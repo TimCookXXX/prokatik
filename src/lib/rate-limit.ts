@@ -8,7 +8,8 @@ export type LimitKind =
   | "booking" | "booking_listing" | "login" | "register" | "resend" | "reset"
   | "mail_ip" | "mail_daily" | "mail_booking" | "password_change"
   | "chat_message" | "chat_thread" | "chat_read"
-  | "realtime_sync";
+  | "realtime_sync"
+  | "search";
 
 // Потолок отправки на весь сервис за сутки. Яндекс даёт 300 писем в сутки по
 // SMTP и режет раньше, если письма однотипные, — упереться хочется в свой
@@ -20,7 +21,13 @@ export type LimitResult =
   | { ok: true }
   | { ok: false; retryAfterSec: number; reason: "gap" | "window" };
 
-interface Rule { windowMs: number; maxInWindow: number; gapMs: number; }
+interface Rule {
+  windowMs: number;
+  maxInWindow: number;
+  gapMs: number;
+  /** Публичные ручки с ключом по IP живут в своём хранилище (см. ниже). */
+  store?: "public";
+}
 
 const RULES: Record<LimitKind, Rule> = {
   // Антиспам заявок вместо СМС-верификации: потолок в окно плюс пауза.
@@ -71,6 +78,10 @@ const RULES: Record<LimitKind, Rule> = {
   // разговором, а не только флапающей сетью, и потолок chat_read такую
   // нагрузку выел бы, после чего чат молча перестал бы догонять.
   realtime_sync: { windowMs: 60 * 60 * 1000, maxInWindow: 1200, gapMs: 0 },
+  // Публичные GET-ручки без входа, ключ — IP. Подсказки «Что» идут на каждое
+  // нажатие с дебаунсом, поэтому потолок высокий: он против выкачивания и
+  // долбёжки, а не против быстрого набора.
+  search: { windowMs: 60 * 1000, maxInWindow: 300, gapMs: 0, store: "public" },
 };
 
 // Аварийный выключатель на время ручных проверок. Читается один раз при старте
@@ -85,13 +96,38 @@ if (DISABLED) {
   console.warn("[rate-limit] ВЫКЛЮЧЕН через RATE_LIMIT_DISABLED — только для проверок");
 }
 
+// Два хранилища. В общем — вход, почта, заявки, чат: ключей немного, и
+// вытеснение самого давнего при заполнении их не трогает. Публичные ручки
+// заводят ключ на каждый анонимный IP; в общем хранилище такой поток вытеснял
+// бы ключи `login`, `reset`, `mail_daily` и молча обнулял их. Поэтому у них
+// своё хранилище, побольше, с чисткой просроченных ключей при заполнении.
 const MAX_KEYS = 10_000;
+const MAX_PUBLIC_KEYS = 20_000;
 const store = new Map<string, number[]>();
+const publicStore = new Map<string, number[]>();
 
-function evictIfFull(): void {
-  if (store.size < MAX_KEYS) return;
-  const firstKey = store.keys().next().value;
-  if (firstKey !== undefined) store.delete(firstKey);
+// Ключ при каждом успешном обращении переставляется в конец, так что порядок
+// Map — порядок последней отметки. Просроченные поэтому лежат в начале подряд:
+// чистка идёт с начала и останавливается на первом живом. Окна у публичных
+// видов одинаковые; разойдутся — чистка лишь станет менее полной, вытеснение
+// давнего всё равно держит потолок.
+function sweepExpired(map: Map<string, number[]>, now: number): void {
+  for (const [key, stamps] of map) {
+    const kind = key.slice(key.lastIndexOf(":") + 1) as LimitKind;
+    const last = stamps[stamps.length - 1];
+    if (last !== undefined && now - last < (RULES[kind]?.windowMs ?? 0)) return;
+    map.delete(key);
+  }
+}
+
+function evictIfFull(map: Map<string, number[]>, max: number, now: number): void {
+  if (map.size < max) return;
+  if (map === publicStore) {
+    sweepExpired(map, now);
+    if (map.size < max) return;
+  }
+  const firstKey = map.keys().next().value;
+  if (firstKey !== undefined) map.delete(firstKey);
 }
 
 export function checkLimit(subject: string, kind: LimitKind): LimitResult {
@@ -99,7 +135,8 @@ export function checkLimit(subject: string, kind: LimitKind): LimitResult {
   const rule = RULES[kind];
   const now = Date.now();
   const key = `${subject}:${kind}`;
-  const arr = store.get(key) ?? [];
+  const map = rule.store === "public" ? publicStore : store;
+  const arr = map.get(key) ?? [];
 
   const fresh = arr.filter((t) => now - t < rule.windowMs);
 
@@ -116,10 +153,13 @@ export function checkLimit(subject: string, kind: LimitKind): LimitResult {
   }
 
   fresh.push(now);
-  if (store.has(key)) store.delete(key);
-  evictIfFull();
-  store.set(key, fresh);
+  if (map.has(key)) map.delete(key);
+  evictIfFull(map, rule.store === "public" ? MAX_PUBLIC_KEYS : MAX_KEYS, now);
+  map.set(key, fresh);
   return { ok: true };
 }
 
-export function _resetForTests(): void { store.clear(); }
+export function _resetForTests(): void { store.clear(); publicStore.clear(); }
+export function _storeSizesForTests(): { private: number; public: number } {
+  return { private: store.size, public: publicStore.size };
+}

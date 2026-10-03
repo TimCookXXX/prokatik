@@ -10,7 +10,7 @@ import {
   type City,
 } from "@/server/catalog";
 import {
-  filterParams, parseFilters, SORT_OPTIONS, type CategorySearchParams,
+  defaultSort, filterParams, parseFilters, sortOptionsFor, type CategorySearchParams,
 } from "@/lib/catalog/filters";
 import { todayStr, addDaysStr } from "@/lib/catalog/dates";
 import { formatPrice, listingsCountLabel, ownersCountLabel } from "@/lib/catalog/format";
@@ -77,10 +77,10 @@ export async function CategoryListing({
   const listHref = withParams((q) => q.set("view", "list"));
 
   // Адреса сортировки собирает сервер: SortMenu клиентский, и функцию через
-  // границу ему не передать. «new» — значение по умолчанию, в адрес не пишется.
-  const sortOptions = SORT_OPTIONS.map((o) => {
+  // границу ему не передать. Умолчание в адрес не пишется.
+  const sortOptions = sortOptionsFor().map((o) => {
     const q = filterParams(searchParams);
-    if (o.value === "new") q.delete("sort"); else q.set("sort", o.value);
+    if (o.value === defaultSort()) q.delete("sort"); else q.set("sort", o.value);
     const qs = q.toString();
     return { ...o, href: qs ? `${basePath}?${qs}` : basePath };
   });
@@ -149,7 +149,7 @@ export async function CategoryListing({
               today={from}
             />
             <div className="flex items-center gap-2">
-              <SortMenu options={sortOptions} current={searchParams.sort} />
+              <SortMenu options={sortOptions} current={filters.sort} />
               <ViewToggle view={view} gridHref={gridHref} listHref={listHref} />
             </div>
           </div>

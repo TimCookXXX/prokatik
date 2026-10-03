@@ -13,6 +13,8 @@ import { auth } from "@/lib/auth";
 import { newId } from "@/lib/id";
 import { writeDealNote } from "@/server/deal-note";
 import { slugify } from "@/lib/slugify";
+import { RESERVED_SLUGS } from "@/lib/owner/validation";
+import { invalidateSearchIndex } from "@/server/search-index";
 import { notify } from "@/server/notifications";
 import { publish } from "@/server/realtime";
 import { requestNotify } from "@/lib/realtime/events";
@@ -71,6 +73,7 @@ export async function adminSetListingStatus(
       ? { ok: false, error: "Владелец забанен — сначала снимите бан" }
       : { ok: false, error: "not_found" };
   }
+  invalidateSearchIndex();
   revalidatePath("/admin/listings");
   return { ok: true, data: undefined };
 }
@@ -107,6 +110,9 @@ export async function adminCreateCity(input: unknown): Promise<ActionResult> {
   const db = getDb();
   const slug = slugify(parsed.data.name);
   if (!slug) return { ok: false, error: "bad_name" };
+  // Слаг города — первый сегмент адреса: «search» или «admin» перекрыли бы
+  // маршрут приложения, и город остался бы без страниц.
+  if (RESERVED_SLUGS.has(slug)) return { ok: false, error: `Адрес «/${slug}» занят сервисом — назовите город иначе` };
   const dup = await db.select({ id: cities.id }).from(cities).where(eq(cities.slug, slug)).limit(1);
   if (dup.length > 0) return { ok: false, error: "Город с таким слагом уже есть" };
 
@@ -117,6 +123,8 @@ export async function adminCreateCity(input: unknown): Promise<ActionResult> {
     region: parsed.data.region || null,
     nameLocative: parsed.data.nameLocative || null,
   });
+  // Названия городов — стоп-слова поиска, они снимаются при сборке индекса.
+  invalidateSearchIndex();
   revalidatePath("/admin/cities");
   return { ok: true, data: undefined };
 }
@@ -139,6 +147,7 @@ export async function adminUpdateCity(cityId: string, input: unknown): Promise<A
     .returning({ id: cities.id });
   if (res.length === 0) return { ok: false, error: "not_found" };
 
+  invalidateSearchIndex();
   revalidatePath("/admin/cities");
   return { ok: true, data: undefined };
 }
@@ -150,6 +159,7 @@ export async function adminSetCityActive(cityId: string, isActive: boolean): Pro
     .where(eq(cities.id, cityId))
     .returning({ id: cities.id });
   if (res.length === 0) return { ok: false, error: "not_found" };
+  invalidateSearchIndex();
   revalidatePath("/admin/cities");
   return { ok: true, data: undefined };
 }
@@ -190,6 +200,7 @@ export async function adminCreateCategory(input: unknown): Promise<ActionResult>
     slug,
     vertical: form.vertical || null,
   });
+  invalidateSearchIndex();
   revalidatePath("/admin/categories");
   return { ok: true, data: undefined };
 }
@@ -206,6 +217,7 @@ export async function adminDeleteCategory(categoryId: string): Promise<ActionRes
   if (used.length > 0) return { ok: false, error: "В категории есть позиции — удалить нельзя" };
 
   await db.delete(categories).where(eq(categories.id, categoryId));
+  invalidateSearchIndex();
   revalidatePath("/admin/categories");
   return { ok: true, data: undefined };
 }
@@ -359,6 +371,8 @@ export async function adminBanUser(userId: string, reason: unknown): Promise<Act
     throw e;
   }
 
+  // Вещи забаненного уходят из подсказок и /search сразу.
+  invalidateSearchIndex();
   // Бан закрывает живые заявки по обе стороны, а лента у них теперь общая.
   revalidatePath("/admin/users");
   revalidatePath("/cabinet/requests");
@@ -389,6 +403,7 @@ export async function adminUnbanUser(userId: string): Promise<ActionResult> {
     throw e;
   }
 
+  invalidateSearchIndex();
   revalidatePath("/admin/users");
   return { ok: true, data: undefined };
 }

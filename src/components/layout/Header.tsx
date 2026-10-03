@@ -9,6 +9,7 @@ import { LoginTrigger } from "@/components/auth/LoginTrigger";
 import { getActiveCities } from "@/server/catalog";
 import { UserMenu } from "@/components/auth/UserMenu";
 import { CitySelector } from "./CitySelector";
+import type { SearchCity } from "@/components/search/SearchBar";
 import { HeaderSearch } from "./HeaderSearch";
 
 export async function Header() {
@@ -25,8 +26,10 @@ export async function Header() {
   // клиентской навигации не перерисовывается — прочитанный здесь адрес протух
   // бы на первом же переходе. Город определяют сами клиентские компоненты: из
   // адреса, а где его там нет — из предпочтения, которое layout положил в
-  // CityPreferenceProvider. Шапке нужен только список активных.
-  const citySlugs = cities.map((c) => c.slug);
+  // CityPreferenceProvider. Шапке нужен только список активных — с гео-контекстом
+  // каждого, потому что поле «Где» тоже узнаёт свой город лишь на клиенте.
+  // Геоданных пока нет ни у одного города: geo null, «Где» не рисуется.
+  const searchCities: SearchCity[] = cities.map((c) => ({ slug: c.slug, name: c.name, geo: null }));
 
   return (
     // Плавающая карточка: сам <header> — прозрачный sticky-контейнер, панель
@@ -61,7 +64,7 @@ export async function Header() {
           </div>
 
           {/* Поиск занимает всё оставшееся место в ряду. */}
-          <HeaderSearch className="min-w-0 flex-1" cities={citySlugs} />
+          <HeaderSearch className="min-w-0 flex-1" cities={searchCities} />
 
           {/* Действия: на мобайле их роль берёт таб-бар — «Сдать», «Профиль»,
            * а переключатель темы живёт в подвале. */}

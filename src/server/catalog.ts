@@ -126,7 +126,8 @@ export interface ListingFilters {
   /** Диапазон дат: позиция должна быть свободна во ВСЕ дни включительно. */
   availableFrom?: string;
   availableTo?: string;
-  sort?: "price_asc" | "price_desc" | "new" | "free";
+  /** Действующая сортировка (parseFilters). `relevance` работает только с ids из индекса поиска. */
+  sort?: "relevance" | "price_asc" | "price_desc" | "new" | "free";
   page?: number;
   pageSize?: number;
 }
@@ -160,7 +161,15 @@ function filterConditions(f: ListingFilters) {
 
 // Порядок выдачи. «Сначала свободные» считает свободу по выбранному диапазону,
 // а если его нет — по сегодняшнему дню: иначе сортировка спорила бы с фильтром.
-function orderBy(f: ListingFilters, today: string) {
+//
+// «Подходящие» — порядок id из индекса поиска. Массив уходит ОДНИМ параметром
+// (`sql.param`): драйвер pg передаёт JS-массив как массив Postgres, а голый
+// `${ids}` в шаблоне drizzle развернул бы его в `($1, $2, …)`. Без ids (поиск
+// упал на ILIKE) релевантности нет — порядок как у новых.
+function orderBy(f: ListingFilters, today: string, ids?: readonly string[]) {
+  if (f.sort === "relevance" && ids) {
+    return sql`array_position(${sql.param([...ids])}::text[], ${listings.id})`;
+  }
   if (f.sort === "price_asc") return asc(listings.priceDay);
   if (f.sort === "price_desc") return desc(listings.priceDay);
   if (f.sort === "free") {
@@ -259,8 +268,18 @@ export interface SearchFacets {
   maxPriceDay: number | null;
 }
 
-// Условие текстового поиска. Пустой запрос условия не даёт вовсе: /search без
-// него работает витриной города, а не пустой страницей.
+/**
+ * Чем запрос сужает выдачу /search.
+ * - `ids` — совпадения из индекса поиска (src/server/search.ts) в порядке
+ *   релевантности. Фильтры, даты, фасеты, счёт и страницы — по-прежнему в SQL,
+ *   поверх этого набора.
+ * - `text` — аварийный путь, когда индекс собрать не удалось: ILIKE по тексту.
+ *   Пустой текст — без условия, весь город: /search без запроса — витрина.
+ */
+export type SearchMatch = { ids: readonly string[] } | { text: string };
+
+// Условие текстового поиска — только для аварийного пути (SearchMatch.text):
+// обычный поиск идёт по индексу. Пустой запрос условия не даёт вовсе.
 //
 // Спецсимволы ILIKE экранируются: без этого `%` в запросе означал «что угодно»,
 // и `/search?q=%` отдавал весь город, выдавая это за результат поиска.
@@ -270,15 +289,23 @@ function textConditions(query: string) {
   return [or(ilike(listings.title, like), ilike(listings.description, like))];
 }
 
+// `inArray`, а не `= ANY(${ids})`: шаблон drizzle развернул бы массив в список.
+function matchConditions(match: SearchMatch) {
+  return "ids" in match ? [inArray(listings.id, [...match.ids])] : textConditions(match.text.trim());
+}
+
+const noMatches = (match: SearchMatch) => "ids" in match && match.ids.length === 0;
+
 export async function getSearchFacets(
   cityId: string,
-  q: string,
+  match: SearchMatch,
   filters: ListingFilters = {},
 ): Promise<SearchFacets> {
+  if (noMatches(match)) return { countsByCategory: new Map(), minPriceDay: null, maxPriceDay: null };
   const base = [
     eq(listings.cityId, cityId),
     eq(listings.status, "active"),
-    ...textConditions(q.trim()),
+    ...matchConditions(match),
   ];
 
   const db = getDb();
@@ -327,17 +354,18 @@ export async function getSearchFacets(
   };
 }
 
-// Выдача города с текстовым поиском: ILIKE по названию и описанию. Пустой
-// запрос — не пустой ответ, а весь город: /search без `q` работает витриной,
-// а запрос лишь сужает её. Отличие от getListingsForCategories ровно в двух
-// вещах: здесь есть текстовое условие, а раздел необязателен.
+// Выдача города с поиском. Пустой запрос — не пустой ответ, а весь город:
+// /search без `q` работает витриной, а запрос лишь сужает её. Отличие от
+// getListingsForCategories ровно в двух вещах: здесь есть условие запроса
+// (SearchMatch), а раздел необязателен.
 export async function searchListings(
   cityId: string,
-  q: string,
+  match: SearchMatch,
   filters: ListingFilters = {},
   /** Сужение по разделу. В каталоге раздел задаёт страница, здесь — фильтр. */
   categoryIds?: string[],
 ): Promise<{ items: ListingWithOwner[]; total: number }> {
+  if (noMatches(match)) return { items: [], total: 0 };
   const db = getDb();
   const pageSize = filters.pageSize ?? DEFAULT_PAGE_SIZE;
   const page = Math.max(1, filters.page ?? 1);
@@ -345,12 +373,12 @@ export async function searchListings(
   const where = and(
     eq(listings.cityId, cityId),
     eq(listings.status, "active"),
-    ...textConditions(q.trim()),
+    ...matchConditions(match),
     ...(categoryIds && categoryIds.length > 0 ? [inArray(listings.categoryId, categoryIds)] : []),
     ...filterConditions(filters),
   );
 
-  const order = orderBy(filters, todayStr());
+  const order = orderBy(filters, todayStr(), "ids" in match ? match.ids : undefined);
 
   const [items, totalRows] = await Promise.all([
     db.select(CARD_COLUMNS)

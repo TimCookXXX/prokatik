@@ -1,20 +1,22 @@
 import { describe, it, expect } from "vitest";
-import { filterParams, parseFilters } from "@/lib/catalog/filters";
+import {
+  defaultSort, filterParams, parseFilters, sortOptionsFor,
+} from "@/lib/catalog/filters";
 
 describe("parseFilters()", () => {
-  it("пустые параметры — без фильтров, страница 1", () => {
+  it("пустые параметры — без фильтров, страница 1, сортировка по умолчанию", () => {
     expect(parseFilters({})).toEqual({
       priceMin: undefined, priceMax: undefined, deposit: undefined,
-      verifiedOnly: undefined, sort: undefined, page: 1,
+      verifiedOnly: undefined, sort: "new", page: 1,
     });
   });
 
   it("пустые строки из незаполненной формы — НЕ ноль", () => {
-    // Браузер шлёт ?price_min=&price_max=&sort=new при пустых полях.
-    const f = parseFilters({ price_min: "", price_max: "", sort: "new" });
+    // Браузер шлёт ?price_min=&price_max=&sort= при пустых полях.
+    const f = parseFilters({ price_min: "", price_max: "", sort: "" });
     expect(f.priceMin).toBeUndefined();
     expect(f.priceMax).toBeUndefined();
-    expect(f.sort).toBeUndefined();
+    expect(f.sort).toBe("new");
   });
 
   it("валидные числа проходят, дробные floor-ятся", () => {
@@ -30,10 +32,10 @@ describe("parseFilters()", () => {
     expect(f.page).toBe(1);
   });
 
-  it("sort только из белого списка", () => {
+  it("sort только из белого списка, иначе умолчание", () => {
     expect(parseFilters({ sort: "price_asc" }).sort).toBe("price_asc");
     expect(parseFilters({ sort: "price_desc" }).sort).toBe("price_desc");
-    expect(parseFilters({ sort: "evil" }).sort).toBeUndefined();
+    expect(parseFilters({ sort: "evil" }).sort).toBe("new");
   });
 
   it("page парсится, невалидная — 1", () => {
@@ -86,5 +88,36 @@ describe("filterParams()", () => {
   it("не тащит page и контекст поиска", () => {
     const qs = filterParams({ page: "3", q: "дрель", city: "kazan" }).toString();
     expect(qs).toBe("");
+  });
+});
+
+// Сортировка, которую возвращает parseFilters, — уже действующая: её и
+// подсвечивает меню. Раньше при пустом `sort` меню показывало первый пункт
+// («свободные»), а порядок был «новые».
+describe("действующая сортировка", () => {
+  it("при запросе по умолчанию — подходящие, без запроса — новые", () => {
+    expect(defaultSort({ q: "дрель" })).toBe("relevance");
+    expect(defaultSort({})).toBe("new");
+    expect(parseFilters({}, { q: "дрель" }).sort).toBe("relevance");
+    expect(parseFilters({}).sort).toBe("new");
+  });
+
+  // При запросе новизна больше не умолчание, поэтому `sort=new` в адресе
+  // теперь значимо и не отбрасывается.
+  it("явное sort=new допустимо", () => {
+    expect(parseFilters({ sort: "new" }, { q: "дрель" }).sort).toBe("new");
+    expect(parseFilters({ sort: "new" }).sort).toBe("new");
+  });
+
+  it("relevance без запроса отбрасывается к умолчанию", () => {
+    expect(parseFilters({ sort: "relevance" }).sort).toBe("new");
+    expect(parseFilters({ sort: "relevance" }, { q: "дрель" }).sort).toBe("relevance");
+  });
+
+  it("sortOptionsFor предлагает «Подходящие» только при запросе", () => {
+    const withQ = sortOptionsFor({ q: "дрель" }).map((o) => o.value);
+    const without = sortOptionsFor({}).map((o) => o.value);
+    expect(withQ).toEqual(["relevance", "free", "new", "price_asc", "price_desc"]);
+    expect(without).toEqual(["free", "new", "price_asc", "price_desc"]);
   });
 });

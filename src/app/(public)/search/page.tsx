@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
+import { content } from "@theme/content";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { getCityBySlug } from "@/server/catalog";
 import { resolveViewerCity } from "@/server/city";
@@ -14,7 +15,7 @@ export const dynamic = "force-dynamic";
 // поиска индексируются категорийные страницы — они и лежат в sitemap.
 // Здесь именно noindex, а не Disallow в robots.txt: закрытый от обхода адрес
 // робот не скачает и запрета внутри не прочитает.
-export const metadata: Metadata = { title: "Поиск", robots: { index: false } };
+export const metadata: Metadata = { title: content.search.title, robots: { index: false } };
 
 export default async function SearchPage({
   searchParams,
@@ -34,11 +35,13 @@ export default async function SearchPage({
 
   return (
     <main className="mx-auto w-full max-w-[1200px] px-4 py-6">
-      <Breadcrumbs items={[{ label: "Главная", href: "/" }, { label: "Поиск" }]} />
+      <Breadcrumbs items={[{ label: "Главная", href: "/" }, { label: content.search.title }]} />
       {/* Город отделён точкой, а не предлогом: в базе он лежит в именительном
-        * падеже, и «поиск по Казань» из него не собрать. */}
+        * падеже, и «поиск по Казань» из него не собрать. Заголовок — весь
+        * запрос, как его набрали; если нашлось только по части, это говорит
+        * плашка над выдачей (SearchResults). */}
       <h1 className="mb-4 mt-3 font-display text-2xl font-bold">
-        {q ? <>Поиск: «{q}»</> : "Поиск"}
+        {q ? content.search.titleWithQuery(q) : content.search.title}
         {city && (
           <span className="ml-2 text-base font-normal text-muted-foreground">
             · {city.name}

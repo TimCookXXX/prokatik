@@ -13,9 +13,14 @@ vi.mock("@/server/catalog", async (orig) => ({
   getSearchFacets: vi.fn(),
 }));
 
+// Ранжирование идёт по индексу в памяти — здесь он не нужен, важно, что
+// выдача берёт его набор id и порядок.
+vi.mock("@/server/search", () => ({ rankListingIds: vi.fn() }));
+
 import {
   searchListings, getAvailabilityRows, getAllCategories, getSearchFacets,
 } from "@/server/catalog";
+import { rankListingIds } from "@/server/search";
 import { SearchResults } from "@/components/catalog/SearchResults";
 
 const city = { id: "c1", slug: "kazan", name: "Казань" } as never;
@@ -47,6 +52,8 @@ beforeEach(() => {
   vi.mocked(getSearchFacets).mockResolvedValue({
     countsByCategory: new Map(), minPriceDay: null, maxPriceDay: null,
   });
+  vi.mocked(rankListingIds).mockReset();
+  vi.mocked(rankListingIds).mockResolvedValue({ ids: [], usedQuery: "", dropped: [] });
 });
 
 describe("SearchResults", () => {
@@ -64,7 +71,8 @@ describe("SearchResults", () => {
   it("asks the database for the whole city when there is no query", async () => {
     await SearchResults({ city, q: "", searchParams: {} });
 
-    expect(searchListings).toHaveBeenCalledWith("c1", "", expect.anything(), undefined);
+    expect(searchListings).toHaveBeenCalledWith("c1", { text: "" }, expect.anything(), undefined);
+    expect(rankListingIds).not.toHaveBeenCalled();
   });
 
   // Панель — единственный способ снять фильтр дат, поэтому она обязана быть на
@@ -106,5 +114,90 @@ describe("SearchResults", () => {
     render(await SearchResults({ city, q: "", searchParams: {} }));
 
     expect(screen.getByText(/пока нечего арендовать/)).toBeInTheDocument();
+  });
+
+  it("searches by the ids the index ranked, in its order", async () => {
+    vi.mocked(rankListingIds).mockResolvedValue({ ids: ["2", "1"], usedQuery: "дрель", dropped: [] });
+
+    await SearchResults({ city, q: "дрель", searchParams: { q: "дрель" } });
+
+    expect(rankListingIds).toHaveBeenCalledWith(["c1"], "дрель");
+    expect(searchListings).toHaveBeenCalledWith(
+      "c1", { ids: ["2", "1"] }, expect.objectContaining({ sort: "relevance" }), undefined,
+    );
+    expect(getSearchFacets).toHaveBeenCalledWith("c1", { ids: ["2", "1"] }, expect.anything());
+  });
+
+  // Меню показывает действующую сортировку, а не сырой параметр: без него
+  // раньше подсвечивался первый пункт («свободные»), хотя порядок был другим.
+  it("shows the effective sort in the menu", async () => {
+    const { unmount } = render(await SearchResults({ city, q: "", searchParams: {} }));
+    expect(screen.getByText("новые")).toBeInTheDocument();
+    unmount();
+
+    vi.mocked(rankListingIds).mockResolvedValue({ ids: ["1"], usedQuery: "дрель", dropped: [] });
+    render(await SearchResults({ city, q: "дрель", searchParams: { q: "дрель" } }));
+    expect(screen.getByText("подходящие")).toBeInTheDocument();
+  });
+
+  it("keeps an explicit sort=new under a query", async () => {
+    vi.mocked(rankListingIds).mockResolvedValue({ ids: ["1"], usedQuery: "дрель", dropped: [] });
+    render(await SearchResults({ city, q: "дрель", searchParams: { q: "дрель", sort: "new" } }));
+
+    expect(screen.getByText("новые")).toBeInTheDocument();
+    expect(searchListings).toHaveBeenCalledWith(
+      "c1", { ids: ["1"] }, expect.objectContaining({ sort: "new" }), undefined,
+    );
+  });
+
+  it("tells which part of the query the results are for", async () => {
+    vi.mocked(rankListingIds).mockResolvedValue({
+      ids: ["1"], usedQuery: "перфоратор", dropped: ["зелёный"],
+    });
+    vi.mocked(searchListings).mockResolvedValue({ items: [item("1", "Перфоратор Bosch")], total: 1 });
+
+    render(await SearchResults({
+      city, q: "зелёный перфоратор", searchParams: { q: "зелёный перфоратор" },
+    }));
+
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "По «зелёный перфоратор» ничего — показываем по «перфоратор»",
+    );
+  });
+
+  it("shows no notice when the whole query matched", async () => {
+    vi.mocked(rankListingIds).mockResolvedValue({ ids: ["1"], usedQuery: "дрель", dropped: [] });
+    render(await SearchResults({ city, q: "дрель", searchParams: { q: "дрель" } }));
+
+    expect(screen.queryByText(/показываем по/)).not.toBeInTheDocument();
+  });
+
+  // В запросе одни стоп-слова: искать нечего — показываем город, как без запроса.
+  it("shows the city feed when the query has no searchable words", async () => {
+    vi.mocked(rankListingIds).mockResolvedValue({ ids: null, usedQuery: "прокат", dropped: [] });
+
+    await SearchResults({ city, q: "прокат", searchParams: { q: "прокат" } });
+
+    expect(searchListings).toHaveBeenCalledWith(
+      "c1", { text: "" }, expect.objectContaining({ sort: "new" }), undefined,
+    );
+  });
+
+  // Аварийный путь: индекс не собрался — страница жива, поиск идёт ILIKE, а
+  // ошибка уходит в лог.
+  it("falls back to a text search when the index is unavailable", async () => {
+    vi.mocked(rankListingIds).mockRejectedValue(new Error("db down"));
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      render(await SearchResults({ city, q: "дрель", searchParams: { q: "дрель" } }));
+
+      expect(searchListings).toHaveBeenCalledWith(
+        "c1", { text: "дрель" }, expect.objectContaining({ sort: "new" }), undefined,
+      );
+      expect(err).toHaveBeenCalled();
+      expect(screen.getByText("новые")).toBeInTheDocument();
+    } finally {
+      err.mockRestore();
+    }
   });
 });

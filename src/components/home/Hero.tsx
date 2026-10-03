@@ -5,6 +5,7 @@ import type { AuthPanelProps } from "@/lib/auth/panel-props";
 import { Button } from "@/components/ui/button";
 import { LoginTrigger } from "@/components/auth/LoginTrigger";
 import { BracketsHandoff } from "@/components/brand/BracketsHandoff";
+import { SearchBar, type SearchCity } from "@/components/search/SearchBar";
 
 // Слово стоит на месте две с половиной секунды, считая перелёты: столько нужно,
 // чтобы его прочли. 280 мс — длительность .handoff-out и .handoff-in.
@@ -18,11 +19,13 @@ const FACT_ICONS: Record<(typeof content.home.heroFacts)[number]["icon"], Lucide
 };
 
 export function Hero({
-  citySlug,
+  city,
   placeHref,
   authProps,
 }: {
-  citySlug?: string;
+  // Город витрины — тот же, что у подборок ниже. Без него нет ни поиска, ни
+  // каталога города.
+  city?: SearchCity;
   placeHref: string;
   // Задан — значит перед нами аноним: «Разместить» открывает вход модалкой
   // вместо ухода на /login.
@@ -30,7 +33,7 @@ export function Hero({
 }) {
   // Городов может не быть вовсе (пустая база, все выключены) — тогда витрины
   // нет и «Каталог» ведёт в поиск, а не в ссылку с undefined в пути.
-  const catalogHref = citySlug ? `/${citySlug}` : "/search";
+  const catalogHref = city ? `/${city.slug}` : "/search";
 
   return (
     // Два слоя, роли которых меняет тема (см. .hero-panel в globals.css): в
@@ -44,8 +47,9 @@ export function Hero({
         * в дереве последний и без этого лёг бы поверх текста и кнопок.
         * Точка wide — общая для всех секций главной, см. tailwind.config.ts. */}
       {/* На телефоне — одна колонка с порядком «заголовок → подзаголовок →
-        * плитки → кнопки», выключка по центру. С wide раскладка макетная: текст
-        * и кнопки слева двумя строками, плитки справа на обе. Порядок в
+        * поиск → плитки → кнопки», выключка по центру. С wide раскладка
+        * макетная: текст, поиск и кнопки слева тремя строками, плитки справа на
+        * все. Порядок в
         * разметке мобильный, десктопный собирается явной раскладкой по клеткам
         * — так DOM совпадает с тем, что читают с телефона. */}
       <div className="relative z-10 grid items-center gap-8 p-4 sm:p-6 wide:grid-cols-[minmax(0,1fr)_minmax(280px,528px)] wide:gap-x-12 wide:gap-y-8 wide:p-11">
@@ -88,7 +92,19 @@ export function Hero({
         {/* На телефоне — список в одну колонку строками: четыре высокие плитки
           * 2×2 занимали там почти экран и отжимали кнопки за сгиб. С sm
           * ширины хватает, и плитки возвращаются к макетному виду. */}
-        <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-2.5 wide:col-start-2 wide:row-start-1 wide:row-span-2">
+        {/* Поиск сразу под подзаголовком и на телефоне, и на десктопе: на
+          * телефоне плитки ниже растянулись бы на экран и унесли его за сгиб.
+          * Списки подсказок — порталом: у секции overflow-hidden. */}
+        {city && (
+          <SearchBar
+            variant="hero"
+            cities={[city]}
+            citySlug={city.slug}
+            className="wide:col-start-1 wide:row-start-2"
+          />
+        )}
+
+        <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-2.5 wide:col-start-2 wide:row-start-1 wide:row-span-3">
           {content.home.heroFacts.map((fact) => {
             const Icon = FACT_ICONS[fact.icon];
             // Имя класса целиком, а не собранное из кусков: Tailwind вычищает
@@ -133,7 +149,7 @@ export function Hero({
 
         {/* На телефоне кнопки разведены к краям панели, на десктопе стоят
           * рядом слева, как в макете. */}
-        <div className="flex flex-wrap items-center justify-between gap-3 wide:col-start-1 wide:row-start-2 wide:justify-start">
+        <div className="flex flex-wrap items-center justify-between gap-3 wide:col-start-1 wide:row-start-3 wide:justify-start">
           <Button asChild className="h-12 px-6 text-base font-semibold">
             <Link href={catalogHref as never}>{content.home.heroCatalog}</Link>
           </Button>

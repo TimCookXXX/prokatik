@@ -7,16 +7,29 @@
 // vertical у подкатегории тот же, что у корня, — грубая группировка ниш.
 // Явный slug задаётся там, где имя повторяется в разных ветках: «Аксессуары»
 // есть и в одежде, и в электронике, а слаг у категории один на всю таблицу.
+//
+// keywords — слова, по которым поиск «Что» относит вещь к разделу: «химчистка»
+// находит всё из «Уборочной техники». Совпадение по ним получает каждое
+// объявление раздела, поэтому сюда идут слова про раздел целиком, а не названия
+// отдельных вещей: «дрель» у «Электроинструментов» вывела бы на «дрель» и
+// болгарку, и лобзик. Равнозначные названия одной вещи («болгарка» = «ушм») —
+// в src/lib/search/synonyms.ts. В БД слов нет: дерево задано здесь, поиск
+// берёт их по слагу, и разделу из админки они не достаются, пока их не впишут.
+
+import { slugify } from "@/lib/slugify";
 
 export interface SeedCategoryChild {
   name: string;
   /** Если не задан — slugify(name). */
   slug?: string;
+  /** Слова поиска, относящие вещь к разделу. */
+  keywords?: string[];
 }
 
 export interface SeedCategoryRoot {
   name: string;
   vertical: string;
+  keywords?: string[];
   children: SeedCategoryChild[];
 }
 
@@ -24,78 +37,78 @@ export const SEED_CATEGORIES: SeedCategoryRoot[] = [
   {
     name: "Инструменты", vertical: "tools",
     children: [
-      { name: "Электроинструменты" },
+      { name: "Электроинструменты", keywords: ["электроинструмент"] },
       { name: "Ручной инструмент" },
-      { name: "Садовая техника" },
-      { name: "Строительное оборудование" },
+      { name: "Садовая техника", keywords: ["сад", "садовый", "дача", "огород"] },
+      { name: "Строительное оборудование", keywords: ["стройка", "строительство", "ремонт"] },
     ],
   },
   {
     name: "Одежда", vertical: "clothing",
     children: [
-      { name: "Вечерняя одежда" },
-      { name: "Свадебная одежда" },
-      { name: "Костюмы" },
+      { name: "Вечерняя одежда", keywords: ["платье", "выпускной"] },
+      { name: "Свадебная одежда", keywords: ["свадьба", "платье"] },
+      { name: "Костюмы", keywords: ["костюм", "карнавальный", "маскарад"] },
       { name: "Аксессуары", slug: "aksessuary-odezhda" },
     ],
   },
   {
     name: "Фото и видео", vertical: "photo",
     children: [
-      { name: "Камеры" },
+      { name: "Камеры", keywords: ["фотоаппарат", "камера"] },
       { name: "Объективы" },
-      { name: "Освещение" },
-      { name: "Штативы и стабилизаторы" },
-      { name: "Дроны" },
-      { name: "Экшн-камеры" },
+      { name: "Освещение", keywords: ["свет", "осветитель"] },
+      { name: "Штативы и стабилизаторы", keywords: ["штатив", "трипод"] },
+      { name: "Дроны", keywords: ["дрон", "квадрокоптер"] },
+      { name: "Экшн-камеры", keywords: ["камера"] },
     ],
   },
   {
     name: "Транспорт", vertical: "transport",
     children: [
-      { name: "Велосипеды" },
-      { name: "Электросамокаты" },
-      { name: "Автомобили" },
-      { name: "Прицепы" },
-      { name: "Водный транспорт" },
+      { name: "Велосипеды", keywords: ["велосипед"] },
+      { name: "Электросамокаты", keywords: ["самокат", "электросамокат"] },
+      { name: "Автомобили", keywords: ["авто", "машина", "автомобиль"] },
+      { name: "Прицепы", keywords: ["прицеп"] },
+      { name: "Водный транспорт", keywords: ["лодка"] },
     ],
   },
   {
-    name: "Туризм и отдых", vertical: "outdoor",
+    name: "Туризм и отдых", vertical: "outdoor", keywords: ["туризм", "поход"],
     children: [
-      { name: "Палатки" },
-      { name: "Спальники" },
-      { name: "Рюкзаки" },
-      { name: "Кемпинг-оборудование" },
+      { name: "Палатки", keywords: ["кемпинг", "поход"] },
+      { name: "Спальники", keywords: ["спальный мешок", "поход"] },
+      { name: "Рюкзаки", keywords: ["поход"] },
+      { name: "Кемпинг-оборудование", keywords: ["кемпинг", "поход"] },
       { name: "Туристическая посуда" },
     ],
   },
   {
     name: "Развлечения", vertical: "entertainment",
     children: [
-      { name: "Игровые приставки" },
-      { name: "VR" },
+      { name: "Игровые приставки", keywords: ["приставка", "консоль"] },
+      { name: "VR", keywords: ["виртуальная реальность"] },
       { name: "Настольные игры" },
-      { name: "Проекторы" },
+      { name: "Проекторы", keywords: ["проектор", "кино"] },
     ],
   },
   {
-    name: "Детские товары", vertical: "kids",
+    name: "Детские товары", vertical: "kids", keywords: ["детский", "ребенок"],
     children: [
-      { name: "Коляски" },
-      { name: "Автокресла" },
-      { name: "Игрушки" },
-      { name: "Стульчики для кормления" },
+      { name: "Коляски", keywords: ["коляска"] },
+      { name: "Автокресла", keywords: ["автокресло", "автолюлька"] },
+      { name: "Игрушки", keywords: ["игрушка"] },
+      { name: "Стульчики для кормления", keywords: ["стульчик", "кормление"] },
     ],
   },
   {
-    name: "Дом и мероприятия", vertical: "home",
+    name: "Дом и мероприятия", vertical: "home", keywords: ["мероприятие", "праздник"],
     children: [
       { name: "Мебель" },
-      { name: "Декор" },
-      { name: "Шатры и тенты" },
-      { name: "Грили и барбекю" },
-      { name: "Уборочная техника" },
+      { name: "Декор", keywords: ["праздник", "украшение", "оформление"] },
+      { name: "Шатры и тенты", keywords: ["шатер", "тент", "навес"] },
+      { name: "Грили и барбекю", keywords: ["мангал", "гриль", "шашлык", "пикник"] },
+      { name: "Уборочная техника", keywords: ["уборка", "химчистка", "клининг"] },
     ],
   },
   {
@@ -105,17 +118,17 @@ export const SEED_CATEGORIES: SeedCategoryRoot[] = [
       { name: "Планшеты" },
       { name: "Смартфоны" },
       { name: "Мониторы" },
-      { name: "Аксессуары", slug: "aksessuary-elektronika" },
+      { name: "Аксессуары", slug: "aksessuary-elektronika", keywords: ["гаджет"] },
     ],
   },
   {
     name: "Спорт", vertical: "sport",
     children: [
-      { name: "Тренажеры" },
+      { name: "Тренажеры", keywords: ["тренажер", "фитнес"] },
       { name: "Фитнес-инвентарь" },
-      { name: "Зимний спорт" },
+      { name: "Зимний спорт", keywords: ["лыжи", "сноуборд", "коньки"] },
       { name: "Велоспорт" },
-      { name: "Водный спорт" },
+      { name: "Водный спорт", keywords: ["серфинг", "плавание"] },
     ],
   },
 ];
@@ -142,6 +155,16 @@ export function parseCategoryPath(raw: string): { root: string; child: string } 
 export function allCategoryPaths(): string[] {
   return SEED_CATEGORIES.flatMap((root) =>
     root.children.map((child) => categoryPath(root.name, child.name)));
+}
+
+const KEYWORDS_BY_SLUG = new Map<string, string[]>(SEED_CATEGORIES.flatMap((root) => [
+  [slugify(root.name), root.keywords ?? []] as const,
+  ...root.children.map((c) => [c.slug ?? slugify(c.name), c.keywords ?? []] as const),
+]));
+
+/** Слова поиска раздела по слагу; раздел не из дерева — без слов. */
+export function categoryKeywords(slug: string): readonly string[] {
+  return KEYWORDS_BY_SLUG.get(slug) ?? [];
 }
 
 /** Есть ли такой путь в дереве. */

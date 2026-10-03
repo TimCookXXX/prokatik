@@ -62,9 +62,12 @@ export const listingFormSchema = z.object({
 
 export type ListingForm = z.output<typeof listingFormSchema>;
 
-// Слаги, зарезервированные под маршруты приложения: слаг категории (сегмент после
-// города) не должен их перекрывать (категории проверяются отдельно по БД).
+// Слаги, зарезервированные под маршруты приложения. Проверяет их создание
+// города (adminCreateCity): слаг города — первый сегмент адреса и не должен
+// перекрывать статический маршрут. Разделам проверка не нужна — под /{city}/
+// статических соседей нет.
 export const RESERVED_SLUGS = new Set([
-  "api", "admin", "cabinet", "requests", "login", "welcome", "banned",
-  "privacy", "dev", "u", "sitemap.xml", "robots.txt", "manifest.webmanifest",
+  "api", "admin", "cabinet", "requests", "login", "reset", "welcome", "banned",
+  "privacy", "dev", "u", "chat", "profile", "search", "sources",
+  "sitemap.xml", "robots.txt", "manifest.webmanifest",
 ]);

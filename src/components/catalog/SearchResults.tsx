@@ -4,15 +4,21 @@
 // Запрос здесь — обычный сужающий фильтр, а не условие существования страницы:
 // без него показывается весь город, с ним — то, что нашлось. Поэтому фильтры,
 // разделы и верхняя панель живут независимо от `q`.
+//
+// Что нашлось и в каком порядке, решает индекс поиска (rankListingIds) — тот
+// же, что у подсказок в шапке. SQL получает готовый набор id и считает поверх
+// него фильтры, фасеты и страницы.
 
 import Link from "next/link";
+import { content } from "@theme/content";
 import { EmptyState } from "@/components/ui/EmptyState";
 import {
   getAllCategories, getAvailabilityRows, getSearchFacets, rollupToRoots,
-  searchListings, DEFAULT_PAGE_SIZE, type City,
+  searchListings, DEFAULT_PAGE_SIZE, type City, type SearchMatch,
 } from "@/server/catalog";
+import { rankListingIds, type RankedIds } from "@/server/search";
 import {
-  filterParams, parseFilters, SORT_OPTIONS, type CategorySearchParams,
+  defaultSort, filterParams, parseFilters, sortOptionsFor, type CategorySearchParams,
 } from "@/lib/catalog/filters";
 import { todayStr, addDaysStr } from "@/lib/catalog/dates";
 import { buildAvailabilityByListing } from "@/lib/catalog/availability";
@@ -30,11 +36,18 @@ export async function SearchResults({
   q: string;
   searchParams: CategorySearchParams;
 }) {
-  const filters = parseFilters(searchParams);
-  // Категории идут отдельной волной, а не в общем Promise.all ниже: от них
-  // зависит narrowIds, то есть сам запрос выдачи. На витрине города такой
-  // зависимости нет — там набор разделов задаёт страница.
-  const cats = await getAllCategories();
+  // Категории и ранжирование идут отдельной волной, а не в общем Promise.all
+  // ниже: от них зависят narrowIds и набор id, то есть сам запрос выдачи. На
+  // витрине города такой зависимости нет — там набор разделов задаёт страница.
+  const [cats, ranked] = await Promise.all([getAllCategories(), rankQuery(city, q)]);
+  // Условие запроса: id из индекса; индекс упал — ILIKE по тексту; запроса нет
+  // или в нём нет слов для поиска (одни стоп-слова) — весь город.
+  const match: SearchMatch = ranked?.ids ? { ids: ranked.ids }
+    : ranked === undefined ? { text: q } : { text: "" };
+  // Без набора id сортировать по релевантности нечем — тогда и умолчание, и
+  // меню как без запроса.
+  const sortCtx = { q: "ids" in match ? q : undefined };
+  const filters = parseFilters(searchParams, sortCtx);
 
   // Сужение по разделу: слаг из адреса → корень и все его подкатегории. Раздела
   // нет или слаг чужой — сужения нет, ищем по всему городу.
@@ -46,8 +59,8 @@ export async function SearchResults({
     : undefined;
 
   const [{ items, total }, facets] = await Promise.all([
-    searchListings(city.id, q, filters, narrowIds),
-    getSearchFacets(city.id, q, filters),
+    searchListings(city.id, match, filters, narrowIds),
+    getSearchFacets(city.id, match, filters),
   ]);
 
   const from = todayStr();
@@ -113,11 +126,13 @@ export async function SearchResults({
 
   const page = filters.page ?? 1;
   const totalPages = Math.max(1, Math.ceil(total / DEFAULT_PAGE_SIZE));
-  const sortOptions = SORT_OPTIONS.map((o) => {
+  // Умолчание в адрес не пишется: при запросе это «подходящие», и тогда
+  // «новые» — явное `sort=new`.
+  const sortOptions = sortOptionsFor(sortCtx).map((o) => {
     const params = filterParams(searchParams);
     if (q) params.set("q", q);
     params.set("city", city.slug);
-    if (o.value === "new") params.delete("sort"); else params.set("sort", o.value);
+    if (o.value === defaultSort(sortCtx)) params.delete("sort"); else params.set("sort", o.value);
     return { ...o, href: `/search?${params.toString()}` };
   });
 
@@ -169,10 +184,15 @@ export async function SearchResults({
             today={from}
           />
           <div className="flex items-center gap-2">
-            <SortMenu options={sortOptions} current={searchParams.sort} />
+            <SortMenu options={sortOptions} current={filters.sort} />
             <ViewToggle view={view} gridHref={gridHref} listHref={listHref} />
           </div>
         </div>
+        {ranked?.ids && ranked.dropped.length > 0 && (
+          <p role="status" className="rounded-lg border border-border px-3 py-2 text-sm text-muted-foreground">
+            {content.search.subsetNotice(q, ranked.usedQuery)}
+          </p>
+        )}
         {items.length === 0 ? (
           // Пусто по разным причинам, и валить их в одну фразу нельзя: «в
           // городе ничего нет» — прямая ложь, когда выдачу обнулил фильтр или
@@ -229,4 +249,18 @@ export async function SearchResults({
       </div>
     </div>
   );
+}
+
+/**
+ * Ранжирование запроса по индексу. null — запроса нет; undefined — индекс
+ * недоступен, и выдача уходит на аварийный ILIKE (ошибка в лог, страница жива).
+ */
+async function rankQuery(city: City, q: string): Promise<RankedIds | null | undefined> {
+  if (!q) return null;
+  try {
+    return await rankListingIds([city.id], q);
+  } catch (e) {
+    console.error("[search] индекс поиска недоступен, выдача по ILIKE:", e);
+    return undefined;
+  }
 }

@@ -44,6 +44,7 @@ import { queueBookingMail } from "@/server/booking-mail";
 import { notify } from "@/server/notifications";
 import { publish } from "@/server/realtime";
 import { requestNotify } from "@/lib/realtime/events";
+import { invalidateSearchIndex } from "@/server/search-index";
 
 export type ActionResult<T = void> =
   | { ok: true; data: T }
@@ -99,6 +100,9 @@ export async function createListing(input: unknown): Promise<ActionResult<{ list
     status: "active",
   });
 
+  // Подсказки и /search идут по индексу в памяти: без сброса новая вещь
+  // появилась бы в них только после сверки версии.
+  invalidateSearchIndex();
   revalidatePath("/cabinet/listings");
   return { ok: true, data: { listingId: id } };
 }
@@ -131,6 +135,7 @@ export async function updateListing(listingId: string, input: unknown): Promise<
     .returning({ id: listings.id });
   if (res.length === 0) return { ok: false, error: "not_found" };
 
+  invalidateSearchIndex();
   revalidatePath("/cabinet/listings");
   revalidatePath(`/cabinet/listings/${listingId}`);
   return { ok: true, data: undefined };
@@ -164,6 +169,8 @@ export async function setListingStatus(
     .returning({ id: listings.id });
   if (res.length === 0) return { ok: false, error: "not_found" };
 
+  // Скрытое объявление должно пропасть из подсказок сразу, а не через 30 с.
+  invalidateSearchIndex();
   revalidatePath("/cabinet/listings");
   return { ok: true, data: undefined };
 }
