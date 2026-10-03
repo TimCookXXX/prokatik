@@ -2,60 +2,75 @@
 
 import { useCallback, useEffect, useSyncExternalStore } from "react";
 import type { DateRange } from "@/lib/catalog/filters";
+import type { UserPoint } from "@/lib/geo/location";
 
-// Даты «Когда», выбранные в панели, но ещё не отправленные. Общие для всех
-// панелей страницы: на телефоне человек выбирает даты в hero, а подсказку
-// «Что» берёт в панели шапки (поле hero отдаёт ей фокус), и шапка обязана
-// отправить те же даты.
+// Даты «Когда» и точка «Где», выбранные в панели, но ещё не отправленные.
+// Общие для всех панелей страницы: на телефоне человек выбирает даты в hero, а
+// подсказку «Что» берёт в панели шапки (поле hero отдаёт ей фокус), и шапка
+// обязана отправить те же даты и то же место.
 //
 // Черновик привязан к адресу, на котором выбран. Сменился адрес — переход
-// случился, черновик выбрасывается, и поле снова показывает даты из адреса:
+// случился, черновик выбрасывается, и поле снова показывает значение из адреса:
 // шапка живёт в корневом layout'е и иначе пронесла бы неотправленный выбор на
 // чужую страницу — или вернула бы брошенный, когда человек придёт назад.
 
-interface Draft {
+interface Draft<T> {
   at: string;
-  /** null — «Любые даты»: даты из адреса сняты. */
-  range: DateRange | null;
+  /** null — значение из адреса снято: «Любые даты», «×» у «Где». */
+  value: T | null;
 }
 
-let draft: Draft | null = null;
-const listeners = new Set<() => void>();
-
-function subscribe(cb: () => void) {
-  listeners.add(cb);
-  return () => { listeners.delete(cb); };
+function draftStore<T>() {
+  let draft: Draft<T> | null = null;
+  const listeners = new Set<() => void>();
+  const notify = () => { for (const cb of listeners) cb(); };
+  return {
+    subscribe(cb: () => void) {
+      listeners.add(cb);
+      return () => { listeners.delete(cb); };
+    },
+    get: () => draft,
+    set(next: Draft<T> | null) {
+      draft = next;
+      notify();
+    },
+    reset() { draft = null; },
+  };
 }
 
-const snapshot = () => draft;
+type Store<T> = ReturnType<typeof draftStore<T>>;
 
-function notify() {
-  for (const cb of listeners) cb();
-}
+const dates = draftStore<DateRange>();
+const where = draftStore<UserPoint>();
 
 /**
- * Даты панели на адресе `at`: черновик, если он выбран здесь, иначе — даты из
- * адреса (уже нормализованные). Второй элемент — записать черновик.
+ * Значение панели на адресе `at`: черновик, если он выбран здесь, иначе —
+ * значение из адреса. Второй элемент — записать черновик.
  */
-export function usePanelDates(
-  at: string,
-  fromUrl: DateRange | null,
-): [DateRange | null, (range: DateRange | null) => void] {
-  const current = useSyncExternalStore(subscribe, snapshot, () => null);
-  const set = useCallback((range: DateRange | null) => {
-    draft = { at, range };
-    notify();
-  }, [at]);
+function usePanelDraft<T>(
+  store: Store<T>, at: string, fromUrl: T | null,
+): [T | null, (value: T | null) => void] {
+  const current = useSyncExternalStore(store.subscribe, store.get, () => null);
+  const set = useCallback((value: T | null) => store.set({ at, value }), [store, at]);
   useEffect(() => {
-    if (draft && draft.at !== at) {
-      draft = null;
-      notify();
-    }
-  }, [at]);
-  return [current && current.at === at ? current.range : fromUrl, set];
+    const d = store.get();
+    if (d && d.at !== at) store.set(null);
+  }, [store, at]);
+  return [current && current.at === at ? current.value : fromUrl, set];
 }
 
-/** Для тестов: черновик общий на модуль и иначе протекал бы между кейсами. */
+/** Даты панели: черновик или даты из адреса (уже нормализованные). */
+export function usePanelDates(at: string, fromUrl: DateRange | null) {
+  return usePanelDraft(dates, at, fromUrl);
+}
+
+/** Точка «Где» панели: черновик или точка из адреса (кодек lib/geo/location). */
+export function usePanelWhere(at: string, fromUrl: UserPoint | null) {
+  return usePanelDraft(where, at, fromUrl);
+}
+
+/** Для тестов: черновики общие на модуль и иначе протекали бы между кейсами. */
 export function _resetPanelDates() {
-  draft = null;
+  dates.reset();
+  where.reset();
 }

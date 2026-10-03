@@ -9,6 +9,7 @@ const base = {
   href: "/u/01ARZ3NDEKTSV4RRFFQ69G5FAV",
   image: null,
   cityName: "Казань",
+  geoPrecision: "city" as const,
   isVerified: true,
   createdAt: new Date("2023-05-01"),
   chatHref: "/chat/new/01ARZ3NDEKTSV4RRFFQ69G5FAW",
@@ -52,11 +53,27 @@ describe("OwnerCard", () => {
     expect(screen.getByRole("link", { name: "Профиль" })).toBeInTheDocument();
   });
 
-  // Публичная подпись адреса — улица без номера дома, город OwnerCard
-  // дописывает сам. Полного адреса у компонента нет вовсе.
-  it("shows the public address label followed by the city", () => {
+  // Подпись без точки (город без геоданных, строка до backfill) — текст
+  // владельца без пункта: город OwnerCard дописывает сам.
+  it("appends the city to a label without a point", () => {
     render(<OwnerCard {...base} location="улица Баумана" />);
     expect(screen.getByText("улица Баумана, Казань")).toBeInTheDocument();
+  });
+
+  // Подпись адреса с точкой уже называет свой пункт: город каталога после
+  // «Мега, Новая Адыгея» читался бы так, будто Новая Адыгея — в Краснодаре.
+  it("shows a geocoded label as is, without the catalog city", () => {
+    const krd = { ...base, cityName: "Краснодар" };
+    for (const [geoPrecision, location] of [
+      ["place", "Мега, Новая Адыгея"],
+      ["street", "улица Гагарина, Яблоновский"],
+      ["house", "улица Красная, Краснодар"],
+    ] as const) {
+      const { unmount } = render(<OwnerCard {...krd} geoPrecision={geoPrecision} location={location} />);
+      expect(screen.getByText(location)).toBeInTheDocument();
+      expect(screen.queryByText(new RegExp(`${location}, Краснодар`))).toBeNull();
+      unmount();
+    }
   });
 
   it("shows just the city when there is no label or the label is the city", () => {
@@ -66,5 +83,17 @@ describe("OwnerCard", () => {
     render(<OwnerCard {...base} location="Казань" />);
     expect(screen.getByText("Казань")).toBeInTheDocument();
     expect(screen.queryByText("Казань, Казань")).toBeNull();
+  });
+
+  // Точка «Где» в адресе страницы — расстояние по прямой своим пунктом, со
+  // своей иконкой: точка-разделитель повисала бы в конце строки при переносе.
+  it("shows the distance to the point from the URL as its own item", () => {
+    const { unmount } = render(<OwnerCard {...base} location="улица Баумана" distance={{ km: 1.23, approx: false }} />);
+    const distance = screen.getByTitle("по прямой");
+    expect(distance).toHaveTextContent(/^1,2 км$/);
+    expect(screen.getByText("улица Баумана, Казань")).not.toContainElement(distance);
+    unmount();
+    render(<OwnerCard {...base} location="улица Баумана" />);
+    expect(screen.queryByTitle("по прямой")).toBeNull();
   });
 });

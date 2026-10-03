@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  carryParams, defaultSort, filterParams, parseDateRange, parseFilters, sortOptionsFor,
+  carryParams, defaultSort, filterParams, parseDateRange, parseFilters, sortContextOf, sortOptionsFor,
 } from "@/lib/catalog/filters";
 
 describe("parseFilters()", () => {
@@ -122,6 +122,58 @@ describe("действующая сортировка", () => {
   });
 });
 
+// Точка «Где» (lib/geo/location.ts) действует только в городе с геоданными
+// (region): там у объявлений есть точки, и есть от чего считать «Ближе».
+describe("«Где» и «Ближе»", () => {
+  const loc = { loc: "p:45.035,38.975", la: "ул. Красная", lp: "s" };
+
+  it("точка из адреса попадает в фильтры только в городе с геоданными", () => {
+    expect(parseFilters(loc, { region: true }).near).toEqual({
+      point: { lat: 45.035, lon: 38.975 }, label: "ул. Красная", source: "address", precision: "street",
+    });
+    expect(parseFilters(loc).near).toBeUndefined();
+    expect(parseFilters(loc, { region: false }).near).toBeUndefined();
+  });
+
+  it("мусор, район и округ — без точки", () => {
+    for (const bad of ["p:abc", "d:yubileynyy", "o:zapadnyy", ""]) {
+      expect(parseFilters({ loc: bad }, { region: true }).near).toBeUndefined();
+    }
+  });
+
+  it("без запроса с точкой по умолчанию — ближе; запрос важнее", () => {
+    expect(defaultSort({ near: true })).toBe("near");
+    expect(defaultSort({ q: "дрель", near: true })).toBe("relevance");
+    expect(parseFilters(loc, { region: true }).sort).toBe("near");
+    expect(parseFilters(loc, { q: "дрель", region: true }).sort).toBe("relevance");
+  });
+
+  it("sort=near допустим только с точкой и регионом, иначе молча отбрасывается", () => {
+    expect(parseFilters({ ...loc, sort: "near" }, { q: "дрель", region: true }).sort).toBe("near");
+    expect(parseFilters({ sort: "near" }, { region: true }).sort).toBe("new");
+    expect(parseFilters({ ...loc, sort: "near" }).sort).toBe("new");
+    expect(parseFilters({ ...loc, sort: "near" }, { q: "дрель" }).sort).toBe("relevance");
+  });
+
+  it("явная сортировка с точкой остаётся", () => {
+    expect(parseFilters({ ...loc, sort: "price_asc" }, { region: true }).sort).toBe("price_asc");
+    expect(parseFilters({ ...loc, sort: "new" }, { region: true }).sort).toBe("new");
+  });
+
+  it("sortOptionsFor предлагает «Ближе» только с действующей точкой", () => {
+    expect(sortOptionsFor({ near: true }).map((o) => o.value))
+      .toEqual(["near", "free", "new", "price_asc", "price_desc"]);
+    expect(sortOptionsFor({ q: "дрель", near: true }).map((o) => o.value))
+      .toEqual(["relevance", "near", "free", "new", "price_asc", "price_desc"]);
+    expect(sortOptionsFor({}).map((o) => o.value)).not.toContain("near");
+  });
+
+  it("sortContextOf берёт точку из готовых фильтров", () => {
+    expect(sortContextOf(parseFilters(loc, { region: true }))).toEqual({ q: undefined, near: true });
+    expect(sortContextOf(parseFilters(loc), "дрель")).toEqual({ q: "дрель", near: false });
+  });
+});
+
 // Даты выдачи разбираются строго, по правилам брони (docs/domain.md): мусор и
 // половинка — фильтра нет, прошлое начало подтягивается к сегодня, горизонт —
 // 180 дней. «Сегодня» передаётся явно: иначе тест зависел бы от дня прогона.
@@ -204,5 +256,33 @@ describe("carryParams()", () => {
   it("filterParams не тащит битые даты", () => {
     const qs = filterParams({ deposit: "none", from: "2026-10-10", to: "garbage" }, { today });
     expect(qs.toString()).toBe("deposit=none");
+  });
+
+  // «Где» едет так же, как даты, — уже через кодек: три знака, мусор отброшен.
+  it("переносит «Где» нормализованным", () => {
+    const qs = carryParams({
+      from: "2026-10-10", to: "2026-10-12",
+      loc: "p:45.062115,38.95201", la: " рядом: улица Красная ", src: "geo", lp: "s",
+    }, { today });
+    expect(Object.fromEntries(qs)).toEqual({
+      from: "2026-10-10", to: "2026-10-12",
+      loc: "p:45.062,38.952", la: "рядом: улица Красная", src: "geo", lp: "s",
+    });
+  });
+
+  it("без точки не переносит ни подпись, ни точность", () => {
+    expect(carryParams({ loc: "d:yubileynyy", la: "Юбилейный", lp: "t" }, { today }).toString()).toBe("");
+    expect(carryParams({ la: "ул. Красная", src: "geo" }, { today }).toString()).toBe("");
+  });
+
+  it("повторённый loc не роняет разбор: берётся первое значение", () => {
+    const sp = { loc: ["p:45.035,38.975", "x"], la: ["ул. Красная", "y"] } as unknown as { loc: string; la: string };
+    expect(Object.fromEntries(carryParams(sp, { today }))).toEqual({ loc: "p:45.035,38.975", la: "ул. Красная" });
+    expect(parseFilters(sp, { today, region: true }).near?.point).toEqual({ lat: 45.035, lon: 38.975 });
+  });
+
+  it("filterParams включает «Где» вместе с sort=near", () => {
+    const qs = filterParams({ price_max: "900", sort: "near", loc: "p:45.035,38.975", lp: "t" }, { today });
+    expect(qs.toString()).toBe("price_max=900&sort=near&loc=p%3A45.035%2C38.975&lp=t");
   });
 });

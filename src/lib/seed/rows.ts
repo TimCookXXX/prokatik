@@ -418,11 +418,18 @@ export type SeedParseResult =
   | { ok: true; data: SeedData }
   | { ok: false; issues: SeedIssue[] };
 
+/**
+ * Город, к которому по правилу сервиса относится точка объявления (слаг из
+ * cities.csv); null — сказать нечем (у региона нет геоданных). Считает его
+ * геокодер — scripts/seed-real.ts; здесь только сверка с колонкой city.
+ */
+export type SeedCityOfPoint = (listing: SeedListingRow, cities: readonly SeedCityRow[]) => string | null;
+
 export function parseSeedData(input: {
   cities: CsvRow[];
   users: CsvRow[];
   listings: CsvRow[];
-}): SeedParseResult {
+}, opts: { cityOfPoint?: SeedCityOfPoint } = {}): SeedParseResult {
   const issues: SeedIssue[] = [];
   const add = (file: string, line: number, message: string) => issues.push({ file, line, message });
 
@@ -512,6 +519,17 @@ export function parseSeedData(input: {
     }
     if (!citiesBroken && !declaredCities.has(l.city)) {
       add("listings.csv", line, `city «${l.city}» — нет такого slug в cities.csv`);
+    }
+    // Город объявления определяет адрес, как и в форме: ЖК Краснодара не
+    // может лежать в Яблоновском. Иначе сид положил бы вещь в чужой город, и
+    // первая же правка в кабинете молча перенесла бы её обратно.
+    const derived = !citiesBroken && l.lat !== null && opts.cityOfPoint
+      ? opts.cityOfPoint(l, cities.map((c) => c.row))
+      : null;
+    if (derived && derived !== l.city) {
+      add("listings.csv", line,
+        `адрес «${l.address}» относится к городу «${derived}», а city = «${l.city}» — город определяет адрес: `
+        + `поставьте city ${derived} или исправьте address, очистите lat и запустите pnpm geo:backfill --csv seed_real/listings.csv`);
     }
     const pair = `${l.owner} ${l.title.toLowerCase()}`;
     if (pairs.has(pair)) {

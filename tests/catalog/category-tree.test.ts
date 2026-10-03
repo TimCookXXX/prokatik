@@ -66,6 +66,19 @@ describe("buildCategoryTree()", () => {
     expect(tree[0]!.children[0]!.count).toBe(10);
   });
 
+  // С точкой «Где» счётчики — по региону, а страница подкатегории живёт по
+  // позициям самого города: ветка, где всё у соседа, в навигацию не попадает.
+  it("с региональными счётчиками ведёт только в подкатегории, которые есть у города", () => {
+    const cats = [
+      cat("tools", "Инструменты"),
+      cat("power", "Электроинструменты", "tools"),
+      cat("hand", "Ручной инструмент", "tools"),
+    ];
+    const tree = buildCategoryTree(cats, counts({ power: 9, hand: 4 }), counts({ power: 2 }));
+    expect(tree[0]!.count).toBe(13);
+    expect(tree[0]!.children.map((c) => [c.slug, c.count])).toEqual([["power", 9]]);
+  });
+
   it("пустой вход даёт пустое дерево", () => {
     expect(buildCategoryTree([], new Map())).toEqual([]);
   });

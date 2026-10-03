@@ -108,7 +108,9 @@ export default async function CabinetListingPage({
           mode="edit"
           listingId={listing.id}
           returnHref={selfHref}
-          cities={cities.map((c) => ({ id: c.id, name: c.name, slug: c.slug, geo: geo.get(c.slug) ?? null }))}
+          cities={cities.map((c) => ({
+            id: c.id, name: c.name, nameLocative: c.nameLocative, slug: c.slug, geo: geo.get(c.slug) ?? null,
+          }))}
           categories={leafCategories(cats)}
           // Полный адрес и точка — владельцу в его же форме; публичные
           // страницы их не выбирают (publicListingColumns).

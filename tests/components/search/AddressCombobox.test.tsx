@@ -120,7 +120,7 @@ describe("AddressCombobox", () => {
     expect(serverCalls()[0]).toContain(`near=${CENTRE.lat.toFixed(4)}%2C${CENTRE.lon.toFixed(4)}`);
     fireEvent.click(options()[0]);
     expect(onPick).toHaveBeenCalledWith(expect.objectContaining({ kind: "house", title: "улица Красная, 120" }));
-    expect(input()).toHaveValue("улица Красная, 120");
+    expect(input()).toHaveValue("улица Красная, 120, Краснодар");
     // под полем — что увидят покупатели
     expect(screen.getByText(content.address.note.listing.house)).toBeInTheDocument();
     expect(input()).toHaveAttribute("aria-describedby", "addr-note");
@@ -205,7 +205,7 @@ describe("AddressCombobox", () => {
     fireEvent.keyDown(input(), { key: "Enter" });
     await waitFor(() => expect(onPick).toHaveBeenCalledTimes(1));
     expect(document.activeElement).toBe(input());
-    expect(input()).toHaveValue("улица Ставропольская");
+    expect(input()).toHaveValue("улица Ставропольская, Краснодар");
 
     type("красная");
     await waitFor(() => expect(options()[0]).toHaveTextContent("улица Красная"));
@@ -229,7 +229,7 @@ describe("AddressCombobox", () => {
     await waitFor(() => expect(onPick).toHaveBeenCalledTimes(1));
     expect(onPick.mock.calls[0][0]).toMatchObject({ title: "улица Ставропольская" });
     expect(document.activeElement).not.toBe(input());
-    expect(input()).toHaveValue("улица Ставропольская");
+    expect(input()).toHaveValue("улица Ставропольская, Краснодар");
   });
 
   it("«Где»: Enter resolves the address and then submits the search", async () => {
@@ -239,7 +239,7 @@ describe("AddressCombobox", () => {
     type("ставропольская");
     fireEvent.keyDown(input(), { key: "Enter" });
     await waitFor(() => expect(onSubmit).toHaveBeenCalled());
-    expect(input()).toHaveValue("улица Ставропольская");
+    expect(input()).toHaveValue("улица Ставропольская, Краснодар");
   });
 
   it("not found — says so and clears the value; server down without the mini index — a retry hint", async () => {
@@ -309,6 +309,6 @@ describe("addressValueOf", () => {
     const krd = engine.suggest("краснодар", { limit: 1 })[0];
     expect(addressValueOf(krd, "Краснодар")).toMatchObject({ precision: "city", point: null });
     const st = engine.suggest("красная", { limit: 1 })[0];
-    expect(addressValueOf(st, "Краснодар")).toMatchObject({ label: "улица Красная", precision: "street", kind: "street" });
+    expect(addressValueOf(st, "Краснодар")).toMatchObject({ label: "улица Красная, Краснодар", precision: "street", kind: "street" });
   });
 });

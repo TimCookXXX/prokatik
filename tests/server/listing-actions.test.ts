@@ -70,12 +70,15 @@ const citiesGeo = new Map<string, CityGeoContext | null>([
   ["kazan", null],
 ]);
 vi.mock("@/server/city", () => ({ getCitiesGeo: async () => citiesGeo }));
-const CITIES: Record<string, { id: string; slug: string; name: string }> = {
-  krd: { id: "krd", slug: "krasnodar", name: "Краснодар" },
-  yab: { id: "yab", slug: "yablonovskiy", name: "Яблоновский" },
-  kzn: { id: "kzn", slug: "kazan", name: "Казань" },
+const CITIES: Record<string, { id: string; slug: string; name: string; nameLocative: string }> = {
+  krd: { id: "krd", slug: "krasnodar", name: "Краснодар", nameLocative: "Краснодаре" },
+  yab: { id: "yab", slug: "yablonovskiy", name: "Яблоновский", nameLocative: "Яблоновском" },
+  kzn: { id: "kzn", slug: "kazan", name: "Казань", nameLocative: "Казани" },
 };
-vi.mock("@/server/catalog", () => ({ getCityById: async (id: string) => CITIES[id] ?? null }));
+vi.mock("@/server/catalog", () => ({
+  getCityById: async (id: string) => CITIES[id] ?? null,
+  getActiveCities: async () => Object.values(CITIES),
+}));
 
 const { createListing, updateListing } = await import("@/server/actions/owner");
 const { resetGeocoderEngines } = await import("@/server/geocoder");
@@ -85,6 +88,14 @@ const street = createClientGeocoder(buildClientIndex(structuredClone(FIXTURE)))
 const pick = {
   mode: "pick" as const, kind: street.kind, title: street.title, subtitle: street.subtitle,
   lat: street.lat, lon: street.lon,
+};
+// Улица Садовая в Яблоновском — город объявления по адресу, а не по форме.
+const yabStreet = createClientGeocoder(buildClientIndex(structuredClone(FIXTURE)))
+  .suggest("садовая яблоновский", { near: KRD_CENTRE })
+  .find((h) => h.subtitle.startsWith("Яблоновский"))!;
+const pickYab = {
+  mode: "pick" as const, kind: yabStreet.kind, title: yabStreet.title, subtitle: yabStreet.subtitle,
+  lat: yabStreet.lat, lon: yabStreet.lon,
 };
 
 const form = (over: Record<string, unknown> = {}) => ({
@@ -112,9 +123,19 @@ describe("createListing: адрес", () => {
   it("сохраняет адрес и точку из серверного хита", async () => {
     expect(await createListing(form({ address: pick }))).toMatchObject({ ok: true });
     expect(state.inserts[0]).toMatchObject({
-      address: "улица Красная", location: "улица Красная", geoPrecision: "street",
+      address: "улица Красная, Краснодар", location: "улица Красная, Краснодар", geoPrecision: "street",
       lat: expect.any(Number), lon: expect.any(Number),
     });
+  });
+
+  // Город в форме при выборе подсказки — только регион поиска: подменённый
+  // cityId не уведёт ЖК Краснодара в Яблоновский.
+  it("город объявления — из адреса, cityId формы для подсказки не действует", async () => {
+    expect(await createListing(form({ cityId: "yab", address: pick }))).toMatchObject({ ok: true });
+    expect(state.inserts[0]).toMatchObject({ cityId: "krd", address: "улица Красная, Краснодар" });
+
+    expect(await createListing(form({ cityId: "krd", address: pickYab }))).toMatchObject({ ok: true });
+    expect(state.inserts[1]).toMatchObject({ cityId: "yab", address: "улица Садовая, Яблоновский", location: "улица Садовая, Яблоновский" });
   });
 
   it("без адреса объявление не создаётся", async () => {
@@ -137,7 +158,7 @@ describe("createListing: адрес", () => {
     expect(await createListing(form({ cityId: "kzn", address: { mode: "text", text: "ул. Баумана" } })))
       .toMatchObject({ ok: true });
     expect(state.inserts[0]).toMatchObject({
-      address: "ул. Баумана", location: "ул. Баумана", lat: null, lon: null, geoPrecision: "city",
+      cityId: "kzn", address: "ул. Баумана", location: "ул. Баумана", lat: null, lon: null, geoPrecision: "city",
     });
   });
 });
@@ -149,7 +170,7 @@ describe("updateListing: адрес", () => {
     state.current = stored;
     state.geoThrows = true;
     expect(await updateListing("L1", form({ priceDay: 700 }))).toEqual({ ok: true, data: undefined });
-    expect(state.updates[0]).toMatchObject({ priceDay: 700 });
+    expect(state.updates[0]).toMatchObject({ priceDay: 700, cityId: "krd" });
     for (const c of ADDRESS_COLUMNS) expect(state.updates[0]).not.toHaveProperty(c);
   });
 
@@ -176,7 +197,14 @@ describe("updateListing: адрес", () => {
   it("новый адрес при правке пишется целиком", async () => {
     state.current = { cityId: "krd", address: null, geoPrecision: "city" };
     expect(await updateListing("L1", form({ address: pick }))).toMatchObject({ ok: true });
-    expect(state.updates[0]).toMatchObject({ address: "улица Красная", geoPrecision: "street" });
+    expect(state.updates[0]).toMatchObject({ address: "улица Красная, Краснодар", geoPrecision: "street" });
+  });
+
+  // Новый адрес в другом пункте — объявление переезжает вместе с ним.
+  it("новый адрес в другом городе переносит объявление туда", async () => {
+    state.current = stored;
+    expect(await updateListing("L1", form({ address: pickYab }))).toMatchObject({ ok: true });
+    expect(state.updates[0]).toMatchObject({ cityId: "yab", address: "улица Садовая, Яблоновский" });
   });
 
   it("чужое объявление — not_found до похода в геокодер", async () => {

@@ -367,6 +367,39 @@ describe("parseSeedData: адрес объявления", () => {
     }
   });
 
+  // Город определяет адрес: точка, которая по геокодеру в другом городе, —
+  // ошибка (ЖК Радуга — Краснодар, а не Яблоновский). Сверку считает
+  // scripts/seed-real.ts движком; здесь — заглушка.
+  it("точка в другом городе, чем city, — ошибка с подсказкой", () => {
+    const yab = city({ slug: "yablonovskiy", name: "Яблоновский", name_locative: "Яблоновском", geo_region: "krasnodar", lat: "44.98", lon: "38.94" });
+    const seen: string[] = [];
+    const cityOfPoint = (l: { city: string; address: string | null }, cities: readonly { slug: string }[]) => {
+      seen.push(`${l.city}:${cities.map((c) => c.slug).join(",")}`);
+      return l.address === "ЖК Радуга" ? "krasnodar" : l.city;
+    };
+    const res = parseSeedData({
+      cities: [geoCity, yab],
+      users: [user()],
+      listings: [
+        listing({ ...POINT, city: "yablonovskiy", address: "ЖК Радуга", location: "ЖК Радуга", precision: "place" }),
+        listing({ ...POINT, title: "Лобзик", city: "yablonovskiy" }),
+      ],
+    }, { cityOfPoint });
+    expect(messages(res)).toEqual([
+      "listings.csv:2 адрес «ЖК Радуга» относится к городу «krasnodar», а city = «yablonovskiy» — город определяет адрес: "
+      + "поставьте city krasnodar или исправьте address, очистите lat и запустите pnpm geo:backfill --csv seed_real/listings.csv",
+    ]);
+    expect(seen).toEqual(["yablonovskiy:krasnodar,yablonovskiy", "yablonovskiy:krasnodar,yablonovskiy"]);
+  });
+
+  it("сверка молчит без точки и когда сказать нечем", () => {
+    const cityOfPoint = () => null;
+    expect(parse({ listings: [listing()] }).ok).toBe(true);
+    expect(parseSeedData({ cities: [geoCity], users: [user()], listings: [listing(POINT)] }, { cityOfPoint }).ok).toBe(true);
+    const never = () => { throw new Error("no point — no check"); };
+    expect(parseSeedData({ cities: [city()], users: [user()], listings: [listing()] }, { cityOfPoint: never }).ok).toBe(true);
+  });
+
   it("нет новых колонок в шапке — ошибка про шапку", () => {
     const { address: _a, lat: _lat, lon: _lon, precision: _p, ...old } = listing();
     expect(messages(parse({ listings: [old] })))

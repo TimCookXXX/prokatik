@@ -76,7 +76,8 @@ export async function createListing(input: unknown): Promise<ActionResult<{ list
   if (!slug) return { ok: false, error: "Название должно содержать буквы или цифры" };
 
   // До любой записи: отказ по адресу не должен оставить переименованного
-  // продавца без объявления. У новой вещи «оставить как было» нечего.
+  // продавца без объявления. У новой вещи «оставить как было» нечего. Город
+  // объявления — из адреса: у выбранной подсказки он свой, а не из формы.
   const address = await resolveListingAddress(form.address, { cityId: form.cityId, current: null });
   if (!address.ok) return { ok: false, error: address.error };
   if (!address.fields) return { ok: false, error: "invalid_input" };
@@ -91,7 +92,7 @@ export async function createListing(input: unknown): Promise<ActionResult<{ list
   await getDb().insert(listings).values({
     id,
     ownerUserId: owner.userId,
-    cityId: form.cityId,
+    cityId: address.cityId,
     categoryId: form.categoryId,
     title: form.title,
     slug,
@@ -123,7 +124,8 @@ export async function updateListing(listingId: string, input: unknown): Promise<
   const form = parsed.data;
 
   // Текущий адрес — для `keep`: правка цены или фото адрес не переспрашивает,
-  // но смена города или строка без адреса требуют выбрать его заново.
+  // но смена города или строка без адреса требуют выбрать его заново. Новый
+  // адрес (`pick`) сам задаёт город — объявление переезжает вместе с ним.
   const db = getDb();
   const currentRows = await db
     .select({ cityId: listings.cityId, address: listings.address, geoPrecision: listings.geoPrecision })
@@ -137,7 +139,7 @@ export async function updateListing(listingId: string, input: unknown): Promise<
 
   const res = await db.update(listings)
     .set({
-      cityId: form.cityId,
+      cityId: address.cityId,
       categoryId: form.categoryId,
       title: form.title, // слаг сохраняем: URL позиции не должен ломаться
       description: form.description || null,

@@ -8,7 +8,7 @@ import {
 } from "@/lib/search/listing-index";
 import { hasSearchWords, MAX_QUERY_LENGTH } from "@/lib/search/match";
 import type { DateRange } from "@/lib/catalog/filters";
-import { getCityBySlug, getFreeListingIds } from "@/server/catalog";
+import { getFreeListingIds, type City } from "@/server/catalog";
 import { getSearchIndex } from "@/server/search-index";
 
 /** Потолок совпадений выдачи: дальше фильтры, счёт и страницы считает SQL по этим id. */
@@ -75,19 +75,18 @@ export interface SuggestResult {
 
 /**
  * Подсказки панели «Что» в городе. Пустой или односимвольный запрос —
- * популярные разделы без объявлений. null — города нет или он отключён.
- * `cityIds` — набор городов индекса, когда он шире города (регион при точке
- * «Где»); по умолчанию — сам город. `dates` — уже разобранный диапазон
+ * популярные разделы без объявлений. Ссылки разделов ведут в город страницы.
+ * `cityIds` — набор городов индекса, тот же, что у выдачи (getCityScope): с
+ * точкой «Где» это весь регион, иначе верх выдачи разошёлся бы с подсказками;
+ * по умолчанию — сам город. `dates` — уже разобранный диапазон
  * (parseDateRange): с ним в подсказки идут только свободные на все эти дни,
  * как и в выдаче с теми же датами. Счётчики разделов даты не учитывают.
  */
 export async function suggestForCity(
-  citySlug: string,
+  city: Pick<City, "id" | "slug">,
   q: string,
   { cityIds, dates }: { cityIds?: readonly string[]; dates?: DateRange } = {},
-): Promise<SuggestResult | null> {
-  const city = await getCityBySlug(citySlug);
-  if (!city) return null;
+): Promise<SuggestResult> {
   const { ix, categories, citySlugs } = await getSearchIndex(cityIds ?? [city.id]);
 
   let hits = rankListings(ix, q, {

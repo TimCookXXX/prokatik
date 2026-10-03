@@ -53,14 +53,15 @@ vi.mock("@/server/city", () => ({
   },
 }));
 
-const CITIES: Record<string, { id: string; slug: string; name: string }> = {
-  "c-krd": { id: "c-krd", slug: "krasnodar", name: "Краснодар" },
-  "c-yab": { id: "c-yab", slug: "yablonovskiy", name: "Яблоновский" },
-  "c-kzn": { id: "c-kzn", slug: "kazan", name: "Казань" },
-  "c-sochi": { id: "c-sochi", slug: "sochi", name: "Сочи" },
+const CITIES: Record<string, { id: string; slug: string; name: string; nameLocative: string }> = {
+  "c-krd": { id: "c-krd", slug: "krasnodar", name: "Краснодар", nameLocative: "Краснодаре" },
+  "c-yab": { id: "c-yab", slug: "yablonovskiy", name: "Яблоновский", nameLocative: "Яблоновском" },
+  "c-kzn": { id: "c-kzn", slug: "kazan", name: "Казань", nameLocative: "Казани" },
+  "c-sochi": { id: "c-sochi", slug: "sochi", name: "Сочи", nameLocative: "Сочи" },
 };
 vi.mock("@/server/catalog", () => ({
   getCityById: async (id: string) => CITIES[id] ?? null,
+  getActiveCities: async () => Object.values(CITIES),
 }));
 
 const { resolveListingAddress } = await import("@/server/listing-address");
@@ -92,8 +93,9 @@ describe("resolveListingAddress: pick", () => {
     const res = await create(asPick(hit));
     expect(res).toEqual({
       ok: true,
+      cityId: "c-krd",
       fields: {
-        address: "улица Красная", location: "улица Красная",
+        address: "улица Красная, Краснодар", location: "улица Красная, Краснодар",
         lat: expect.any(Number), lon: expect.any(Number), geoPrecision: "street",
       },
     });
@@ -102,33 +104,62 @@ describe("resolveListingAddress: pick", () => {
   it("accepts a microdistrict and a POI from the mini-index as place precision", async () => {
     const yub = client().suggest("юмр", { near: KRD_CENTRE }).find((h) => h.title === "Юбилейный")!;
     expect(await create(asPick(yub))).toMatchObject({
-      ok: true, fields: { address: "Юбилейный", location: "Юбилейный", geoPrecision: "place" },
+      ok: true, fields: { address: "Юбилейный, Краснодар", location: "Юбилейный, Краснодар", geoPrecision: "place" },
     });
 
     const mall = client().suggest("галерея", { near: KRD_CENTRE }).find((h) => h.kind === "poi")!;
     expect(await create(asPick(mall))).toMatchObject({
-      ok: true, fields: { address: "ТЦ Галерея", location: "ТЦ Галерея", geoPrecision: "place" },
+      ok: true, fields: { address: "ТЦ Галерея, Краснодар", location: "ТЦ Галерея, Краснодар", geoPrecision: "place" },
     });
   });
 
   // Дом знает только сервер: полный адрес — владельцу, публично — улица без
-  // номера, а пункт, отличный от города объявления, — в подписи.
+  // номера. Пункт адреса — город объявления, поэтому в подписях он не повторяется.
   it("keeps the house number in address but not in the public location", async () => {
     const { suggestAddresses } = await import("@/server/geocoder");
     const [house] = await suggestAddresses("базовская 21к1", "yablonovskiy");
     expect(house).toMatchObject({ kind: "house", title: "улица Базовская, 21к1" });
 
-    expect(await create(asPick(house), "c-krd")).toMatchObject({
-      ok: true,
-      fields: {
-        address: "улица Базовская, 21к1, Яблоновский",
-        location: "улица Базовская, Яблоновский",
-        geoPrecision: "house",
-      },
-    });
-    // В своём городе пункт не повторяется.
     expect(await create(asPick(house), "c-yab")).toMatchObject({
-      ok: true, fields: { address: "улица Базовская, 21к1", location: "улица Базовская" },
+      ok: true,
+      cityId: "c-yab",
+      fields: { address: "улица Базовская, 21к1, Яблоновский", location: "улица Базовская, Яблоновский", geoPrecision: "house" },
+    });
+  });
+
+  // Город объявления определяет адрес: город формы при выборе подсказки задаёт
+  // только регион поиска (решение 2026-10-03).
+  it("takes the listing city from the address, not from the form", async () => {
+    const { suggestAddresses } = await import("@/server/geocoder");
+    const [house] = await suggestAddresses("базовская 21к1", "yablonovskiy");
+    expect(await create(asPick(house), "c-krd")).toMatchObject({
+      ok: true, cityId: "c-yab", fields: { address: "улица Базовская, 21к1, Яблоновский", location: "улица Базовская, Яблоновский" },
+    });
+
+    const krasnaya = client().suggest("красная", { near: KRD_CENTRE })[0];
+    expect(await create(asPick(krasnaya), "c-yab")).toMatchObject({ ok: true, cityId: "c-krd" });
+
+    // Микрорайон и объект Краснодара — Краснодар, откуда бы ни искали.
+    const yub = client().suggest("юмр", { near: YAB_CENTRE }).find((h) => h.title === "Юбилейный")!;
+    expect(await create(asPick(yub), "c-yab")).toMatchObject({ ok: true, cityId: "c-krd" });
+    const mall = client().suggest("галерея", { near: YAB_CENTRE }).find((h) => h.kind === "poi")!;
+    expect(await create(asPick(mall), "c-yab")).toMatchObject({ ok: true, cityId: "c-krd" });
+  });
+
+  // Пункт, который не город сервиса, — к ближайшему городу региона, а в
+  // публичной подписи остаётся настоящий пункт.
+  it("attaches a neighbouring settlement to the nearest city and keeps its name public", async () => {
+    const sad = client().suggest("садовая новая адыгея", { near: KRD_CENTRE })
+      .find((h) => h.subtitle.startsWith("Новая Адыгея"))!;
+    expect(await create(asPick(sad), "c-yab")).toMatchObject({
+      ok: true,
+      cityId: "c-krd",
+      fields: { address: "улица Садовая, Новая Адыгея", location: "улица Садовая, Новая Адыгея" },
+    });
+
+    const na = client().suggest("новая адыгея", { near: YAB_CENTRE }).find((h) => h.kind === "place")!;
+    expect(await create(asPick(na), "c-yab")).toMatchObject({
+      ok: true, cityId: "c-krd", fields: { location: "Новая Адыгея", geoPrecision: "place" },
     });
   });
 
@@ -168,7 +199,7 @@ describe("resolveListingAddress: pick", () => {
   it("rejects a point further than 40 km from the city centre", async () => {
     const far = client().suggest("дальний", { near: KRD_CENTRE }).find((h) => h.title === "Дальний")!;
     expect(await create(asPick(far)))
-      .toEqual({ ok: false, error: "Адрес далеко от города объявления — проверьте город" });
+      .toEqual({ ok: false, error: "Адрес дальше 40 км от городов сервиса — такие объявления пока не принимаем" });
   });
 
   it("says the address search is unavailable when the engine or its data is down", async () => {
@@ -194,6 +225,7 @@ describe("resolveListingAddress: text", () => {
   it("takes free text in a city without geodata, without a point", async () => {
     expect(await create({ mode: "text", text: "ул. Баумана" }, "c-kzn")).toEqual({
       ok: true,
+      cityId: "c-kzn",
       fields: { address: "ул. Баумана", location: "ул. Баумана", lat: null, lon: null, geoPrecision: "city" },
     });
   });
@@ -220,7 +252,7 @@ describe("resolveListingAddress: keep", () => {
   it("leaves a stored point untouched without touching the geocoder", async () => {
     state.engineDown = true;
     state.geoDown = true;
-    expect(await keep(stored)).toEqual({ ok: true, fields: null });
+    expect(await keep(stored)).toEqual({ ok: true, fields: null, cityId: "c-krd" });
     expect(state.geocoderCalls).toBe(0);
   });
 
@@ -237,6 +269,6 @@ describe("resolveListingAddress: keep", () => {
     expect(await keep({ cityId: "c-krd", address: "ул. Гагарина", geoPrecision: "city" }))
       .toEqual({ ok: false, error: "Укажите адрес" });
     expect(await keep({ cityId: "c-kzn", address: "Казань", geoPrecision: "city" }, "c-kzn"))
-      .toEqual({ ok: true, fields: null });
+      .toEqual({ ok: true, fields: null, cityId: "c-kzn" });
   });
 });

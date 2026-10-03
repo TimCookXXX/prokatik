@@ -52,6 +52,8 @@ export interface AddressExtraRow {
   hint?: string;
   icon?: React.ReactNode;
   position: "start" | "end";
+  /** Только пока не печатают: «Недавнее» над подсказками набранного — лишний шум. */
+  idle?: boolean;
   onSelect: () => void | Promise<void>;
 }
 
@@ -180,10 +182,11 @@ export function AddressCombobox({
   }, [typing, q, client, citySlug, nearLat, nearLon]);
 
   const hits = typing ? accept(visibleAddresses(q, server, clientHits)) : [];
+  const shownExtras = extras.filter((x) => !x.idle || !typing);
   const rows: Row[] = [
-    ...extras.filter((x) => x.position === "start").map((extra) => ({ kind: "extra" as const, key: `x:${extra.key}`, extra })),
+    ...shownExtras.filter((x) => x.position === "start").map((extra) => ({ kind: "extra" as const, key: `x:${extra.key}`, extra })),
     ...hits.map((hit) => ({ kind: "hit" as const, key: `a:${hitKey(hit)}`, hit })),
-    ...extras.filter((x) => x.position === "end").map((extra) => ({ kind: "extra" as const, key: `x:${extra.key}`, extra })),
+    ...shownExtras.filter((x) => x.position === "end").map((extra) => ({ kind: "extra" as const, key: `x:${extra.key}`, extra })),
   ];
   const open = query !== null && rows.length > 0;
 

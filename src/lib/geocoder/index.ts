@@ -8,4 +8,4 @@ export {
 export { houseKey, displayHouse } from "./house-number";
 export { tokenize } from "./query";
 export type * from "./types";
-export { buildClientIndex, createClientGeocoder, type ClientIndex, type ClientGeocoder } from "./client-index";
+export { buildClientIndex, createClientGeocoder, withSettlement, type ClientIndex, type ClientGeocoder } from "./client-index";

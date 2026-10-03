@@ -10,7 +10,7 @@
 // Ранжирование совпадает с серверным, потому что вместе с названиями приходят посчитанные по домам величины:
 // число домов улицы, пункт большинства её домов, радиус застройки и число домов пунктов (index-build.ts, Precomputed).
 
-import { Engine } from "./engine";
+import { Engine, type Geocoder } from "./engine";
 import { buildIndex, type SearchIndex } from "./index-build";
 import type { AddressHit, GeoIndexData, IndexPlace, IndexPoi, IndexStreet, PlaceKind, SuggestOptions } from "./types";
 
@@ -112,7 +112,14 @@ export function createClientGeocoder(ci: ClientIndex): ClientGeocoder {
   const engine = new Engine(ix);
   return {
     version: ci.version,
-    // id с «c» — подсказка из мини-индекса (у сервера свои id); сверять с серверными — по title и subtitle
-    suggest: (q, opts) => engine.suggest(q, opts).map((h) => ({ ...h, id: `c${h.id}` })),
+    // id с «c» — подсказка из мини-индекса (у сервера свои id); сверять с серверными — по title и subtitle.
+    // Пункты — по своему id, до префикса: по ним форма объявления показывает город, к которому отойдёт адрес.
+    suggest: (q, opts) => engine.suggest(q, opts).map((h) => withSettlement(engine, { ...h, id: `c${h.id}` }, h.id)),
   };
+}
+
+/** Подсказка с населёнными пунктами (Geocoder.settlementOf); `id` — id этого движка, если у подсказки уже другой. */
+export function withSettlement(g: Pick<Geocoder, "settlementOf">, hit: AddressHit, id = hit.id): AddressHit {
+  const settlement = g.settlementOf({ id, lat: hit.lat, lon: hit.lon });
+  return settlement ? { ...hit, settlement } : hit;
 }

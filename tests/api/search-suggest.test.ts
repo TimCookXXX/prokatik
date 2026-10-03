@@ -7,8 +7,11 @@ import { NextRequest } from "next/server";
 // (его покрывает tests/search).
 vi.mock("@/server/catalog", () => ({ getCityBySlug: vi.fn(), getFreeListingIds: vi.fn() }));
 vi.mock("@/server/search-index", () => ({ getSearchIndex: vi.fn() }));
+// Набор городов при точке «Где» решает getCityScope (геоданные городов в БД).
+vi.mock("@/server/city", () => ({ getCityScope: vi.fn() }));
 
 import { getCityBySlug, getFreeListingIds } from "@/server/catalog";
+import { getCityScope } from "@/server/city";
 import { addDaysStr, todayStr } from "@/lib/catalog/dates";
 import { getSearchIndex } from "@/server/search-index";
 import { buildListingIndex } from "@/lib/search/listing-index";
@@ -45,6 +48,10 @@ beforeEach(() => {
   vi.mocked(getSearchIndex).mockReset();
   vi.mocked(getSearchIndex).mockResolvedValue(index() as never);
   vi.mocked(getFreeListingIds).mockReset();
+  vi.mocked(getCityScope).mockReset();
+  vi.mocked(getCityScope).mockImplementation(async (city) => ({
+    region: false, near: null, cityIds: [city.id], nearby: false,
+  }));
 });
 
 describe("GET /api/search/suggest", () => {
@@ -191,6 +198,51 @@ describe("GET /api/search/suggest", () => {
       const body = await (await get(`city=krasnodar&q=${encodeURIComponent("электроинструменты")}&from=${from}&to=${to}`)).json();
       expect(body.items).toEqual([]);
       expect(body.categories.length).toBeGreaterThan(0);
+    });
+  });
+
+  // С точкой «Где» выдача идёт по всем городам региона, и подсказки — по тому
+  // же набору: иначе верх выдачи разошёлся бы с подсказками.
+  describe("with «Где»", () => {
+    const NEIGHBOUR = { id: "c2", slug: "yablonovskiy" };
+    const loc = `loc=${encodeURIComponent("p:45.0,38.9")}&lp=s`;
+
+    it("takes the index of the whole region when a point is set", async () => {
+      vi.mocked(getCityScope).mockResolvedValue({
+        region: true, near: null, cityIds: [CITY.id, NEIGHBOUR.id], nearby: true,
+      });
+      const res = await get(`city=krasnodar&q=${encodeURIComponent("перфоратор")}&${loc}`);
+      expect(res.status).toBe(200);
+
+      expect(getCityScope).toHaveBeenCalledWith(
+        expect.objectContaining({ id: CITY.id }),
+        expect.objectContaining({ loc: "p:45.0,38.9", lp: "s" }),
+      );
+      expect(getSearchIndex).toHaveBeenCalledWith([CITY.id, NEIGHBOUR.id]);
+    });
+
+    it("stays in the city without a point", async () => {
+      await get(`city=krasnodar&q=${encodeURIComponent("перфоратор")}`);
+      expect(getCityScope).not.toHaveBeenCalled();
+      expect(getSearchIndex).toHaveBeenCalledWith([CITY.id]);
+    });
+
+    it("links listings of a neighbouring city by their own city", async () => {
+      const shifted = rows.map((r, i) => (i % 2 ? { ...r, cityId: NEIGHBOUR.id } : r));
+      vi.mocked(getSearchIndex).mockResolvedValue({
+        ix: buildListingIndex(shifted, CATEGORIES, countsOf(shifted), CITY_NAMES),
+        categories: new Map(CATEGORIES.map((c) => [c.id, c])),
+        citySlugs: new Map([[CITY.id, CITY.slug], [NEIGHBOUR.id, NEIGHBOUR.slug]]),
+      } as never);
+      vi.mocked(getCityScope).mockResolvedValue({
+        region: true, near: null, cityIds: [CITY.id, NEIGHBOUR.id], nearby: true,
+      });
+
+      const body = await (await get(`city=krasnodar&q=${encodeURIComponent("инструмент")}&${loc}`)).json();
+      const hrefs: string[] = body.items.map((i: { href: string }) => i.href);
+      expect(hrefs.some((h) => h.startsWith("/yablonovskiy/"))).toBe(true);
+      // Разделы ведут в город страницы: город «Где» не меняет.
+      for (const c of body.categories) expect(c.href).toMatch(/^\/krasnodar\//);
     });
   });
 });

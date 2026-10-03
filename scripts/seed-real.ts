@@ -5,7 +5,9 @@
 // Запуск: pnpm db:seed:real (нужен DATABASE_URL в .env, миграции применены).
 // Ни исходников фотографий, ни доступа к бакету не требует: адреса и размеры
 // берутся из seed_real/photos.json, который пишет pnpm seed:photos. Поэтому
-// скрипт одинаково работает и локально, и на сервере.
+// скрипт одинаково работает и локально, и на сервере — кроме сверки города
+// объявления с его точкой: она строит движок геокодера и идёт только вне
+// прода (cityOfPointCheck).
 //
 // Демо-сид scripts/seed.ts ему не нужен и не мешает: дерево категорий оба
 // заводят через scripts/seed-categories.ts, и каждый поднимается в одиночку.
@@ -20,7 +22,10 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { Pool } from "pg";
 import { users, cities, listings } from "../drizzle/schema";
-import type { SeedData } from "../src/lib/seed/rows";
+import type { SeedCityOfPoint, SeedData } from "../src/lib/seed/rows";
+import { createGeocoder, type Geocoder } from "../src/lib/geocoder";
+import { listingCityOf, storedAddressHit } from "../src/lib/geo/address";
+import { loadGeoIndexFromDb } from "../src/server/geocoder-index";
 import { categoryPath } from "../src/lib/seed/categories";
 import { missingFromManifest, type SeedPhotoManifest } from "../src/lib/seed/photos";
 import { newId } from "../src/lib/id";
@@ -234,18 +239,51 @@ async function grantDevPasswords(db: SeedDb, data: SeedData): Promise<void> {
   }
 }
 
+// ------------------------------------------------------- город по точке
+
+/**
+ * Сверка города объявления с точкой: город определяет адрес, как в форме
+ * (listingCityOf по пунктам адреса из геокодера). Движок региона строится в
+ * этом процессе — сотни МБ, поэтому на проде (NODE_ENV=production, сервер с
+ * живым app) сверки нет: таблица приходит туда уже проверенной сидом на машине
+ * разработчика. Нет импорта региона — сверять нечем, строки не трогаются.
+ */
+async function cityOfPointCheck(pool: Pool): Promise<SeedCityOfPoint | undefined> {
+  if (process.env.NODE_ENV === "production") {
+    console.log("Сверка города с точкой пропущена на проде — её делает сид на машине разработчика.");
+    return undefined;
+  }
+  const { rows } = await pool.query<{ region: string }>("select distinct region from geo_imports");
+  const engines = new Map<string, Geocoder>();
+  for (const { region } of rows) {
+    const data = await loadGeoIndexFromDb(pool, region);
+    if (data) engines.set(region, createGeocoder(data));
+  }
+  return (listing, cities) => {
+    const region = cities.find((c) => c.slug === listing.city)?.geoRegion;
+    const g = region ? engines.get(region) : undefined;
+    if (!g || listing.lat === null || listing.lon === null) return null;
+    const point = { lat: listing.lat, lon: listing.lon };
+    const hit = storedAddressHit(g, listing.address, point);
+    const candidates = cities.flatMap((c) => (c.geoRegion === region && c.lat !== null && c.lon !== null
+      ? [{ id: c.slug, name: c.name, nameLocative: c.nameLocative, centre: { lat: c.lat, lon: c.lon } }]
+      : []));
+    return listingCityOf(hit ? g.settlementOf(hit) : null, point, candidates)?.id ?? null;
+  };
+}
+
 // -------------------------------------------------------------------- main
 
 async function main() {
   const url = process.env.DATABASE_URL;
   if (!url) die("DATABASE_URL is required");
 
-  const data = await readSeedData();
-  const photos = resolvePhotos(data, await readManifest());
-
   const pool = new Pool({ connectionString: url });
   const db = drizzle(pool);
   try {
+    const data = await readSeedData({ cityOfPoint: await cityOfPointCheck(pool) });
+    const photos = resolvePhotos(data, await readManifest());
+
     // Одна транзакция на всё: падение на тридцатом объявлении не должно
     // оставлять базу наполовину заполненной.
     const stats = await db.transaction(async (tx) => {

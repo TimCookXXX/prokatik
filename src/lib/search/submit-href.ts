@@ -38,6 +38,8 @@ function applyPanel(params: URLSearchParams, v: SearchPanelValue): URLSearchPara
   set("from", v.from);
   set("to", v.to);
   for (const key of WHERE_PARAMS) set(key, v.loc?.[key]);
+  // Без точки «Ближе» не от чего считать: «×» у «Где» снимает и её.
+  if (!v.loc?.loc && params.get("sort") === "near") params.delete("sort");
   params.delete("page");
   return params;
 }

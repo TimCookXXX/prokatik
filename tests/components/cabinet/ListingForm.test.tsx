@@ -1,11 +1,12 @@
-// Адрес выдачи в форме объявления: payload `keep` / `pick` / `text`, смена
-// города сбрасывает адрес, без адреса форма не уходит, ошибка сервера про
-// адрес — у поля. Геокодер — фикстура движка: мини-индекс собирается в главном
+// Адрес выдачи в форме объявления: payload `keep` / `pick` / `text`, город
+// в регионе с геоданными определяет адрес (выбора города там нет), город без
+// геоданных выбирается отдельно и сбрасывает адрес, без адреса форма не
+// уходит, ошибка сервера про адрес — у поля. Геокодер — фикстура движка: мини-индекс собирается в главном
 // потоке (воркера в jsdom нет), сервер подсказок отвечает тем же движком.
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { content } from "@theme/content";
-import { buildClientIndex, createGeocoder } from "@/lib/geocoder";
+import { buildClientIndex, createGeocoder, withSettlement } from "@/lib/geocoder";
 import { FIXTURE } from "../../geocoder/fixture";
 
 const ok = { ok: true as const, data: { listingId: "l1" } };
@@ -37,7 +38,9 @@ const fetchMock = vi.fn(async (input: string) => {
   if (url.pathname === "/api/geo/suggest") {
     if (serverGate) await serverGate;
     const [lat, lon] = (url.searchParams.get("near") ?? "").split(",").map(Number);
-    const items = engine.suggest(url.searchParams.get("q") ?? "", { near: { lat, lon }, limit: 7 });
+    // Как сервер: с пунктами адреса, по ним форма видит город объявления.
+    const items = engine.suggest(url.searchParams.get("q") ?? "", { near: { lat, lon }, limit: 7 })
+      .map((h) => withSettlement(engine, h));
     return new Response(JSON.stringify({ items }), { status: 200 });
   }
   return new Response("", { status: 404 });
@@ -58,6 +61,9 @@ const cities = (): Props["cities"] => [
   { id: "c-yab", name: "Яблоновский", slug: "yablonovskiy", geo: { region: "krasnodar", centre: { lat: 44.988, lon: 38.9475 }, token: `t${token}` } },
   { id: "c-kzn", name: "Казань", slug: "kazan", geo: null },
 ];
+const otherCity = () => fireEvent.click(screen.getByRole("button", { name: A.otherCity }));
+// Город объявления под полем адреса: «В каталоге: Яблоновский».
+const catalogLine = () => screen.getByText(A.catalogCity, { exact: false }).textContent;
 
 const initial = (cityId: string): Props["initial"] => ({
   title: "Перфоратор Bosch", cityId, categoryId: "cat", description: "",
@@ -87,6 +93,8 @@ const options = () => {
 const submit = () => fireEvent.submit(screen.getByRole("button", { name: /Добавить позицию|Сохранить/ }).closest("form")!);
 const sent = (fn: typeof createListing | typeof updateListing) =>
   (fn.mock.calls[0].at(-1) as { address: unknown }).address;
+const sentCity = (fn: typeof createListing | typeof updateListing) =>
+  (fn.mock.calls[0].at(-1) as { cityId: string }).cityId;
 
 async function typeAddress(text: string) {
   fireEvent.focus(combobox());
@@ -192,26 +200,84 @@ describe("ListingForm: адрес выдачи", () => {
     expect(updateListing).not.toHaveBeenCalled();
   });
 
-  it("смена города сбрасывает адрес", async () => {
+  // Город объявления определяет адрес: выбора города рядом с поиском нет, под
+  // полем — куда отойдёт вещь, и уходит этот город, а не город поиска.
+  it("в регионе с геоданными города не выбирают: его определяет адрес", async () => {
+    renderForm();
+    expect(screen.queryByRole("combobox", { name: A.city })).not.toBeInTheDocument();
+    expect(screen.getByText(A.catalogHint)).toBeInTheDocument();
+
+    await typeAddress("базовская 21к1");
+    await waitFor(() => expect(options()[0]).toHaveTextContent("улица Базовская, 21к1"));
+    fireEvent.click(options()[0]);
+    expect(catalogLine()).toBe(`${A.catalogCity} Яблоновский`);
+    // Подпись — как сохранится: пункт и есть город объявления.
+    expect(combobox()).toHaveValue("улица Базовская, 21к1, Яблоновский");
+    submit();
+    await waitFor(() => expect(createListing).toHaveBeenCalled());
+    expect(sentCity(createListing)).toBe("c-yab");
+    expect(sent(createListing)).toMatchObject({ mode: "pick", kind: "house" });
+  });
+
+  it("пункт, который не город сервиса, отходит ближайшему городу", async () => {
+    renderForm({ cityId: "c-yab" });
+    await typeAddress("садовая новая адыгея");
+    await waitFor(() => expect(options().some((o) => o.textContent?.includes("Новая Адыгея"))).toBe(true));
+    fireEvent.click(options().find((o) => o.textContent?.includes("Новая Адыгея"))!);
+    expect(catalogLine()).toBe(`${A.catalogCity} Краснодар`);
+    submit();
+    await waitFor(() => expect(createListing).toHaveBeenCalled());
+    expect(sentCity(createListing)).toBe("c-krd");
+  });
+
+  it("правка: под сохранённым адресом — город объявления", () => {
+    renderForm({
+      cityId: "c-yab", mode: "edit", listingId: "l1",
+      savedAddress: { label: "улица Связи", precision: "street", point: { lat: 44.985, lon: 38.955 } },
+    });
+    expect(catalogLine()).toBe(`${A.catalogCity} Яблоновский`);
+  });
+
+  it("город без геоданных — отдельной ссылкой: адрес сбрасывается, уходит text с этим городом", async () => {
     renderForm({
       mode: "edit", listingId: "l1",
       savedAddress: { label: "улица Красная, 120", precision: "house", point: { lat: 45.035, lon: 38.98 } },
     });
-    fireEvent.change(screen.getByRole("combobox", { name: "Город" }), { target: { value: "c-yab" } });
-    expect(combobox()).toHaveValue("");
+    otherCity();
+    expect(screen.queryByRole("combobox", { name: A.label })).not.toBeInTheDocument();
+    // В выборе — только города без геоданных; единственный выбран сразу.
+    const select = screen.getByRole("combobox", { name: A.city });
+    expect(within(select).getAllByRole("option").map((o) => o.textContent)).toEqual([A.cityPlaceholder, "Казань"]);
+    expect(select).toHaveValue("c-kzn");
+    const text = screen.getByRole("textbox", { name: A.label });
+    expect(text).toHaveValue("");
     submit();
     await waitFor(() => expect(screen.getByText(A.required)).toBeInTheDocument());
     expect(updateListing).not.toHaveBeenCalled();
+
+    fireEvent.change(text, { target: { value: "ул. Баумана" } });
+    submit();
+    await waitFor(() => expect(updateListing).toHaveBeenCalled());
+    expect(sentCity(updateListing)).toBe("c-kzn");
+    expect(sent(updateListing)).toEqual({ mode: "text", text: "ул. Баумана" });
   });
 
-  it("подсказка, пришедшая после смены города, адрес нового города не занимает", async () => {
+  it("из текстового режима — назад к поиску адреса, адрес снова пуст", () => {
+    renderForm({ cityId: "c-kzn" });
+    fireEvent.change(screen.getByRole("textbox", { name: A.label }), { target: { value: "ул. Баумана" } });
+    fireEvent.click(screen.getByRole("button", { name: A.backToSearch }));
+    expect(combobox()).toHaveValue("");
+    expect(screen.queryByRole("combobox", { name: A.city })).not.toBeInTheDocument();
+  });
+
+  it("подсказка, пришедшая после перехода к другому городу, его адрес не занимает", async () => {
     let release = () => {};
     serverGate = new Promise((r) => { release = r; });
     renderForm();
     await typeAddress("красная 120");
     // ушли с поля: первая подсказка ждёт сервер, а город тем временем сменили
     fireEvent.blur(combobox());
-    fireEvent.change(screen.getByRole("combobox", { name: "Город" }), { target: { value: "c-kzn" } });
+    otherCity();
     await act(async () => { release(); await new Promise((r) => setTimeout(r, 20)); });
     expect(screen.getByRole("textbox", { name: A.label })).toHaveValue("");
     submit();
@@ -247,7 +313,7 @@ describe("ListingForm: адрес выдачи", () => {
       mode: "edit", listingId: "l1",
       savedAddress: { label: "улица Красная, 120", precision: "house", point: { lat: 45.035, lon: 38.98 } },
     });
-    fireEvent.change(screen.getByRole("combobox", { name: "Город" }), { target: { value: "c-kzn" } });
+    otherCity();
     expect(screen.getByRole("textbox", { name: A.label })).toHaveValue("");
   });
 

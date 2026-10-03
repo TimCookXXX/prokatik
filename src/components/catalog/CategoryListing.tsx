@@ -10,8 +10,10 @@ import {
   type City,
 } from "@/server/catalog";
 import {
-  carryParams, defaultSort, filterParams, parseFilters, sortOptionsFor, type CategorySearchParams,
+  carryParams, defaultSort, filterParams, parseFilters, sortContextOf, sortOptionsFor,
+  type CategorySearchParams,
 } from "@/lib/catalog/filters";
+import { singleCityScope, type CityScope } from "@/lib/catalog/city-scope";
 import { todayStr, addDaysStr } from "@/lib/catalog/dates";
 import { formatPrice, listingsCountLabel, ownersCountLabel } from "@/lib/catalog/format";
 import { buildAvailabilityByListing } from "@/lib/catalog/availability";
@@ -26,6 +28,7 @@ export type { CategorySearchParams } from "@/lib/catalog/filters";
 
 export async function CategoryListing({
   city, categoryIds, basePath, activeRootSlug, activeSubSlug, activeLabel, searchParams,
+  scope = singleCityScope(city.id),
 }: {
   city: City;
   categoryIds: string[];
@@ -34,16 +37,24 @@ export async function CategoryListing({
   activeSubSlug?: string;
   activeLabel: string;     // подпись на мобильной кнопке выбора раздела
   searchParams: CategorySearchParams;
+  /**
+   * Города выдачи и точка «Где» (getCityScope): с точкой — весь регион, и
+   * выдача, счётчики дерева и статистика считаются по нему. Без — сам город.
+   */
+  scope?: CityScope;
 }) {
   const today = todayStr();
-  const filters = parseFilters(searchParams, { today });
-  const [{ items, total }, stats, cats, directCounts] = await Promise.all([
-    getListingsForCategories(city.id, categoryIds, filters),
-    getCategoryStats(city.id, categoryIds),
+  const filters = parseFilters(searchParams, { today, region: scope.region });
+  const multiCity = scope.cityIds.length > 1;
+  const [{ items, total }, stats, cats, directCounts, ownCounts] = await Promise.all([
+    getListingsForCategories(scope.cityIds, categoryIds, filters),
+    getCategoryStats(scope.cityIds, categoryIds),
     getAllCategories(),
-    getListingCountsByCategory(city.id),
+    getListingCountsByCategory(scope.cityIds),
+    // Какие подкатегории вообще есть у города — их страницы живут без точки.
+    multiCity ? getListingCountsByCategory([city.id]) : undefined,
   ]);
-  const tree = buildCategoryTree(cats, directCounts);
+  const tree = buildCategoryTree(cats, directCounts, ownCounts);
 
   // Границы слайдера — из раздела. Совпали min и max (или цен нет вовсе) —
   // двигать нечего, панель покажет обычные поля ввода.
@@ -60,8 +71,8 @@ export async function CategoryListing({
   const to = filters.availableTo ?? addDaysStr(today, 6);
   const availRows = await getAvailabilityRows(items.map((i) => i.listing.id), from, to);
   const availByListing = buildAvailabilityByListing(availRows);
-  // Переносимые параметры (даты) едут дальше по каталогу: в карточки, в ветки
-  // дерева разделов и в скрытые поля фильтров — «Показать» их не теряет.
+  // Переносимые параметры (даты и «Где») едут дальше по каталогу: в карточки, в
+  // ветки дерева разделов и в скрытые поля фильтров — «Показать» их не теряет.
   const carry = carryParams(searchParams, { today });
   const carryQuery = carry.toString();
 
@@ -85,10 +96,12 @@ export async function CategoryListing({
   const listHref = withParams((q) => q.set("view", "list"));
 
   // Адреса сортировки собирает сервер: SortMenu клиентский, и функцию через
-  // границу ему не передать. Умолчание в адрес не пишется.
-  const sortOptions = sortOptionsFor().map((o) => {
+  // границу ему не передать. Умолчание в адрес не пишется; «Ближе» — только с
+  // действующей точкой «Где».
+  const sortCtx = sortContextOf(filters);
+  const sortOptions = sortOptionsFor(sortCtx).map((o) => {
     const q = filterParams(searchParams, { today });
-    if (o.value === defaultSort()) q.delete("sort"); else q.set("sort", o.value);
+    if (o.value === defaultSort(sortCtx)) q.delete("sort"); else q.set("sort", o.value);
     const qs = q.toString();
     return { ...o, href: qs ? `${basePath}?${qs}` : basePath };
   });
@@ -145,7 +158,7 @@ export async function CategoryListing({
           />
         </aside>
 
-        <div className="flex flex-1 flex-col gap-4">
+        <div className="flex min-w-0 flex-1 flex-col gap-4">
           {/* Шапка выдачи: даты слева, сортировка и вид справа. Все ссылки
             * строятся от текущих параметров, чтобы переключение одного не
             * сбрасывало остальные и не тащило номер страницы. */}
@@ -172,7 +185,8 @@ export async function CategoryListing({
                 <ListingCard
                   key={item.listing.id}
                   item={item}
-                  citySlug={city.slug}
+                  // Свой город у каждой: с «Где» в выдаче и соседние города региона.
+                  citySlug={item.citySlug}
                   availabilityMap={availByListing.get(item.listing.id) ?? new Map()}
                   from={from}
                   to={filters.availableTo}

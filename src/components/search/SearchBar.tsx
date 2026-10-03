@@ -6,16 +6,16 @@ import { Search } from "lucide-react";
 import { content } from "@theme/content";
 import { cn } from "@/lib/utils";
 import { parseDateRange } from "@/lib/catalog/filters";
+import { locationQuery, parseLocation, type UserPoint } from "@/lib/geo/location";
 import { fieldWithin } from "@/components/ui/field";
 import { Button } from "@/components/ui/button";
 import { useCurrentCity } from "@/components/layout/use-current-city";
-import {
-  WHERE_PARAMS, searchSubmitHref, type WhatValue, type WhereParams,
-} from "@/lib/search/submit-href";
+import { WHERE_PARAMS, searchSubmitHref, type WhatValue } from "@/lib/search/submit-href";
 import { WhatField } from "./WhatField";
 import { WhenChip, WhenField } from "./WhenField";
+import { WhereChip, WhereField } from "./WhereField";
 import { usePopoverLayout } from "./MobileSuggestPanel";
-import { usePanelDates } from "./panel-dates";
+import { usePanelDates, usePanelWhere } from "./panel-dates";
 import type { CityGeoContext } from "@/lib/geo/context";
 
 /** Гео-контекст города для «Где»: регион геоданных, центр, версия мини-индекса. */
@@ -28,9 +28,10 @@ export interface SearchCity {
   geo: CityGeoContext | null;
 }
 
-// Панель поиска «Что · Когда · Где»; пока в ней поля «Что» и «Когда».
-// Одна форма на поверхность: в шапке — узкая строка, в hero — большая плашка.
-// «Когда» в шапке видно с lg; ниже его открывает чип в панели подсказок.
+// Панель поиска «Что · Когда · Где». Одна форма на поверхность: в шапке —
+// узкая строка, в hero — большая плашка. «Когда» и «Где» в шапке видны с lg;
+// ниже их открывают чипы в панели подсказок. «Где» есть только в городе с
+// геоданными (geo): без них у объявлений нет точек и расстояний.
 //
 // Без JS и до гидрации это обычная GET-форма на /search: поле «Что» названо q,
 // город, даты и известное из адреса «Где» лежат скрытыми полями. После
@@ -61,6 +62,11 @@ export function SearchBar({
   // Выбранная подсказка «Что»: держится, пока текст не тронули.
   const [picked, setPicked] = useState<WhatValue | null>(null);
   const [whenSheet, setWhenSheet] = useState(false);
+  const [whereSheet, setWhereSheet] = useState(false);
+  // Гео-контекст текущего города: город шапки меняется на клиенте, а с ним —
+  // есть ли «Где» и чей мини-индекс адресов.
+  const city = cities.find((c) => c.slug === citySlug);
+  const whereCity = city?.geo ? { slug: city.slug, name: city.name, geo: city.geo } : null;
 
   // Шапка живёт в корневом layout'е и не перемонтируется: текст «Что» выводится
   // из адреса и пересчитывается при его смене — но не под руками. Иначе после
@@ -91,19 +97,42 @@ export function SearchBar({
     }) ?? null,
     [searchParams],
   );
-  const [dates, setDates] = usePanelDates(`${pathname}?${searchParams.toString()}`, fromUrl);
+  const at = `${pathname}?${searchParams.toString()}`;
+  const [dates, setDates] = usePanelDates(at, fromUrl);
 
-  // «Где» — что известно из адреса: поля в панели ещё нет, но поиск из выдачи
-  // с точкой не должен её терять.
-  const loc: WhereParams = {};
-  for (const key of WHERE_PARAMS) {
-    const v = searchParams.get(key);
-    if (v) loc[key] = v;
-  }
+  // «Где» — точка из адреса (кодек lib/geo/location: мусор — без точки), выбор
+  // в панели — черновиком, как даты. Город без геоданных поля не рисует, но
+  // точку из адреса не теряет: она едет дальше скрытыми полями.
+  const whereFromUrl = useMemo(
+    () => parseLocation(Object.fromEntries(WHERE_PARAMS.map((k) => [k, searchParams.get(k)]))),
+    [searchParams],
+  );
+  const [where, setWhereDraft] = usePanelWhere(at, whereFromUrl);
+  // Выбор «Где» бывает позже нажатия «Найти» (Enter по набранному адресу,
+  // геолокация): отправка ждёт промис и берёт точку из ref — состояние к этому
+  // моменту ещё не перерисовано.
+  const whereRef = useRef(where);
+  whereRef.current = where;
+  const setWhere = (p: UserPoint | null) => {
+    whereRef.current = p;
+    setWhereDraft(p);
+  };
+  const pending = useRef<Promise<void> | null>(null);
+  const track = (p: Promise<void>) => {
+    pending.current = p;
+    void p.finally(() => { if (pending.current === p) pending.current = null; });
+  };
+  const loc = where ? locationQuery(where) : null;
+  const suggestWhere = whereCity && loc ? { loc: loc.loc, lp: loc.lp } : null;
 
   const submit = (what: WhatValue) => {
+    if (pending.current) {
+      void pending.current.then(() => submit(what));
+      return;
+    }
+    const point = whereRef.current;
     const href = searchSubmitHref(
-      { what, from: dates?.from, to: dates?.to, loc },
+      { what, from: dates?.from, to: dates?.to, loc: point ? locationQuery(point) : null },
       { pathname, searchParams, citySlug },
     );
     if (!href) {
@@ -142,7 +171,7 @@ export function SearchBar({
       {citySlug && <input type="hidden" name="city" value={citySlug} />}
       {dates && <input type="hidden" name="from" value={dates.from} />}
       {dates && <input type="hidden" name="to" value={dates.to} />}
-      {WHERE_PARAMS.map((key) => loc[key] && <input key={key} type="hidden" name={key} value={loc[key]} />)}
+      {loc && WHERE_PARAMS.map((key) => loc[key] && <input key={key} type="hidden" name={key} value={loc[key]} />)}
     </>
   );
 
@@ -173,6 +202,7 @@ export function SearchBar({
           id="what-header"
           citySlug={citySlug}
           dates={dates}
+          where={suggestWhere}
           value={text}
           onChange={onText}
           onPick={onPick}
@@ -183,12 +213,19 @@ export function SearchBar({
           inputClassName="text-sm"
           clearClassName="hidden sm:grid"
           className="flex-1"
-          panelToolbar={<WhenChip value={dates} onClick={() => setWhenSheet(true)} />}
+          panelToolbar={
+            <>
+              {/* Даты короче адреса: недостаток ширины ест чип «Где», а не они. */}
+              <span className="flex shrink-0"><WhenChip value={dates} onClick={() => setWhenSheet(true)} /></span>
+              {whereCity && <WhereChip value={where} onClick={() => setWhereSheet(true)} />}
+            </>
+          }
         />
-        {/* Ниже lg поля «Когда» в шапке нет — выбранные даты выдаёт точка на
-          * кнопке поиска (ширину поля она не ест), а сами они видны в чипе
-          * панели подсказок. */}
+        {/* Ниже lg полей «Когда» и «Где» в шапке нет — выбор выдаёт точка на
+          * кнопке поиска (ширину поля она не ест), а сами значения видны в
+          * чипах панели подсказок. */}
         {dates && <span className="sr-only lg:hidden">{content.search.when.datesSet}</span>}
+        {whereCity && where && <span className="sr-only lg:hidden">{content.search.where.set}</span>}
         <span aria-hidden="true" className="hidden h-5 w-px shrink-0 bg-border lg:block" />
         <WhenField
           variant="header"
@@ -201,6 +238,24 @@ export function SearchBar({
           returnFocus={() => inputRef.current}
           className="hidden lg:flex"
         />
+        {whereCity && (
+          <>
+            <span aria-hidden="true" className="hidden h-5 w-px shrink-0 bg-border lg:block" />
+            <WhereField
+              // Свой мини-индекс и центр у каждого города: смена города — новое поле.
+              key={whereCity.slug}
+              variant="header"
+              city={whereCity}
+              value={where}
+              onChange={setWhere}
+              track={track}
+              sheetOpen={whereSheet}
+              onSheetOpenChange={setWhereSheet}
+              returnFocus={() => inputRef.current}
+              className="lg:w-40 xl:w-52"
+            />
+          </>
+        )}
         {hidden}
         {/* Единственная лупа — и есть кнопка: зелёная справа, как «Найти» в hero. */}
         <button
@@ -209,7 +264,7 @@ export function SearchBar({
           className="relative flex h-7 w-7 shrink-0 items-center justify-center rounded-sm bg-primary text-primary-foreground transition-transform active:scale-[0.94]"
         >
           <Search className="h-3.5 w-3.5" aria-hidden="true" />
-          {dates && (
+          {(dates || (whereCity && where)) && (
             <span
               aria-hidden="true"
               className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-accent ring-2 ring-background lg:hidden"
@@ -224,12 +279,21 @@ export function SearchBar({
     <form
       {...formProps}
       aria-label={content.search.heroLabel}
-      className={cn(fieldWithin, "flex flex-col gap-2 p-2 text-left md:flex-row md:items-stretch", className)}
+      className={cn(
+        fieldWithin,
+        "flex flex-col gap-2 p-2 text-left md:flex-row md:items-stretch",
+        // С wide hero делит ряд с плитками, и колонка уже ≈ 540 px: три поля
+        // и кнопка в строку там не входят. «Что» уходит в свою строку сверху,
+        // «Когда», «Где» и «Найти» — под ним.
+        whereCity && "wide:flex-wrap",
+        className,
+      )}
     >
       <WhatField
         id="what-hero"
         citySlug={citySlug}
         dates={dates}
+        where={suggestWhere}
         value={text}
         onChange={onText}
         onPick={onPick}
@@ -238,12 +302,37 @@ export function SearchBar({
         labelClassName="text-xs text-muted-foreground"
         placeholder={content.search.heroPlaceholder}
         inputClassName="py-0.5 text-base font-semibold placeholder:font-normal md:text-[17px]"
-        className="flex-1 justify-center gap-0.5 px-3 py-1.5 md:px-4"
+        className={cn("flex-1 justify-center gap-0.5 px-3 py-1.5 md:px-4", whereCity && "wide:basis-full")}
         // Ниже lg — та же панель подсказок, что у шапки: её поле и получает фокус.
         redirectFocus={() => document.querySelector<HTMLElement>("[data-site-header] [data-what-input]")}
       />
-      <span aria-hidden="true" className="mx-3 h-px shrink-0 bg-border md:mx-0 md:my-2 md:h-auto md:w-px" />
-      <WhenField variant="hero" value={dates} onChange={setDates} className="md:w-48 md:shrink-0" />
+      <span
+        aria-hidden="true"
+        className={cn(
+          "mx-3 h-px shrink-0 bg-border md:mx-0 md:my-2 md:h-auto md:w-px",
+          whereCity && "wide:my-0 wide:h-px wide:basis-full",
+        )}
+      />
+      <WhenField
+        variant="hero"
+        value={dates}
+        onChange={setDates}
+        className={cn("md:w-48 md:shrink-0", whereCity && "wide:w-auto wide:flex-1")}
+      />
+      {whereCity && (
+        <>
+          <span aria-hidden="true" className="mx-3 h-px shrink-0 bg-border md:mx-0 md:my-2 md:h-auto md:w-px" />
+          <WhereField
+            key={whereCity.slug}
+            variant="hero"
+            city={whereCity}
+            value={where}
+            onChange={setWhere}
+            track={track}
+            className="md:w-48 md:shrink-0 lg:w-56 wide:w-auto wide:flex-1"
+          />
+        </>
+      )}
       {hidden}
       <Button type="submit" className="h-12 shrink-0 px-6 text-base font-semibold md:h-auto md:min-h-12">
         {content.nav.search}

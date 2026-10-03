@@ -5,47 +5,107 @@
 // src/server/geocoder.ts, браузер: мини-индекс в components/search).
 
 import { content } from "@theme/content";
-import type { AddressHit } from "@/lib/geocoder/types";
+import type { Geocoder } from "@/lib/geocoder";
+import type { AddressHit, HitSettlement } from "@/lib/geocoder/types";
 import { normalize } from "@/lib/search/text";
 import { haversineKm, type GeoPoint } from "./point";
 import { listingPrecision, type GeoPrecision } from "./precision";
 
 export type { AddressHit } from "@/lib/geocoder/types";
 
+type LabelHit = Pick<AddressHit, "kind" | "title" | "parts" | "settlement">;
+
+const clip = (s: string, max: number) => s.trim().slice(0, max).trim();
+
+// Назван ли пункт в имени хита: «СНТ Кубаночка, 15», «Лазурный, 1-е отделение», сам «Яблоновский».
+const namedIn = (name: string, settlement: string) => ` ${normalize(name)} `.includes(` ${normalize(settlement)} `);
+
+/**
+ * Пункт для подписи хита — из settlementOf (микрорайоны и округа там
+ * пропущены, поэтому у «Юбилейного» это Краснодар, у «Меги» — Новая Адыгея).
+ * У места и объекта пункты, уже названные в имени, пропускаются: сам СНТ или
+ * посёлок в черте города подписывается пунктом над ним («СНТ Мечта,
+ * Краснодар», «Лазурный, Краснодар»), пункт без пункта над ним — ничем. СНТ
+ * называется вместе с пунктом над ним: одноимённых СНТ в регионе по нескольку
+ * («улица Вишнёвая, СНТ Кубань, Берёзовый»). Хит без пунктов (не прошёл через
+ * settlementOf) — пункт из частей адреса: у улицы и дома это «Краснодар» или
+ * «Краснодар, Юбилейный» (берётся город), у объекта — то же; у места пункт
+ * не известен (null).
+ */
+function settlementLabel(hit: LabelHit, name: string, area: boolean, cityName: string): string | null {
+  const s = hit.settlement;
+  if (s?.names.length) {
+    let i = 0;
+    while (area && i < s.names.length && namedIn(name, s.names[i])) i++;
+    if (i === s.names.length) return null;
+    const above = s.kinds?.[i] === "snt" ? s.names[i + 1] : undefined;
+    return above ? `${s.names[i]}, ${above}` : s.names[i];
+  }
+  const place = hit.parts?.place?.split(",")[0].trim() || null;
+  if (area && place && namedIn(name, place)) return null;
+  if (hit.kind === "street" || hit.kind === "house") return place ?? cityName;
+  return hit.kind === "poi" ? place : null;
+}
+
+/**
+ * «{имя}, {пункт}». Подпись всегда называет свой пункт, а не город каталога
+ * (docs/decisions/0021). Не влезает в `max` — режется имя, а не пункт.
+ */
+function withSettlement(name: string, settlement: string | null, max = Infinity): string {
+  if (!settlement) return clip(name, max);
+  const tail = `, ${settlement}`;
+  if (tail.length >= max) return clip(settlement, max);
+  return `${clip(name, max - tail.length)}${tail}`;
+}
+
+/** Имя хита без пункта: полное (может быть с домом) или публичное (без дома), и место ли это (пункт может быть в имени). */
+function labelName(hit: LabelHit, full: boolean): { name: string; area: boolean } {
+  if (hit.kind === "place" || hit.kind === "poi") return { name: hit.title, area: true };
+  const street = hit.parts?.street ?? (hit.kind === "street" ? hit.title : null);
+  // Дом без улицы (адрес по пункту: «СНТ Кубаночка, 15») — пункт уже в title,
+  // публично — сам пункт.
+  if (!street) return { name: full ? hit.title : hit.parts?.place ?? hit.title, area: true };
+  // Номер есть только в title дома, улица — в parts. У улицы title и есть улица:
+  // пункт ей пишется всегда, даже названный в ней («Яблоновский проезд, Яблоновский»).
+  return { name: full ? hit.title : street, area: false };
+}
+
+function label(hit: LabelHit, cityName: string, full: boolean, max?: number): string {
+  const { name, area } = labelName(hit, full);
+  return withSettlement(name, settlementLabel(hit, name, area, cityName), max);
+}
+
 /**
  * Полная подпись хита — для поля и `listings.address`: «улица Базовская, 21к1,
- * Яблоновский»; в городе `cityName` — без города («улица Красная, 120»), у
- * пункта и объекта — его название. Может содержать номер дома. Дом без
- * улицы (адрес по пункту: «СНТ Кубаночка, 1») пункт уже несёт в title.
+ * Яблоновский», «улица Красная, 120, Краснодар», «Юбилейный, Краснодар»,
+ * «Мега, Новая Адыгея». Может содержать номер дома. Пункт — свой
+ * (settlementLabel); `cityName` нужен, только если пунктов у хита нет.
  */
-export function hitLabel(hit: Pick<AddressHit, "kind" | "title" | "parts">, cityName: string): string {
-  const place = hit.parts?.place ?? null;
-  if (hit.kind === "place" || hit.kind === "poi" || !place || place === cityName) return hit.title;
-  if (hit.kind === "house" && !hit.parts?.street) return hit.title;
-  return `${hit.title}, ${place}`;
+export function hitLabel(hit: LabelHit, cityName: string): string {
+  return label(hit, cityName, true);
 }
 
 /**
  * Публичная подпись адреса объявления (`listings.location`) — **без номера
- * дома**: дом и улица — «улица Красная», с пунктом, если он не город
- * объявления («улица Базовская, Яблоновский»; город OwnerCard допишет сам);
- * объект — его название («ЖК Панорама»), пункт — название пункта.
+ * дома**, со своим пунктом: улица — «улица Красная, Краснодар», «улица
+ * Базовская, Яблоновский»; объект или микрорайон — «ЖК Панорама, Краснодар»,
+ * «Мега, Новая Адыгея»; пункт или СНТ — с пунктом над ним, если он есть
+ * («Лазурный, Краснодар», «СНТ Мечта, Южный», «Яблоновский»). OwnerCard
+ * показывает её как есть, город каталога не дописывает.
  */
-export function publicLabel(hit: Pick<AddressHit, "kind" | "title" | "parts">, cityName: string): string {
-  if (hit.kind === "poi" || hit.kind === "place") return hit.title;
-  const place = hit.parts?.place ?? null;
-  // Номер есть только в title дома, улица — в parts. У улицы title и есть
-  // улица. Дом без улицы (адрес по пункту: «СНТ Кубаночка, 15») — пункт.
-  const street = hit.parts?.street ?? (hit.kind === "street" ? hit.title : null);
-  if (!street) return place ?? cityName;
-  return place && place !== cityName ? `${street}, ${place}` : street;
+export function publicLabel(hit: LabelHit, cityName: string): string {
+  return label(hit, cityName, false);
 }
 
-/** Подпись точки геолокации по обратному геокодеру: дом и объект — адрес; улица и пункт — «рядом: …». */
-export function reverseLabel(hit: Pick<AddressHit, "kind" | "title" | "parts"> | null, cityName: string): string | null {
+/**
+ * Подпись точки геолокации по обратному геокодеру — **без номера дома**: она
+ * уходит в адрес страницы (`la`), а с ним в «поделиться», историю и Метрику.
+ * Дом — его улица, объект — название; улица и пункт без дома рядом — «рядом: …».
+ */
+export function reverseLabel(hit: LabelHit | null, cityName: string): string | null {
   if (!hit) return null;
-  if (hit.kind === "house" || hit.kind === "poi") return hitLabel(hit, cityName);
-  return content.address.near(hitLabel(hit, cityName));
+  if (hit.kind === "house" || hit.kind === "poi") return publicLabel(hit, cityName);
+  return content.address.near(publicLabel(hit, cityName));
 }
 
 /** Есть ли в запросе номер: дома знает только сервер, улицы и пункты — и мини-индекс браузера. */
@@ -186,7 +246,63 @@ export interface ListingAddressFields {
   geoPrecision: GeoPrecision;
 }
 
-const clip = (s: string, max: number) => s.trim().slice(0, max).trim();
+/** Город сервиса, к которому может отойти адрес: активный город того же региона геоданных. */
+export interface ListingCityCandidate {
+  id: string;
+  name: string;
+  /** Предложный падеж («Яблоновском»): пункт в данных сверяется и с ним. */
+  nameLocative?: string | null;
+  centre: GeoPoint | null;
+}
+
+/**
+ * Город объявления по его адресу — город определяет адрес, а не выбор
+ * владельца. Пункт адреса или пункт над ним (СНТ → посёлок → город) с именем
+ * города сервиса — этот город: микрорайон, ЖК и посёлок в черте Краснодара —
+ * Краснодар. Иначе (Козет, Новая Адыгея, Энем, СНТ на отшибе) — ближайший
+ * по центру город региона; расстояние — от центра верхнего пункта, а не от
+ * самой точки, чтобы весь посёлок отходил к одному городу. Равные расстояния
+ * решает имя, затем id: от порядка списка ответ не зависит. null — городов с
+ * центром нет. Дальше 40 км адрес отвергает listingAddressOf.
+ *
+ * Общая для формы (подпись «В каталоге: …» до сохранения), сервера
+ * (src/server/listing-address.ts — он и решает) и сида.
+ */
+export function listingCityOf<C extends ListingCityCandidate>(
+  settlement: HitSettlement | null | undefined, point: GeoPoint, cities: readonly C[],
+): C | null {
+  const from = settlement ?? point;
+  for (const name of settlement?.names ?? []) {
+    const key = normalize(name);
+    const named = cities.filter((c) => normalize(c.name) === key || (!!c.nameLocative && normalize(c.nameLocative) === key));
+    if (named.length > 0) return nearestCity(named, from) ?? named[0];
+  }
+  return nearestCity(cities, from);
+}
+
+function nearestCity<C extends ListingCityCandidate>(cities: readonly C[], from: GeoPoint): C | null {
+  let best: C | null = null;
+  let bestKm = Infinity;
+  for (const c of cities) {
+    if (!c.centre) continue;
+    const km = haversineKm(from, c.centre);
+    const tie = best !== null && Math.abs(km - bestKm) < 1e-9;
+    if (tie ? (c.name.localeCompare(best!.name, "ru") || c.id.localeCompare(best!.id)) < 0 : km < bestKm) {
+      best = c;
+      bestKm = km;
+    }
+  }
+  return best;
+}
+
+/**
+ * Обе подписи адреса объявления по хиту, в длину колонок: полная (`address`)
+ * и публичная (`location`). Режется имя, пункт остаётся. Общая для формы
+ * (listingAddressOf) и пересчёта подписей сида и базы (geo:backfill --relabel).
+ */
+export function listingLabelsOf(hit: LabelHit, cityName: string): Pick<ListingAddressFields, "address" | "location"> {
+  return { address: label(hit, cityName, true, ADDRESS_MAX), location: label(hit, cityName, false, LOCATION_MAX) };
+}
 
 /**
  * Хит геокодера → колонки адреса объявления: полная подпись (может быть с
@@ -196,7 +312,7 @@ const clip = (s: string, max: number) => s.trim().slice(0, max).trim();
  * src/server/listing-address.ts) и backfill сида (scripts/geo-backfill.ts).
  */
 export function listingAddressOf(
-  hit: Pick<AddressHit, "kind" | "title" | "subtitle" | "parts" | "precision" | "lat" | "lon">,
+  hit: Pick<AddressHit, "kind" | "title" | "subtitle" | "parts" | "settlement" | "precision" | "lat" | "lon">,
   city: { name: string; centre: GeoPoint | null },
 ): { ok: true; fields: ListingAddressFields } | { ok: false; reason: "coarse" | "far" } {
   const precision = listingPrecision(hit);
@@ -205,13 +321,25 @@ export function listingAddressOf(
   return {
     ok: true,
     fields: {
-      address: clip(hitLabel(hit, city.name), ADDRESS_MAX),
-      location: clip(publicLabel(hit, city.name), LOCATION_MAX),
+      ...listingLabelsOf(hit, city.name),
       lat: hit.lat,
       lon: hit.lon,
       geoPrecision: precision,
     },
   };
+}
+
+/**
+ * Хит уже сохранённого адреса — по подписи и точке, без id: подсказки на
+ * подпись рядом с точкой, первая не дальше 50 м от неё, иначе обратный
+ * геокодер точки. По нему сид сверяет город объявления с точкой
+ * (scripts/seed-real.ts) — тем же путём, что и форма (settlementOf хита).
+ */
+export function storedAddressHit(
+  g: Pick<Geocoder, "suggest" | "reverse">, address: string | null, point: GeoPoint,
+): AddressHit | null {
+  const near = address ? g.suggest(address, { near: point, limit: 10 }).find((h) => haversineKm(h, point) <= SAME_HIT_KM) : null;
+  return near ?? g.reverse(point.lat, point.lon);
 }
 
 /** Свободный текст адреса (город без геоданных): точки нет, подпись — сам текст. */

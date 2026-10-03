@@ -1,9 +1,12 @@
 import Link from "next/link";
-import { BadgeCheck, MapPin, CalendarClock } from "lucide-react";
+import { BadgeCheck, MapPin, CalendarClock, Navigation } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
 import { Button } from "@/components/ui/button";
 import { LoginTrigger } from "@/components/auth/LoginTrigger";
 import { formatMonthYearGen } from "@/lib/catalog/dates";
+import { DISTANCE_TITLE, distanceLabel } from "@/lib/geo/distance";
+import type { GeoPrecision } from "@/lib/geo/precision";
+import type { ListingDistance } from "@/server/catalog";
 
 // Блок продавца под фото одной строкой: аватар, имя-ссылка с бейджем проверки,
 // под ними справка (локация, на сайте с) мелким кеглем, справа — действия.
@@ -11,17 +14,20 @@ import { formatMonthYearGen } from "@/lib/catalog/dates";
 // Карты-заглушки тут больше нет. Она занимала 280×220 ради серой сетки и
 // названия города, которое и так стоит строкой левее; интеграции карт нет, и
 // пустая рамка только отодвигала описание вниз.
-/* Город дописывается к подписи сам: в location его нет, если пункт адреса и
- * есть город объявления. Подпись, равная городу (адрес — сам Яблоновский или
- * текст «Казань» в городе без геоданных), второй раз его не повторяет. */
-function placeLine(location: string | null | undefined, cityName: string): string {
+/* Подпись адреса с точкой (house, street, place) уже называет свой пункт —
+ * «улица Базовская, Яблоновский», «Мега, Новая Адыгея» — и показывается как
+ * есть: город каталога после неё читался бы так, будто Новая Адыгея — в
+ * Краснодаре. Город дописывается только к подписи без точки (`city`: текст в
+ * городе без геоданных или строка до backfill), и то если она не сам город. */
+function placeLine(location: string | null | undefined, precision: GeoPrecision, cityName: string): string {
   const label = location?.trim();
-  if (!label || label.toLowerCase() === cityName.toLowerCase()) return cityName;
+  if (!label) return cityName;
+  if (precision !== "city" || label.toLowerCase() === cityName.toLowerCase()) return label;
   return `${label}, ${cityName}`;
 }
 
 export function OwnerCard({
-  name, href, image, isVerified, location, cityName, createdAt,
+  name, href, image, isVerified, location, geoPrecision, cityName, distance = null, createdAt,
   chatHref, isAuthed, isOwn, authProps,
 }: {
   name: string;
@@ -33,7 +39,11 @@ export function OwnerCard({
    * номера дома. Полный адрес и точка сюда не приходят вовсе.
    */
   location?: string | null;
+  /** Точность адреса (listings.geo_precision): у `city` подпись без пункта, к ней дописывается город. */
+  geoPrecision: GeoPrecision;
   cityName: string;
+  /** Расстояние от точки «Где» из адреса страницы; null — точки нет. */
+  distance?: ListingDistance | null;
   createdAt: Date;
   /** Переписка по этому объявлению: существующая откроется, новая заведётся. */
   chatHref: string;
@@ -75,8 +85,14 @@ export function OwnerCard({
         <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
           <span className="inline-flex items-center gap-1.5">
             <MapPin className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-            {placeLine(location, cityName)}
+            {placeLine(location, geoPrecision, cityName)}
           </span>
+          {distance && (
+            <span title={DISTANCE_TITLE} className="inline-flex items-center gap-1.5 whitespace-nowrap">
+              <Navigation className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              {distanceLabel(distance.km, distance.approx)}
+            </span>
+          )}
           <span className="inline-flex items-center gap-1.5">
             <CalendarClock className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
             На сайте с {formatMonthYearGen(createdAt)}

@@ -78,6 +78,17 @@ describe("citySwitchHref", () => {
       .toBe("/search?q=drel&city=spb");
   });
 
+  // Точка «Где» описывает место в покинутом городе; «Ближе» без неё не от чего
+  // считать — уходит вместе с ней.
+  it("drops «Где» and the nearest-first sort", () => {
+    expect(citySwitchHref(
+      "/search",
+      "?q=drel&loc=p%3A45.035%2C38.975&la=%D1%83%D0%BB.&src=geo&lp=s&sort=near&view=list",
+      "spb",
+    )).toBe("/search?q=drel&view=list&city=spb");
+    expect(citySwitchHref("/krasnodar/instrumenty", "?loc=p%3A45.035%2C38.975&lp=s", "spb")).toBe("/spb");
+  });
+
   it("replaces the previous city instead of appending one", () => {
     expect(citySwitchHref("/search", "?city=kazan", "spb")).toBe("/search?city=spb");
   });

@@ -57,6 +57,28 @@ describe("ListingFilters", () => {
     expect(hiddenField("sort")).toHaveValue("price_asc");
   });
 
+  // «Где» — тоже состояние верхней панели: без скрытых копий «Показать» в
+  // фильтрах цены терял бы точку, а с ней расстояния и «Ближе».
+  it("переносит точку «Где» и «Ближе»", () => {
+    const carry = carryParams({ loc: "p:44.98812,38.94811", la: "Яблоновский", lp: "t", src: "x" });
+    render(
+      <ListingFilters
+        basePath="/krasnodar/tools"
+        state={{}}
+        hidden={{ ...Object.fromEntries(carry), sort: "near" }}
+      />,
+    );
+    const hiddenField = (name: string) =>
+      document.querySelector<HTMLInputElement>(`input[type="hidden"][name="${name}"]`);
+
+    // Точка — кодеком: три знака, мусор в src отброшен.
+    expect(hiddenField("loc")).toHaveValue("p:44.988,38.948");
+    expect(hiddenField("la")).toHaveValue("Яблоновский");
+    expect(hiddenField("lp")).toHaveValue("t");
+    expect(hiddenField("src")).toBeNull();
+    expect(hiddenField("sort")).toHaveValue("near");
+  });
+
   // Пустые значения полями не становятся: иначе адрес обрастал бы `view=&from=`.
   // Половинчатые даты carryParams не переносит вовсе.
   it("не создаёт полей для незаданных параметров", () => {

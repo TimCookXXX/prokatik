@@ -10,7 +10,7 @@
 // (getCitiesGeo). Функции принимают слаг города: регион и центр берутся из
 // его гео-контекста. Город без геоданных — «не умею» ([] / null).
 
-import { buildClientIndex, Engine, type Geocoder } from "@/lib/geocoder";
+import { buildClientIndex, Engine, withSettlement, type Geocoder } from "@/lib/geocoder";
 import { buildIndex } from "@/lib/geocoder/index-build";
 import type { AddressHit, GeoIndexData } from "@/lib/geocoder/types";
 import type { GeoPoint } from "@/lib/geo/point";
@@ -72,8 +72,9 @@ async function cityGeo(citySlug: string): Promise<CityGeoContext | null> {
 export const SUGGEST_LIMIT = 7;
 
 /**
- * Подсказки адресов — сразу с координатами и точностью. Без `near` ранжирует от
- * центра города: иначе движок взял бы центр самого крупного пункта региона, и
+ * Подсказки адресов — сразу с координатами, точностью и населёнными пунктами
+ * (по ним форма объявления показывает город, к которому отойдёт адрес). Без
+ * `near` ранжирует от центра города: иначе движок взял бы центр самого крупного пункта региона, и
  * в Яблоновском «Гагарина 1» уезжала бы в Краснодар.
  */
 export async function suggestAddresses(
@@ -85,9 +86,10 @@ export async function suggestAddresses(
   if (!geo) return [];
   const engine = await getRegionGeocoder(geo.region);
   if (!engine) return [];
-  return engine.geocoder
+  const g = engine.geocoder;
+  return g
     .suggest(text, { limit: opts.limit ?? SUGGEST_LIMIT, near: opts.near ?? geo.centre })
-    .map(slimHit);
+    .map((h) => slimHit(withSettlement(g, h)));
 }
 
 /** Точка → ближайший адрес: дом ≤ 60 м, иначе улица, иначе населённый пункт; далеко от всего — null. */
@@ -96,7 +98,7 @@ export async function reverseGeocode(p: GeoPoint, citySlug: string): Promise<Add
   if (!geo) return null;
   const engine = await getRegionGeocoder(geo.region);
   const hit = engine?.geocoder.reverse(p.lat, p.lon) ?? null;
-  return hit ? slimHit(hit) : null;
+  return hit ? slimHit(withSettlement(engine!.geocoder, hit)) : null;
 }
 
 /** Мини-индекс браузера (улицы, пункты, объекты — без домов) и его метка; null — адресов нет. */

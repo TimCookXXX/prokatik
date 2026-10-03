@@ -6,7 +6,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { CsvError, parseCsv, type CsvRow } from "../src/lib/csv";
-import { parseSeedData, type SeedData } from "../src/lib/seed/rows";
+import { parseSeedData, type SeedCityOfPoint, type SeedData } from "../src/lib/seed/rows";
 import {
   seedPhotoManifestSchema, type SeedPhotoManifest,
 } from "../src/lib/seed/photos";
@@ -36,13 +36,16 @@ async function readCsv(name: string): Promise<CsvRow[]> {
   }
 }
 
-/** Разбирает таблицы целиком и печатает все ошибки разом, а не первую. */
-export async function readSeedData(): Promise<SeedData> {
+/**
+ * Разбирает таблицы целиком и печатает все ошибки разом, а не первую.
+ * `cityOfPoint` — сверка города объявления с его точкой (scripts/seed-real.ts).
+ */
+export async function readSeedData(opts: { cityOfPoint?: SeedCityOfPoint } = {}): Promise<SeedData> {
   const [cities, users, listings] = await Promise.all([
     readCsv("cities.csv"), readCsv("users.csv"), readCsv("listings.csv"),
   ]);
 
-  const parsed = parseSeedData({ cities, users, listings });
+  const parsed = parseSeedData({ cities, users, listings }, opts);
   if (!parsed.ok) {
     console.error(`Таблицы не прошли проверку (${parsed.issues.length}):\n`);
     for (const issue of parsed.issues) {

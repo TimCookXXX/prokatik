@@ -144,4 +144,15 @@ describe("BookingWidget — выбор дат", () => {
     expect(callback.searchParams.get("from")).toBe("2026-09-04");
     expect(callback.searchParams.get("to")).toBe("2026-09-10");
   });
+
+  // «Где» целиком — точка, подпись, источник и точность: по нему OwnerCard
+  // показывает расстояние, и после выбора дат перезагрузка его не теряет.
+  it("«Где» переживает выбор дат целиком", () => {
+    const where = { loc: "p:44.988,38.948", la: "улица Базовская, Яблоновский", src: "geo", lp: "s" };
+    window.history.replaceState(null, "", `${base.pathname}?${new URLSearchParams(where)}`);
+    render(<BookingWidget {...base} handoverPickup handoverDelivery={false} />);
+
+    fireEvent.click(day("2026-09-10"));
+    expect(Object.fromEntries(query())).toEqual({ ...where, from: "2026-09-04", to: "2026-09-10" });
+  });
 });

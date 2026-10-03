@@ -16,6 +16,8 @@ import { auth } from "@/lib/auth";
 import { pickCitySlug } from "@/lib/catalog/current-city";
 import { CITY_COOKIE } from "@/lib/catalog/city-cookie";
 import type { CityGeoContext } from "@/lib/geo/context";
+import { parseLocation } from "@/lib/geo/location";
+import { singleCityScope, type CityScope } from "@/lib/catalog/city-scope";
 import { getActiveCities, type City } from "@/server/catalog";
 import { geoDataToken, isoSeconds } from "@/server/geocoder-index";
 
@@ -66,7 +68,8 @@ export async function resolveViewerCity(): Promise<City | null> {
  * Город для формы нового объявления: мой город → кука → первый активный.
  *
  * Порядок обратный: вещь лежит там, где человек живёт, а не там, где он сейчас
- * листает чужой город. Поле остаётся редактируемым, цена ошибки — один клик.
+ * листает чужой город. В городе с геоданными это лишь регион поиска адреса —
+ * город объявления определит сам адрес.
  */
 export async function resolveOwnCity(): Promise<City | null> {
   const active = await getActiveCities();
@@ -146,4 +149,32 @@ export async function getCitiesGeo(
 /** Сброс кэша гео-контекста: правка города в админке, тесты. */
 export function invalidateCitiesGeo(): void {
   G.__inrentaCitiesGeo = undefined;
+}
+
+// ------------------------------------------------------------ города выдачи
+
+/**
+ * Активные города региона геоданных: точка «Где» снимает границу города, и
+ * выдача идёт по всем им (Краснодар и Яблоновский — один регион). Берётся из
+ * того же закэшированного на запрос списка, что и шапка: лишнего запроса нет.
+ */
+export async function getRegionCityIds(region: string): Promise<string[]> {
+  return (await getActiveCities()).filter((c) => c.geoRegion === region).map((c) => c.id);
+}
+
+/**
+ * Набор городов и точка «Где» для страницы города, раздела или /search. Город
+ * при этом не меняется — ни в адресе, ни в куке: «Где» лишь расширяет выдачу
+ * до региона. В городе без геоданных точка не действует вовсе: у объявлений
+ * там нет точек, и «Где» на такой странице не рисуется.
+ */
+export async function getCityScope(
+  city: Pick<City, "id" | "slug">,
+  sp: { loc?: string; la?: string; src?: string; lp?: string },
+): Promise<CityScope> {
+  const geo = (await getCitiesGeo()).get(city.slug) ?? null;
+  const near = geo ? parseLocation(sp) : null;
+  if (!geo || !near) return singleCityScope(city.id, geo !== null);
+  const cityIds = [city.id, ...(await getRegionCityIds(geo.region)).filter((id) => id !== city.id)];
+  return { region: true, near, cityIds, nearby: cityIds.length > 1 };
 }

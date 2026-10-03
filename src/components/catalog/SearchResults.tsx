@@ -18,8 +18,10 @@ import {
 } from "@/server/catalog";
 import { rankListingIds, type RankedIds } from "@/server/search";
 import {
-  carryParams, defaultSort, filterParams, parseFilters, sortOptionsFor, type CategorySearchParams,
+  carryParams, defaultSort, filterParams, parseFilters, sortContextOf, sortOptionsFor,
+  type CategorySearchParams,
 } from "@/lib/catalog/filters";
+import { singleCityScope, type CityScope } from "@/lib/catalog/city-scope";
 import { todayStr, addDaysStr } from "@/lib/catalog/dates";
 import { buildAvailabilityByListing } from "@/lib/catalog/availability";
 import { ListingCard } from "@/components/catalog/ListingCard";
@@ -30,25 +32,31 @@ import { DateRangeFilter } from "@/components/catalog/DateRangeFilter";
 import { ViewToggle, parseView } from "@/components/catalog/ViewToggle";
 
 export async function SearchResults({
-  city, q, searchParams,
+  city, q, searchParams, scope = singleCityScope(city.id),
 }: {
   city: City;
   q: string;
   searchParams: CategorySearchParams;
+  /**
+   * Города выдачи и точка «Где» (getCityScope): с точкой — весь регион, и
+   * индекс поиска, выдача и фасеты считаются по нему. Без — сам город.
+   */
+  scope?: CityScope;
 }) {
   // Категории и ранжирование идут отдельной волной, а не в общем Promise.all
   // ниже: от них зависят narrowIds и набор id, то есть сам запрос выдачи. На
   // витрине города такой зависимости нет — там набор разделов задаёт страница.
-  const [cats, ranked] = await Promise.all([getAllCategories(), rankQuery(city, q)]);
+  const [cats, ranked] = await Promise.all([getAllCategories(), rankQuery(scope.cityIds, q)]);
   // Условие запроса: id из индекса; индекс упал — ILIKE по тексту; запроса нет
   // или в нём нет слов для поиска (одни стоп-слова) — весь город.
   const match: SearchMatch = ranked?.ids ? { ids: ranked.ids }
     : ranked === undefined ? { text: q } : { text: "" };
   // Без набора id сортировать по релевантности нечем — тогда и умолчание, и
   // меню как без запроса.
-  const sortCtx = { q: "ids" in match ? q : undefined };
+  const rankedQ = "ids" in match ? q : undefined;
   const today = todayStr();
-  const filters = parseFilters(searchParams, { ...sortCtx, today });
+  const filters = parseFilters(searchParams, { q: rankedQ, region: scope.region, today });
+  const sortCtx = sortContextOf(filters, rankedQ);
 
   // Сужение по разделу: слаг из адреса → корень и все его подкатегории. Раздела
   // нет или слаг чужой — сужения нет, ищем по всему городу.
@@ -60,8 +68,8 @@ export async function SearchResults({
     : undefined;
 
   const [{ items, total }, facets] = await Promise.all([
-    searchListings(city.id, match, filters, narrowIds),
-    getSearchFacets(city.id, match, filters),
+    searchListings(scope.cityIds, match, filters, narrowIds),
+    getSearchFacets(scope.cityIds, match, filters),
   ]);
 
   // Занятость всех карточек страницы одним запросом: на выбранные даты, а без
@@ -72,7 +80,7 @@ export async function SearchResults({
   const to = filters.availableTo ?? addDaysStr(today, 6);
   const availRows = await getAvailabilityRows(items.map((i) => i.listing.id), from, to);
   const availByListing = buildAvailabilityByListing(availRows);
-  // Переносимые параметры (даты) — в ссылки карточек и скрытые поля фильтров.
+  // Переносимые параметры (даты и «Где») — в ссылки карточек и скрытые поля фильтров.
   const carry = carryParams(searchParams, { today });
   const carryQuery = carry.toString();
 
@@ -178,7 +186,7 @@ export async function SearchResults({
         />
       </aside>
 
-      <div className="flex flex-1 flex-col gap-4">
+      <div className="flex min-w-0 flex-1 flex-col gap-4">
         {/* Панель видна всегда, в том числе на пустой выдаче: единственный
           * способ снять фильтр дат — этот календарь, а «Сбросить» в фильтрах
           * даты не трогает. Спрячь панель на нуле результатов — и выбранные
@@ -228,7 +236,8 @@ export async function SearchResults({
                 <ListingCard
                   key={item.listing.id}
                   item={item}
-                  citySlug={city.slug}
+                  // Свой город у каждой: с «Где» в выдаче и соседние города региона.
+                  citySlug={item.citySlug}
                   availabilityMap={availByListing.get(item.listing.id) ?? new Map()}
                   from={from}
                   to={filters.availableTo}
@@ -264,10 +273,10 @@ export async function SearchResults({
  * Ранжирование запроса по индексу. null — запроса нет; undefined — индекс
  * недоступен, и выдача уходит на аварийный ILIKE (ошибка в лог, страница жива).
  */
-async function rankQuery(city: City, q: string): Promise<RankedIds | null | undefined> {
+async function rankQuery(cityIds: string[], q: string): Promise<RankedIds | null | undefined> {
   if (!q) return null;
   try {
-    return await rankListingIds([city.id], q);
+    return await rankListingIds(cityIds, q);
   } catch (e) {
     console.error("[search] индекс поиска недоступен, выдача по ILIKE:", e);
     return undefined;

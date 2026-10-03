@@ -78,6 +78,56 @@ describe("searchSubmitHref", () => {
     expect(searchSubmitHref(text("", { from: "", to: null, loc: {} }), { pathname: "/cabinet", searchParams: "" })).toBeNull();
   });
 
+  // «Где» по строкам той же таблицы: оно всегда из панели, не из адреса.
+  describe("«Где»", () => {
+    const geo = { loc: "p:45.035,38.975", la: "рядом: улица Красная", src: "geo", lp: "s" };
+    const params = (href: string | null) => Object.fromEntries(new URL(href!, "http://x").searchParams);
+
+    it("category — its canonical path with «Где»", () => {
+      const href = searchSubmitHref(
+        { what: { kind: "category", href: "/krasnodar/instrumenty" }, loc: geo },
+        { pathname: "/", searchParams: "", citySlug: "krasnodar" },
+      );
+      expect(href!.split("?")[0]).toBe("/krasnodar/instrumenty");
+      expect(params(href)).toEqual(geo);
+    });
+
+    it("free text — /search with a geolocation point", () => {
+      expect(params(searchSubmitHref(text("дрель", { loc: geo }), { pathname: "/krasnodar", searchParams: "", citySlug: "krasnodar" })))
+        .toEqual({ q: "дрель", city: "krasnodar", ...geo });
+    });
+
+    it("empty on /search — the panel point replaces the old one, keys it lacks are removed", () => {
+      const href = searchSubmitHref(
+        text("", { loc: { loc: "p:44.991,38.941", la: "Яблоновский", lp: "t" } }),
+        { pathname: "/search", searchParams: "city=krasnodar&sort=near&loc=p:45.035,38.975&la=x&src=geo&lp=s", citySlug: "krasnodar" },
+      );
+      expect(params(href)).toEqual({
+        city: "krasnodar", sort: "near", loc: "p:44.991,38.941", la: "Яблоновский", lp: "t",
+      });
+    });
+
+    it("empty on a category page — «×» in the panel removes the point from the address", () => {
+      expect(searchSubmitHref(
+        text("", { loc: null }),
+        { pathname: "/krasnodar/instrumenty", searchParams: "loc=p:45.035,38.975&la=x&src=geo&lp=s&view=list", citySlug: "krasnodar" },
+      )).toBe("/krasnodar/instrumenty?view=list");
+    });
+
+    it("«×» in the panel also drops «Ближе»: without a point there is nothing to sort by", () => {
+      expect(searchSubmitHref(
+        text("", { loc: null }),
+        { pathname: "/search", searchParams: "city=krasnodar&sort=near&loc=p:45.035,38.975", citySlug: "krasnodar" },
+      )).toBe("/search?city=krasnodar");
+    });
+
+    it("empty with only «Где» on another page — the city page with the point", () => {
+      const href = searchSubmitHref(text("", { loc: geo }), { pathname: "/cabinet", searchParams: "", citySlug: "krasnodar" });
+      expect(href!.split("?")[0]).toBe("/krasnodar");
+      expect(params(href)).toEqual(geo);
+    });
+  });
+
   it("a first path segment that is not the city is not a city page", () => {
     expect(searchSubmitHref(text("", dates), { pathname: "/cabinet/listings", searchParams: "", citySlug: "krasnodar" }))
       .toBe("/krasnodar?from=2026-10-10&to=2026-10-12");

@@ -31,7 +31,7 @@ export default async function HomePage() {
 
   const roots = cats.filter((c) => c.parentId === null);
   const counts = defaultCity
-    ? rollupToRoots(cats, await getListingCountsByCategory(defaultCity.id))
+    ? rollupToRoots(cats, await getListingCountsByCategory([defaultCity.id]))
     : null;
 
   // Восемь последних — ровно два ряда по четыре на десктопе.

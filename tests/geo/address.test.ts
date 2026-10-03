@@ -5,11 +5,12 @@
 import { describe, expect, it } from "vitest";
 import { content } from "@theme/content";
 import {
-  hitKey, hitLabel, needsServer, publicLabel, reverseLabel, sameHit, sameTyping, shouldApply, suggestNear,
-  visibleAddresses, type AddressHit,
+  hitKey, hitLabel, listingLabelsOf, needsServer, publicLabel, reverseLabel, sameHit, sameTyping, shouldApply,
+  suggestNear, visibleAddresses, type AddressHit,
 } from "@/lib/geo/address";
 import { isApprox, isCoarsePlace, listingPrecision, precisionNote } from "@/lib/geo/precision";
-import { createClientGeocoder, buildClientIndex, createGeocoder } from "@/lib/geocoder";
+import { createClientGeocoder, buildClientIndex, createGeocoder, withSettlement } from "@/lib/geocoder";
+import type { HitSettlement } from "@/lib/geocoder/types";
 import { FIXTURE } from "../geocoder/fixture";
 
 function hit(p: Partial<AddressHit> & Pick<AddressHit, "title">): AddressHit {
@@ -130,44 +131,102 @@ describe("precision notes", () => {
   });
 });
 
+// Подпись всегда называет свой пункт (settlementOf: микрорайоны и округа
+// пропущены), а не город каталога: «Мега, Краснодар» читалась бы так, будто
+// Новая Адыгея — в Краснодаре. OwnerCard показывает её как есть.
 describe("labels", () => {
-  it("adds the settlement outside the listing's city", () => {
-    expect(hitLabel(house, "Краснодар")).toBe("улица Красная, 120");
-    expect(hitLabel(yab, "Краснодар")).toBe("улица Базовская, 21к1, Яблоновский");
-    expect(hitLabel(yab, "Яблоновский")).toBe("улица Базовская, 21к1");
-    expect(hitLabel(place, "Краснодар")).toBe("Яблоновский");
+  // Пункты с видами: имя на «СНТ » — садовое товарищество, остальные — посёлки.
+  const at = (...names: string[]): HitSettlement => ({
+    names, kinds: names.map((n) => (n.startsWith("СНТ ") ? "snt" : "village")), lat: 45, lon: 39,
+  });
+  const krd = at("Краснодар");
+
+  it("street and house: «{street}, {settlement}», the house number only in the full label", () => {
+    expect(hitLabel({ ...house, settlement: krd }, "Краснодар")).toBe("улица Красная, 120, Краснодар");
+    expect(publicLabel({ ...house, settlement: krd }, "Краснодар")).toBe("улица Красная, Краснодар");
+    // Город каталога пункт не меняет: Яблоновский и на странице Краснодара, и у себя.
+    for (const cityName of ["Краснодар", "Яблоновский"]) {
+      expect(hitLabel({ ...yab, settlement: at("Яблоновский") }, cityName)).toBe("улица Базовская, 21к1, Яблоновский");
+      expect(publicLabel({ ...yab, settlement: at("Яблоновский") }, cityName)).toBe("улица Базовская, Яблоновский");
+    }
+    expect(publicLabel({ ...street, settlement: krd }, "Краснодар")).toBe("улица Красная, Краснодар");
+    expect(publicLabel({ ...between, settlement: krd }, "Краснодар")).toBe("улица Ставропольская, Краснодар");
+    // Улица, названная по пункту, пункт всё равно несёт.
+    const named = hit({ title: "Яблоновский проезд", kind: "street", parts: { place: "Яблоновский", street: "Яблоновский проезд", house: null } });
+    expect(publicLabel({ ...named, settlement: at("Яблоновский") }, "Яблоновский")).toBe("Яблоновский проезд, Яблоновский");
+  });
+
+  it("POI and microdistrict: «{name}, {settlement}»; a settlement — the one above it, if any", () => {
+    expect(publicLabel({ ...poi, settlement: krd }, "Краснодар")).toBe("ЖК Панорама, Краснодар");
+    expect(publicLabel({ ...ymr, settlement: krd }, "Краснодар")).toBe("Юбилейный, Краснодар");
+    expect(hitLabel({ ...ymr, settlement: krd }, "Краснодар")).toBe("Юбилейный, Краснодар");
+    expect(publicLabel({ ...place, settlement: at("Яблоновский") }, "Краснодар")).toBe("Яблоновский");
+    // Посёлок в черте города — и город над ним.
+    expect(publicLabel({ ...place, title: "Лазурный", settlement: at("Лазурный", "Краснодар") }, "Краснодар")).toBe("Лазурный, Краснодар");
+  });
+
+  // Одноимённых СНТ в регионе по нескольку: СНТ называется с пунктом над ним.
+  it("an SNT is named together with the settlement above it", () => {
+    const snt = hit({ title: "СНТ Мечта", kind: "place", subtitle: "садовое товарищество, Южный", parts: { place: "СНТ Мечта", street: null, house: null } });
+    expect(listingLabelsOf({ ...snt, settlement: at("СНТ Мечта", "Южный") }, "Краснодар"))
+      .toEqual({ address: "СНТ Мечта, Южный", location: "СНТ Мечта, Южный" });
+    expect(publicLabel({ ...snt, settlement: at("СНТ Мечта", "Елизаветинская", "Краснодар") }, "Краснодар")).toBe("СНТ Мечта, Елизаветинская");
+    // СНТ без пункта над ним — только своё имя.
+    expect(publicLabel({ ...snt, settlement: at("СНТ Мечта") }, "Краснодар")).toBe("СНТ Мечта");
+    const lane = hit({ title: "улица Вишнёвая", kind: "street", precision: "street", parts: { place: "СНТ Кубань, Берёзовый", street: "улица Вишнёвая", house: null } });
+    expect(publicLabel({ ...lane, settlement: at("СНТ Кубань", "Берёзовый", "Краснодар") }, "Краснодар")).toBe("улица Вишнёвая, СНТ Кубань, Берёзовый");
+  });
+
+  it("a neighbour settlement is named, not the catalog city", () => {
+    const mega = hit({ title: "Мега", kind: "poi", precision: "house", subtitle: "Новая Адыгея", parts: { place: "Новая Адыгея", street: null, house: null } });
+    expect(publicLabel({ ...mega, settlement: at("Новая Адыгея") }, "Краснодар")).toBe("Мега, Новая Адыгея");
+    const sad = hit({ title: "улица Садовая", kind: "street", precision: "street", parts: { place: "Новая Адыгея", street: "улица Садовая", house: null } });
+    expect(publicLabel({ ...sad, settlement: at("Новая Адыгея") }, "Краснодар")).toBe("улица Садовая, Новая Адыгея");
   });
 
   it("a house addressed by its settlement does not repeat the settlement", () => {
-    const snt = hit({ title: "СНТ Кубаночка, 1", parts: { place: "СНТ Кубаночка", street: null, house: "1" } });
-    expect(hitLabel(snt, "Краснодар")).toBe("СНТ Кубаночка, 1");
+    const snt = hit({ title: "СНТ Кубаночка, 15", parts: { place: "СНТ Кубаночка", street: null, house: "15" }, settlement: at("СНТ Кубаночка", "Октябрьский", "Краснодар") });
+    expect(hitLabel(snt, "Краснодар")).toBe("СНТ Кубаночка, 15, Октябрьский");
+    expect(publicLabel(snt, "Краснодар")).toBe("СНТ Кубаночка, Октябрьский");
+    expect(publicLabel({ ...snt, settlement: undefined }, "Краснодар")).toBe("СНТ Кубаночка");
   });
 
-  it("public label never has a house number", () => {
-    expect(publicLabel(house, "Краснодар")).toBe("улица Красная");
-    expect(publicLabel(yab, "Краснодар")).toBe("улица Базовская, Яблоновский");
-    expect(publicLabel(yab, "Яблоновский")).toBe("улица Базовская");
-    expect(publicLabel(between, "Краснодар")).toBe("улица Ставропольская");
-    expect(publicLabel(street, "Краснодар")).toBe("улица Красная");
-    // объект — название, а не его адрес с домом из подзаголовка
-    expect(publicLabel(poi, "Краснодар")).toBe("ЖК Панорама");
+  // Хит без пунктов (не прошёл через settlementOf): пункт из частей адреса —
+  // «Краснодар, Юбилейный» даёт город; у места пункт не известен.
+  it("without settlements: the place from the address parts, otherwise the city", () => {
+    expect(publicLabel(house, "Краснодар")).toBe("улица Красная, Краснодар");
+    expect(publicLabel({ ...house, parts: { place: "Краснодар, Юбилейный", street: "улица Красная", house: "120" } }, "Яблоновский"))
+      .toBe("улица Красная, Краснодар");
+    expect(publicLabel({ ...street, parts: { place: null, street: "улица Красная", house: null } }, "Казань")).toBe("улица Красная, Казань");
     expect(publicLabel(ymr, "Краснодар")).toBe("Юбилейный");
-    // дом по пункту, без улицы («СНТ Кубаночка, 15») — пункт
-    const snt = hit({ title: "СНТ Кубаночка, 15", parts: { place: "СНТ Кубаночка", street: null, house: "15" } });
-    expect(publicLabel(snt, "Краснодар")).toBe("СНТ Кубаночка");
+    expect(publicLabel(poi, "Краснодар")).toBe("ЖК Панорама, Краснодар");
   });
 
   it("public label of real engine hits has no digits for houses", () => {
     const g = createGeocoder(structuredClone(FIXTURE));
     for (const q of ["красная 120", "базовская 21к1", "ставропольская 106"]) {
-      const h = g.suggest(q, { limit: 1 })[0];
+      const h = withSettlement(g, g.suggest(q, { limit: 1 })[0]);
       expect(publicLabel(h, "Краснодар")).not.toMatch(/\d/);
+      expect(publicLabel(h, "Краснодар")).toMatch(/, (Краснодар|Яблоновский)$/);
     }
   });
 
-  it("geolocation: a house — its address, otherwise «рядом»", () => {
-    expect(reverseLabel(house, "Краснодар")).toBe("улица Красная, 120");
-    expect(reverseLabel(street, "Краснодар")).toBe("рядом: улица Красная");
+  // Колонки: location — 120, address — 200. Режется имя, пункт остаётся.
+  it("listing labels fit the columns by cutting the name, never the settlement", () => {
+    const long = hit({ title: "ЖК " + "Очень длинное название ".repeat(12), kind: "poi", settlement: at("Новая Адыгея") });
+    const { address, location } = listingLabelsOf(long, "Краснодар");
+    expect(location.length).toBeLessThanOrEqual(120);
+    expect(location).toMatch(/^ЖК Очень длинное.*, Новая Адыгея$/);
+    expect(address.length).toBeLessThanOrEqual(200);
+    expect(address).toMatch(/, Новая Адыгея$/);
+    expect(listingLabelsOf({ ...yab, settlement: at("Яблоновский") }, "Краснодар"))
+      .toEqual({ address: "улица Базовская, 21к1, Яблоновский", location: "улица Базовская, Яблоновский" });
+  });
+
+  // Подпись геолокации едет в адрес страницы (la): номера дома в ней нет.
+  it("geolocation: a house — its street without the number, otherwise «рядом»", () => {
+    expect(reverseLabel({ ...house, settlement: krd }, "Краснодар")).toBe("улица Красная, Краснодар");
+    expect(reverseLabel({ ...street, settlement: krd }, "Краснодар")).toBe("рядом: улица Красная, Краснодар");
     expect(reverseLabel(null, "Краснодар")).toBeNull();
   });
 });

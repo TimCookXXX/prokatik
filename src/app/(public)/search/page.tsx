@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { content } from "@theme/content";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { getCityBySlug } from "@/server/catalog";
-import { resolveViewerCity } from "@/server/city";
+import { getCityScope, resolveViewerCity } from "@/server/city";
 import { parseQuery, type CategorySearchParams } from "@/lib/catalog/filters";
 import { Breadcrumbs } from "@/components/catalog/Breadcrumbs";
 import { SearchResults } from "@/components/catalog/SearchResults";
@@ -32,6 +32,9 @@ export default async function SearchPage({
   const city = sp.city
     ? (await getCityBySlug(sp.city)) ?? notFound()
     : await resolveViewerCity();
+  // С точкой «Где» поиск идёт по всем городам региона (getCityScope); город
+  // в адресе и куке при этом не меняется.
+  const scope = city ? await getCityScope(city, sp) : null;
 
   return (
     <main className="mx-auto w-full max-w-[1200px] px-4 py-6">
@@ -39,18 +42,19 @@ export default async function SearchPage({
       {/* Город отделён точкой, а не предлогом: в базе он лежит в именительном
         * падеже, и «поиск по Казань» из него не собрать. Заголовок — весь
         * запрос, как его набрали; если нашлось только по части, это говорит
-        * плашка над выдачей (SearchResults). */}
+        * плашка над выдачей (SearchResults). С точкой «Где» в выдаче и
+        * соседние города региона — подпись говорит об этом. */}
       <h1 className="mb-4 mt-3 font-display text-2xl font-bold">
         {q ? content.search.titleWithQuery(q) : content.search.title}
         {city && (
           <span className="ml-2 text-base font-normal text-muted-foreground">
-            · {city.name}
+            · {scope?.nearby ? content.search.nearby(city.name) : city.name}
           </span>
         )}
       </h1>
 
       {city ? (
-        <SearchResults city={city} q={q} searchParams={sp} />
+        <SearchResults city={city} q={q} searchParams={sp} scope={scope ?? undefined} />
       ) : (
         <EmptyState>Города пока не заведены.</EmptyState>
       )}

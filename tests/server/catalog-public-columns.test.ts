@@ -46,8 +46,8 @@ describe("public listing reads", () => {
     ["getActiveListingsByOwner", () => getActiveListingsByOwner("u1")],
     ["getActiveListingCardsByOwner", () => getActiveListingCardsByOwner("u1")],
     ["getRecentListings", () => getRecentListings(CITY)],
-    ["getListingsForCategories", () => getListingsForCategories(CITY, ["cat"])],
-    ["searchListings", () => searchListings(CITY, { text: "дрель" })],
+    ["getListingsForCategories", () => getListingsForCategories([CITY], ["cat"])],
+    ["searchListings", () => searchListings([CITY], { text: "дрель" })],
   ])("%s selects neither the address nor the point", async (_name, run) => {
     await run();
     expect(queries.length).toBeGreaterThan(0);

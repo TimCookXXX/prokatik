@@ -44,8 +44,9 @@ export function pickCitySlug(
 
 // Куда ведёт выбор города в шапке. С поиска не уводит: переносится то, что
 // человек выбрал про себя, — запрос, раздел, сортировка и вид. Не переносятся
-// цена, даты и страница: они описывают выдачу покинутого города и в новом
-// означали бы уже не то же самое.
+// цена, даты, «Где» (`loc`, `la`, `src`, `lp`) и страница: они описывают выдачу
+// покинутого города и в новом означали бы уже не то же самое. Вместе с точкой
+// уходит и «Ближе» — без неё сортировке не от чего считать.
 export function citySwitchHref(pathname: string, search: string, slug: string): string {
   if (pathname !== "/search") return `/${slug}`;
 
@@ -53,7 +54,7 @@ export function citySwitchHref(pathname: string, search: string, slug: string): 
   const next = new URLSearchParams();
   for (const key of ["q", "category", "sort", "view"]) {
     const value = current.get(key);
-    if (value) next.set(key, value);
+    if (value && !(key === "sort" && value === "near")) next.set(key, value);
   }
   next.set("city", slug);
   return `/search?${next.toString()}`;

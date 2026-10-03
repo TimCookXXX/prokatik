@@ -72,7 +72,7 @@ describe("SearchResults", () => {
   it("asks the database for the whole city when there is no query", async () => {
     await SearchResults({ city, q: "", searchParams: {} });
 
-    expect(searchListings).toHaveBeenCalledWith("c1", { text: "" }, expect.anything(), undefined);
+    expect(searchListings).toHaveBeenCalledWith(["c1"], { text: "" }, expect.anything(), undefined);
     expect(rankListingIds).not.toHaveBeenCalled();
   });
 
@@ -139,9 +139,9 @@ describe("SearchResults", () => {
 
     expect(rankListingIds).toHaveBeenCalledWith(["c1"], "дрель");
     expect(searchListings).toHaveBeenCalledWith(
-      "c1", { ids: ["2", "1"] }, expect.objectContaining({ sort: "relevance" }), undefined,
+      ["c1"], { ids: ["2", "1"] }, expect.objectContaining({ sort: "relevance" }), undefined,
     );
-    expect(getSearchFacets).toHaveBeenCalledWith("c1", { ids: ["2", "1"] }, expect.anything());
+    expect(getSearchFacets).toHaveBeenCalledWith(["c1"], { ids: ["2", "1"] }, expect.anything());
   });
 
   // Меню показывает действующую сортировку, а не сырой параметр: без него
@@ -162,7 +162,7 @@ describe("SearchResults", () => {
 
     expect(screen.getByText("новые")).toBeInTheDocument();
     expect(searchListings).toHaveBeenCalledWith(
-      "c1", { ids: ["1"] }, expect.objectContaining({ sort: "new" }), undefined,
+      ["c1"], { ids: ["1"] }, expect.objectContaining({ sort: "new" }), undefined,
     );
   });
 
@@ -195,7 +195,7 @@ describe("SearchResults", () => {
     await SearchResults({ city, q: "прокат", searchParams: { q: "прокат" } });
 
     expect(searchListings).toHaveBeenCalledWith(
-      "c1", { text: "" }, expect.objectContaining({ sort: "new" }), undefined,
+      ["c1"], { text: "" }, expect.objectContaining({ sort: "new" }), undefined,
     );
   });
 
@@ -208,12 +208,53 @@ describe("SearchResults", () => {
       render(await SearchResults({ city, q: "дрель", searchParams: { q: "дрель" } }));
 
       expect(searchListings).toHaveBeenCalledWith(
-        "c1", { text: "дрель" }, expect.objectContaining({ sort: "new" }), undefined,
+        ["c1"], { text: "дрель" }, expect.objectContaining({ sort: "new" }), undefined,
       );
       expect(err).toHaveBeenCalled();
       expect(screen.getByText("новые")).toBeInTheDocument();
     } finally {
       err.mockRestore();
     }
+  });
+
+  // «Где» едет за человеком: «Показать» в фильтрах, страницы и меню сортировки
+  // не теряют ни точку, ни «Ближе».
+  describe("«Где»", () => {
+    const sp = { loc: "p:44.988,38.948", la: "Яблоновский", lp: "t", sort: "near" };
+    const scope = {
+      region: true, near: { point: { lat: 44.988, lon: 38.948 }, label: "Яблоновский", source: "address" as const, precision: "place" as const },
+      cityIds: ["c1", "c2"], nearby: true,
+    };
+    const hiddenField = (name: string) =>
+      document.querySelector<HTMLInputElement>(`input[type="hidden"][name="${name}"]`);
+
+    it("survives the filters form: the point and «Ближе» go as hidden fields", async () => {
+      render(await SearchResults({ city, q: "", searchParams: sp, scope }));
+      expect(hiddenField("loc")).toHaveValue("p:44.988,38.948");
+      expect(hiddenField("la")).toHaveValue("Яблоновский");
+      expect(hiddenField("lp")).toHaveValue("t");
+      expect(hiddenField("sort")).toHaveValue("near");
+    });
+
+    it("searches the whole region, nearest first, and pages keep the point", async () => {
+      vi.mocked(searchListings).mockResolvedValue({ items: [item("1", "Дрель")], total: 60 } as never);
+      render(await SearchResults({ city, q: "", searchParams: sp, scope }));
+      expect(searchListings).toHaveBeenCalledWith(
+        ["c1", "c2"], { text: "" }, expect.objectContaining({ sort: "near", near: expect.anything() }), undefined,
+      );
+      expect(screen.getByText("Ближе")).toBeInTheDocument();
+      const next = new URL(screen.getByRole("link", { name: /Вперёд/ }).getAttribute("href")!, "http://x");
+      expect(Object.fromEntries(next.searchParams)).toMatchObject({ ...sp, page: "2", city: "kazan" });
+    });
+
+    it("without geodata the point does not act and «Ближе» is not offered", async () => {
+      render(await SearchResults({ city, q: "", searchParams: sp }));
+      expect(searchListings).toHaveBeenCalledWith(
+        ["c1"], { text: "" }, expect.objectContaining({ sort: "new", near: undefined }), undefined,
+      );
+      expect(screen.queryByText("Ближе")).toBeNull();
+      // Но и не теряется: в городе с геоданными она снова заработает.
+      expect(hiddenField("loc")).toHaveValue("p:44.988,38.948");
+    });
   });
 });

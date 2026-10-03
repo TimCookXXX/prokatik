@@ -6,16 +6,21 @@
 // (`cs0`, `cp3`), у сервера — `s:…`, `h:…`, и после переимпорта они меняются.
 // Сервер находит тот же адрес у себя — по виду, тексту и точке не дальше 50 м
 // (sameHit) — и пишет всё из своего хита.
+//
+// Город объявления у выбранного адреса определяет сам адрес, а не форма:
+// город формы для `pick` — только регион, где искать. ЖК в Краснодаре не
+// попадёт в Яблоновский, а Козет или Новая Адыгея (не города сервиса) отойдут
+// ближайшему городу региона (listingCityOf).
 
 import { content } from "@theme/content";
 import type { AddressHit } from "@/lib/geocoder/types";
 import type { CityGeoContext } from "@/lib/geo/context";
 import {
-  listingAddressOf, sameHit, textAddressOf, type ListingAddressFields,
+  listingAddressOf, listingCityOf, sameHit, textAddressOf, type ListingAddressFields,
 } from "@/lib/geo/address";
 import type { GeoPrecision } from "@/lib/geo/precision";
 import type { ListingAddressInput, PickedAddress } from "@/lib/owner/validation";
-import { getCityById, type City } from "@/server/catalog";
+import { getActiveCities, getCityById, type City } from "@/server/catalog";
 import { getCitiesGeo } from "@/server/city";
 import { getRegionGeocoder } from "@/server/geocoder";
 
@@ -34,10 +39,11 @@ export interface StoredAddress {
 /**
  * `fields: null` — адрес не трогать вовсе (`keep`): ни одна из пяти колонок не
  * пишется, и сохранённая точка переживает и правку цены, и переимпорт
- * геоданных, и недоступность геокодера.
+ * геоданных, и недоступность геокодера. `cityId` — город объявления для
+ * записи: у `pick` — город адреса, у `keep` и `text` — город формы.
  */
 export type AddressResolution =
-  | { ok: true; fields: ListingAddressFields | null }
+  | { ok: true; fields: ListingAddressFields | null; cityId: string }
   | { ok: false; error: string };
 
 const fail = (error: string): AddressResolution => ({ ok: false, error });
@@ -49,7 +55,8 @@ const fail = (error: string): AddressResolution => ({ ok: false, error });
  *   без точки (`city`) в городе с геоданными «оставить» не может — это legacy
  *   или ненайденный при backfill адрес, кабинет просит его уточнить.
  * - `text`: только в городе без геоданных; точки нет.
- * - `pick`: в городе с геоданными; всё — из хита, найденного сервером заново.
+ * - `pick`: в городе с геоданными; всё — из хита, найденного сервером заново,
+ *   и город тоже: присланный `cityId` задаёт лишь регион поиска.
  */
 export async function resolveListingAddress(
   input: ListingAddressInput,
@@ -62,40 +69,55 @@ export async function resolveListingAddress(
 
   // Сбой чтения — отказ, а не «у города геоданных нет»: иначе упавший запрос
   // молча пропустил бы адрес текстом без точки.
-  let geo: CityGeoContext | null;
+  let citiesGeo: ReadonlyMap<string, CityGeoContext | null>;
   try {
-    geo = (await getCitiesGeo({ strict: true })).get(city.slug) ?? null;
+    citiesGeo = await getCitiesGeo({ strict: true });
   } catch (e) {
     console.error("[listing-address] cities geo failed:", (e as Error).message);
     return fail(T.unavailable);
   }
+  const geo = citiesGeo.get(city.slug) ?? null;
 
   if (input.mode === "text") {
     // В городе с геоданными адрес — только из подсказок: текст без точки
     // лишил бы покупателей расстояния до вещи.
     if (geo) return fail(T.pickFromList);
-    return { ok: true, fields: textAddressOf(input.text) };
+    return { ok: true, fields: textAddressOf(input.text), cityId: city.id };
   }
 
   // Подсказка из города, у которого геоданных нет (выключены аварийно, пока
   // форма была открыта, или импорт ещё не прошёл), — проверить её нечем.
   if (!geo) return fail(T.unavailable);
-  return pick(input, city, geo);
+  return pick(input, geo, citiesGeo);
 }
 
 async function keep(cityId: string, current: StoredAddress | null): Promise<AddressResolution> {
   if (!current || current.address === null || current.cityId !== cityId) return fail(T.required);
-  if (current.geoPrecision !== "city") return { ok: true, fields: null };
+  const kept: AddressResolution = { ok: true, fields: null, cityId };
+  if (current.geoPrecision !== "city") return kept;
 
   // Точки нет: уточнять есть смысл, только если у города есть геоданные. Сбой
   // чтения правку не блокирует (getCitiesGeo без strict вернёт пустоту) —
   // keep колонок адреса всё равно не трогает.
   const city = await getCityById(cityId);
   const geo = city ? (await getCitiesGeo()).get(city.slug) ?? null : null;
-  return geo ? fail(T.required) : { ok: true, fields: null };
+  return geo ? fail(T.required) : kept;
 }
 
-async function pick(input: PickedAddress, city: City, geo: CityGeoContext): Promise<AddressResolution> {
+/**
+ * Города, к которым может отойти адрес региона: активные, с геоданными этого
+ * региона (у них есть центр). Город формы среди них всегда — он и задал регион.
+ */
+async function regionCities(region: string, citiesGeo: ReadonlyMap<string, CityGeoContext | null>) {
+  return (await getActiveCities()).flatMap((c: City) => {
+    const geo = citiesGeo.get(c.slug);
+    return geo?.region === region ? [{ id: c.id, name: c.name, nameLocative: c.nameLocative, centre: geo.centre }] : [];
+  });
+}
+
+async function pick(
+  input: PickedAddress, geo: CityGeoContext, citiesGeo: ReadonlyMap<string, CityGeoContext | null>,
+): Promise<AddressResolution> {
   let engine: Awaited<ReturnType<typeof getRegionGeocoder>>;
   try {
     engine = await getRegionGeocoder(geo.region);
@@ -119,10 +141,15 @@ async function pick(input: PickedAddress, city: City, geo: CityGeoContext): Prom
   const back = g.reverse(input.lat, input.lon);
   if (back) candidates.push(back);
 
-  const hit = candidates.find((h) => sameHit(input, h));
-  if (!hit) return fail(T.pickFromList);
+  const found = candidates.find((h) => sameHit(input, h));
+  if (!found) return fail(T.pickFromList);
 
-  const res = listingAddressOf(hit, { name: city.name, centre: geo.centre });
+  // Город — по пункту адреса из данных сервера, а не по городу формы.
+  const hit = { ...found, settlement: g.settlementOf(found) ?? undefined };
+  const city = listingCityOf(hit.settlement, hit, await regionCities(geo.region, citiesGeo));
+  if (!city) return fail(T.unavailable);
+
+  const res = listingAddressOf(hit, city);
   if (!res.ok) return fail(res.reason === "coarse" ? content.address.tooCoarse : T.tooFar);
-  return { ok: true, fields: res.fields };
+  return { ok: true, fields: res.fields, cityId: city.id };
 }

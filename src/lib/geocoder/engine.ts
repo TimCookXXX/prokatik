@@ -19,7 +19,7 @@ import { buildIndex, ENT_PLACE, ENT_POI, ENT_STREET, PREC, SETTLEMENT_KINDS, typ
 import { Lru } from "./lru";
 import { chunkVariants, houseLetterTwins, tokenize, type QueryToken } from "./query";
 import { fold, functionKind, phoneticKey, PLACE_TYPES, POI_KIND_WORDS, POI_TYPES, stemWord, streetTypeOf } from "./text";
-import type { AddrPrecision, AddressHit, GeoIndexData, PlaceKind, SuggestOptions } from "./types";
+import type { AddrPrecision, AddressHit, GeoIndexData, HitSettlement, PlaceKind, SuggestOptions } from "./types";
 
 export interface GeocodeOptions {
   near?: { lat: number; lon: number } | null;
@@ -76,6 +76,8 @@ export interface Geocoder {
   geocodeDetailed(address: string, opts?: GeocodeOptions): GeocodeResult;
   /** Точка → ближайший адрес: дом ≤ 60 м, иначе улица, иначе пункт («Моё местоположение»). */
   reverse(lat: number, lon: number, opts?: ReverseOptions): AddressHit | null;
+  /** Населённые пункты ответа этого же движка (по его id); null — пункта нет ни в данных, ни рядом. */
+  settlementOf(hit: Pick<AddressHit, "id" | "lat" | "lon">): HitSettlement | null;
   /** Размер индекса. */
   stats(): { places: number; streets: number; houses: number; pois: number; words: number; forms: number };
 }
@@ -2054,6 +2056,78 @@ export class Engine implements Geocoder {
       id: `p:${pl.id}`, kind: "place", title: a ?? pl.name, subtitle: a ? pl.name : placeSubtitle(pl.kind, ""), lat, lon, precision: "place",
       score: Math.round(Math.max(0, haversineKm(pl, at) - pl.radiusKm) * 1000), parts: { place: pl.name, street: null, house: null },
     };
+  }
+
+  private entityIds: { places: Map<string, number>; streets: Map<string, number>; pois: Map<string, number> } | null = null;
+
+  /**
+   * Населённые пункты ответа: пункт его сущности — дома (свой пункт дома, иначе улицы), улицы, объекта или
+   * самого места — и все пункты над ним, в которых он лежит (СНТ → посёлок → город). Микрорайоны и округа
+   * пропускаются: «Юбилейный» — это Краснодар. Сущности без пункта в данных (улица, микрорайон на отшибе) —
+   * ближайший пункт до 30 км. id — этого движка: у мини-индекса браузера свои
+   * (`p0`, `s3`), у сервера — из данных; чужой или неизвестный id — пункт по точке.
+   */
+  settlementOf(hit: Pick<AddressHit, "id" | "lat" | "lon">): HitSettlement | null {
+    const ix = this.ix;
+    const ids = (this.entityIds ??= {
+      places: new Map(ix.places.map((p, i) => [p.id, i])),
+      streets: new Map(ix.streets.map((s, i) => [s.id, i])),
+      pois: new Map(ix.pois.map((p, i) => [p.id, i])),
+    });
+    const colon = hit.id.indexOf(":");
+    const type = colon >= 0 ? hit.id.slice(0, colon) : "";
+    const rest = hit.id.slice(colon + 1);
+    const ent = rest.includes(":") ? rest.slice(0, rest.indexOf(":")) : rest;
+    const isSettlement = (q: number) => SETTLEMENT_KINDS.has(ix.places[q].kind) || ix.places[q].kind === "snt";
+    // Ближайший пункт до 30 км — как в подписи улицы без пункта (nearestSettlement), но без микрорайонов, у
+    // которых нет города («трасса Темрюк-Краснодар, 118 км»): над ними пунктов нет.
+    const nearest = (lat: number, lon: number) => {
+      let best = -1;
+      let bestD = 30;
+      ix.places.forEach((pl, i) => {
+        if (pl.settlement !== i || !isSettlement(i)) return;
+        const d = Math.max(0, haversineKm(pl, { lat, lon }) - pl.radiusKm);
+        if (d < bestD || (d === bestD && best >= 0 && pl.houses > ix.places[best].houses)) {
+          bestD = d;
+          best = i;
+        }
+      });
+      return best;
+    };
+    const streetPlace = (si: number) => {
+      const st = ix.streets[si];
+      return st.place >= 0 ? st.place : nearest(st.lat, st.lon);
+    };
+    let p = -1;
+    if (type === "p" || type === "ph") p = ids.places.get(ent) ?? -1;
+    else if (type === "o") p = ix.pois[ids.pois.get(ent) ?? -1]?.place ?? -1;
+    else if ((type === "s" || type === "a" || type === "h") && ids.streets.has(ent)) {
+      const si = ids.streets.get(ent)!;
+      const st = ix.streets[si];
+      if (type === "h") {
+        const key = rest.slice(ent.length + 1);
+        for (let j = st.start; j < st.end; j++) {
+          if (ix.hKey[j] === key) {
+            p = ix.hPlace[j];
+            break;
+          }
+        }
+      }
+      if (p < 0) p = streetPlace(si);
+    }
+    const up = (from: number) => {
+      const out: number[] = [];
+      for (let q = from, guard = 0; q >= 0 && guard < 8; q = ix.places[q].parent, guard++) if (isSettlement(q)) out.push(q);
+      return out;
+    };
+    let chain = up(p);
+    if (!chain.length) {
+      const at = p >= 0 ? ix.places[p] : hit;
+      chain = up(nearest(at.lat, at.lon));
+    }
+    if (!chain.length) return null;
+    const top = ix.places[chain[chain.length - 1]];
+    return { names: chain.map((q) => ix.places[q].name), kinds: chain.map((q) => ix.places[q].kind), lat: top.lat, lon: top.lon };
   }
 
   /** q — предок p (город микрорайона, город посёлка в его черте). */

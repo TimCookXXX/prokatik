@@ -16,7 +16,7 @@ import { PopoverContent } from "@/components/ui/Popover";
 import { MobileSuggestPanel, usePopoverLayout } from "./MobileSuggestPanel";
 import {
   EMPTY_SUGGEST, SUGGEST_DEBOUNCE_MS, cachedSuggest, fetchSuggest, sameTyping, shouldApply,
-  suggestQuery, type SuggestCategory, type SuggestItem, type SuggestResult,
+  suggestQuery, type SuggestCategory, type SuggestItem, type SuggestResult, type SuggestWhere,
 } from "./suggest-client";
 
 type Row =
@@ -27,7 +27,7 @@ type Row =
 interface Reply {
   city: string;
   q: string;
-  /** Даты запроса ключом: ответ на прежние даты не про этот выбор. */
+  /** Даты и «Где» запроса ключом: ответ на прежние не про этот выбор. */
   dates: string;
   result: SuggestResult;
 }
@@ -46,7 +46,7 @@ const prevent = (e: React.SyntheticEvent | Event) => e.preventDefault();
 // (MobileSuggestPanel). Фокус всегда остаётся в поле: курсор по строкам
 // ведётся aria-activedescendant, строки отмечены data-active (globals.css).
 export function WhatField({
-  id, citySlug, dates = null, value, onChange, onPick, inputRef, label, labelClassName, placeholder,
+  id, citySlug, dates = null, where = null, value, onChange, onPick, inputRef, label, labelClassName, placeholder,
   inputClassName, clearClassName, className, redirectFocus, panelToolbar,
 }: {
   /** Стабильный id: не useId, поле рендерится и на сервере, ids совпадают при гидрации. */
@@ -55,6 +55,8 @@ export function WhatField({
   citySlug: string | undefined;
   /** Даты «Когда»: с ними подсказки — только свободные на эти дни вещи. */
   dates?: DateRange | null;
+  /** Точка «Где»: с ней подсказки — по всем городам региона, как выдача. */
+  where?: SuggestWhere | null;
   value: string;
   onChange: (text: string) => void;
   onPick: (what: WhatValue) => void;
@@ -96,7 +98,9 @@ export function WhatField({
 
   const query = suggestQuery(value);
   const { from: datesFrom, to: datesTo } = dates ?? {};
-  const datesKey = datesFrom && datesTo ? `${datesFrom}|${datesTo}` : "";
+  const whereLoc = where?.loc;
+  const whereLp = where?.lp;
+  const datesKey = `${datesFrom && datesTo ? `${datesFrom}|${datesTo}` : ""}|${whereLoc ?? ""}`;
   // Одна значимая буква — не запрос (как на сервере): показываем популярное.
   const typing = compact(value).length >= 2;
 
@@ -105,6 +109,7 @@ export function WhatField({
   useEffect(() => {
     if (!open || !citySlug || !typing) return;
     const range = datesFrom && datesTo ? { from: datesFrom, to: datesTo } : null;
+    const point = whereLoc ? { loc: whereLoc, lp: whereLp } : null;
     const apply = (mine: number, result: SuggestResult | null) => {
       if (!shouldApply({ seq: mine, q: query }, shownSeq.current, textRef.current)) return;
       shownSeq.current = mine;
@@ -113,17 +118,17 @@ export function WhatField({
       setReply({ city: citySlug, q: query, dates: datesKey, result: result ?? EMPTY_SUGGEST });
       setActive(-1);
     };
-    const cached = cachedSuggest(citySlug, query, range);
+    const cached = cachedSuggest(citySlug, query, range, point);
     if (cached) {
       apply(++seq.current, cached);
       return;
     }
     const t = setTimeout(() => {
       const mine = ++seq.current;
-      void fetchSuggest(citySlug, query, range).then((result) => apply(mine, result));
+      void fetchSuggest(citySlug, query, range, point).then((result) => apply(mine, result));
     }, SUGGEST_DEBOUNCE_MS);
     return () => clearTimeout(t);
-  }, [open, citySlug, typing, query, datesFrom, datesTo, datesKey]);
+  }, [open, citySlug, typing, query, datesFrom, datesTo, whereLoc, whereLp, datesKey]);
 
   // Популярные разделы — при первом фокусе, дальше из кэша.
   const popularHere = popular?.city === citySlug ? popular : null;

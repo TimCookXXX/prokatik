@@ -13,7 +13,7 @@ import { PhotoDrop, type Photo } from "@/components/cabinet/PhotoDrop";
 import { field } from "@/components/ui/field";
 import { AddressCombobox, addressValueOf, type AddressValue } from "@/components/search/AddressCombobox";
 import { createListing, updateListing } from "@/server/actions/owner";
-import type { AddressHit } from "@/lib/geo/address";
+import { listingCityOf, type AddressHit } from "@/lib/geo/address";
 import type { CityGeoContext } from "@/lib/geo/context";
 import type { ListingAddressInput } from "@/lib/owner/validation";
 import { content } from "@theme/content";
@@ -40,9 +40,39 @@ const A = content.address.listing;
 export interface ListingFormCity {
   id: string;
   name: string;
+  /** Предложный падеж: пункт адреса сверяется с городом и по нему (listingCityOf). */
+  nameLocative?: string | null;
   slug: string;
   /** null — у города нет геоданных: адрес текстом, без точки. */
   geo: CityGeoContext | null;
+}
+
+/**
+ * Где ищется адрес. `geo` — в регионе города `searchId` по подсказкам, и город
+ * объявления определяет выбранный адрес; `text` — город без геоданных
+ * выбирается отдельно, адрес пишется текстом.
+ */
+type AddressMode = { kind: "geo"; searchId: string } | { kind: "text" };
+
+/** Ключ поля адреса: ответ поля, которого уже нет на экране, не принимается. */
+const modeKey = (m: AddressMode) => (m.kind === "geo" ? `geo:${m.searchId}` : "text");
+
+/**
+ * С чего начинает форма: город объявления с геоданными — поиск в его регионе;
+ * без геоданных — текст; города нет (новое объявление без своего города) —
+ * поиск в первом городе с геоданными, если такой есть.
+ */
+function initialMode(cities: ListingFormCity[], cityId: string): AddressMode {
+  const city = cities.find((c) => c.id === cityId);
+  if (city) return city.geo ? { kind: "geo", searchId: city.id } : { kind: "text" };
+  const geo = cities.find((c) => c.geo);
+  return geo ? { kind: "geo", searchId: geo.id } : { kind: "text" };
+}
+
+/** Город текстового режима по умолчанию: единственный без геоданных, иначе пусть выберут. */
+function defaultTextCity(cities: ListingFormCity[]): string {
+  const text = cities.filter((c) => !c.geo);
+  return text.length === 1 ? text[0].id : "";
 }
 
 /**
@@ -143,7 +173,17 @@ export function ListingForm({
   // как его назовут покупатели, и мог заменить прямо здесь.
   sellerName?: string;
 }) {
-  const [v, setV] = useState(initial);
+  const [mode0] = useState(() => initialMode(cities, initial.cityId));
+  const [addressMode, setAddressMode] = useState(mode0);
+  // Куда вернуться из текстового режима: регион своего города, иначе первый с геоданными.
+  const geoSearchId = mode0.kind === "geo" ? mode0.searchId : cities.find((c) => c.geo)?.id ?? null;
+  // Город объявления: в поиске по региону его определяет выбранный адрес, в
+  // текстовом режиме его выбирают. До выбора адреса — город поиска.
+  const [v, setV] = useState(() => ({
+    ...initial,
+    cityId: cities.some((c) => c.id === initial.cityId) ? initial.cityId
+      : mode0.kind === "geo" ? mode0.searchId : defaultTextCity(cities),
+  }));
   const [sellerName, setSellerName] = useState(initialSellerName);
   const [error, setError] = useState<string | null>(null);
   const city = cities.find((c) => c.id === v.cityId) ?? null;
@@ -153,10 +193,10 @@ export function ListingForm({
   // подсказку под набранный текст (ушли с поля прямо на «Сохранить»).
   const addressRef = useRef(address);
   const addressPending = useRef<Promise<void> | null>(null);
-  // Город, к которому относится адрес. Выбор бывает асинхронным (первая
-  // подсказка после ухода с поля ждёт сервер), а город за это время могут
-  // сменить: ответ поля старого города тогда отбрасывается.
-  const addressCity = useRef(v.cityId);
+  // Поле, к которому относится адрес. Выбор бывает асинхронным (первая
+  // подсказка после ухода с поля ждёт сервер), а поле за это время могут
+  // сменить (другой город, текст вместо поиска): ответ старого отбрасывается.
+  const addressKey = useRef(modeKey(mode0));
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -175,15 +215,31 @@ export function ListingForm({
 
   // Адрес принадлежит городу: в другом городе прежний выбор не значит ничего,
   // и «оставить как было» сервер не примет.
-  const changeCity = (cityId: string) => {
-    if (cityId === v.cityId) return;
+  const switchMode = (next: AddressMode, cityId: string) => {
+    setAddressMode(next);
+    addressKey.current = modeKey(next);
     set({ cityId });
-    addressCity.current = cityId;
     setAddress(NO_ADDRESS);
   };
+  const changeTextCity = (cityId: string) => {
+    if (cityId !== v.cityId) switchMode({ kind: "text" }, cityId);
+  };
 
-  const changeAddress = (cityId: string, patch: Partial<AddressState>) => {
-    if (cityId === addressCity.current) setAddress(patch);
+  const changeAddress = (key: string, patch: Partial<AddressState>, cityId?: string) => {
+    if (key !== addressKey.current) return;
+    setAddress(patch);
+    if (cityId) set({ cityId });
+  };
+
+  // Город объявления по выбранному адресу — тем же правилом, что на сервере
+  // (решает сервер, здесь — подпись «В каталоге: …» до сохранения).
+  const searchCity = addressMode.kind === "geo" ? cities.find((c) => c.id === addressMode.searchId) ?? null : null;
+  const cityOfHit = (hit: AddressHit): ListingFormCity | null => {
+    const region = searchCity?.geo?.region;
+    const candidates = cities.flatMap((c) => (c.geo && c.geo.region === region
+      ? [{ ...c, centre: c.geo.centre }]
+      : []));
+    return listingCityOf(hit.settlement, hit, candidates) ?? searchCity;
   };
 
   const focusAddress = () => document.getElementById(`${ADDRESS_ID}-input`)?.focus();
@@ -337,6 +393,23 @@ export function ListingForm({
       </FormBlock>
 
       <FormBlock title="Где забирают" hint="точный адрес не публикуем">
+        <AddressField
+          mode={addressMode}
+          cities={cities}
+          city={city}
+          searchCity={searchCity}
+          address={address}
+          error={addressError}
+          onChange={changeAddress}
+          cityOfHit={cityOfHit}
+          onCity={changeTextCity}
+          onMode={(kind) => {
+            if (kind === "text") switchMode({ kind }, defaultTextCity(cities));
+            else if (geoSearchId) switchMode({ kind, searchId: geoSearchId }, geoSearchId);
+          }}
+          track={(p) => { addressPending.current = p; }}
+        />
+
         <fieldset className="flex flex-col gap-1 text-sm">
           <legend className="mb-1">Способ получения (хотя бы один)</legend>
           <div className="flex flex-wrap gap-2">
@@ -355,29 +428,11 @@ export function ListingForm({
           </div>
         </fieldset>
 
-        <div className="flex flex-wrap gap-2">
-          <label className="flex flex-1 flex-col gap-1 text-sm">
-            Город
-            <select required value={v.cityId}
-              onChange={(e) => changeCity(e.target.value)} className={INPUT}>
-              <option value="" disabled>Выберите город</option>
-              {cities.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-          </label>
-          <label className="flex w-28 flex-col gap-1 text-sm">
-            Количество
-            <input type="number" required min={1} max={1000} value={v.quantity}
-              onChange={(e) => set({ quantity: e.target.value })} className={INPUT} />
-          </label>
-        </div>
-
-        <AddressField
-          city={city}
-          address={address}
-          error={addressError}
-          onChange={changeAddress}
-          track={(p) => { addressPending.current = p; }}
-        />
+        <label className="flex w-28 flex-col gap-1 text-sm">
+          Количество
+          <input type="number" required min={1} max={1000} value={v.quantity}
+            onChange={(e) => set({ quantity: e.target.value })} className={INPUT} />
+        </label>
       </FormBlock>
 
       {error && <p className="text-sm text-destructive" role="alert">{error}</p>}
@@ -390,19 +445,30 @@ export function ListingForm({
 }
 
 /**
- * Адрес выдачи. В городе с геоданными — подсказки геокодера (дом, улица, ЖК,
+ * Адрес выдачи. В регионе с геоданными — подсказки геокодера (дом, улица, ЖК,
  * посёлок) с подписью точности под полем; город и округ целиком не
- * принимаются. Без геоданных — обязательный текст, его покупатели видят как
- * есть, поэтому без номера дома. Ошибка сервера про адрес — здесь же.
+ * принимаются. Города здесь не выбирают: его определяет адрес, и под полем
+ * видно, в каком городе каталога окажется вещь. Город без геоданных —
+ * отдельной ссылкой: тогда город выбирают, а адрес — обязательный текст, его
+ * покупатели видят как есть, поэтому без номера дома. Ошибка сервера про
+ * адрес — здесь же.
  */
 function AddressField({
-  city, address, error, onChange, track,
+  mode, cities, city, searchCity, address, error, onChange, cityOfHit, onCity, onMode, track,
 }: {
+  mode: AddressMode;
+  cities: ListingFormCity[];
+  /** Город объявления. */
   city: ListingFormCity | null;
+  /** Город, в регионе которого ищется адрес (режим `geo`). */
+  searchCity: ListingFormCity | null;
   address: AddressState;
   error: string | null;
-  /** Правка адреса от поля города `cityId`: от поля прежнего города не принимается. */
-  onChange: (cityId: string, patch: Partial<AddressState>) => void;
+  /** Правка адреса от поля `key` (modeKey): от поля, которого уже нет, не принимается. */
+  onChange: (key: string, patch: Partial<AddressState>, cityId?: string) => void;
+  cityOfHit: (hit: AddressHit) => ListingFormCity | null;
+  onCity: (cityId: string) => void;
+  onMode: (kind: AddressMode["kind"]) => void;
   track: (pending: Promise<void>) => void;
 }) {
   const errorId = `${ADDRESS_ID}-error`;
@@ -410,49 +476,78 @@ function AddressField({
   const errorLine = error && (
     <p id={errorId} className="text-sm text-destructive" role="alert">{error}</p>
   );
+  const key = modeKey(mode);
+  const switchLink = (label: string, next: AddressMode["kind"]) => (
+    <button
+      type="button"
+      onClick={() => onMode(next)}
+      className="-my-1 shrink-0 rounded-sm py-1 text-xs font-medium text-primary hover:underline
+        focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+    >
+      {label}
+    </button>
+  );
 
-  if (!city) {
+  if (mode.kind === "text" || !searchCity?.geo) {
+    const textCities = cities.filter((c) => !c.geo);
     return (
-      <label className="flex flex-col gap-1 text-sm">
-        {A.label}
-        <input disabled placeholder={A.cityFirst} className={`${INPUT} disabled:opacity-60`} />
-      </label>
-    );
-  }
-
-  if (!city.geo) {
-    return (
-      <div className="flex flex-col gap-1 text-sm">
-        <label htmlFor={`${ADDRESS_ID}-input`}>{A.label}</label>
-        <input
-          id={`${ADDRESS_ID}-input`}
-          required minLength={3} maxLength={200}
-          value={address.text}
-          placeholder={A.textPlaceholder}
-          aria-invalid={error ? true : undefined}
-          aria-describedby={error ? `${hintId} ${errorId}` : hintId}
-          onChange={(e) => onChange(city.id, { text: e.target.value, payload: { mode: "text", text: e.target.value } })}
-          className={INPUT}
-        />
-        <p id={hintId} className="text-xs text-muted-foreground">{A.textHint}</p>
-        {errorLine}
+      <div className="flex flex-col gap-3">
+        <label className="flex flex-col gap-1 text-sm">
+          {A.city}
+          <select required value={city && !city.geo ? city.id : ""}
+            onChange={(e) => onCity(e.target.value)} className={INPUT}>
+            <option value="" disabled>{A.cityPlaceholder}</option>
+            {textCities.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        </label>
+        {city && !city.geo ? (
+          <div className="flex flex-col gap-1 text-sm">
+            <label htmlFor={`${ADDRESS_ID}-input`}>{A.label}</label>
+            <input
+              id={`${ADDRESS_ID}-input`}
+              required minLength={3} maxLength={200}
+              value={address.text}
+              placeholder={A.textPlaceholder}
+              aria-invalid={error ? true : undefined}
+              aria-describedby={error ? `${hintId} ${errorId}` : hintId}
+              onChange={(e) => onChange(key, { text: e.target.value, payload: { mode: "text", text: e.target.value } })}
+              className={INPUT}
+            />
+            <p id={hintId} className="text-xs text-muted-foreground">{A.textHint}</p>
+            {errorLine}
+          </div>
+        ) : (
+          <label className="flex flex-col gap-1 text-sm">
+            {A.label}
+            <input disabled placeholder={A.cityFirst} className={`${INPUT} disabled:opacity-60`} />
+          </label>
+        )}
+        {cities.some((c) => c.geo) && <div>{switchLink(A.backToSearch, "geo")}</div>}
       </div>
     );
   }
 
   const legacy = !address.value && address.legacy ? A.legacy(address.legacy) : null;
+  // Город объявления виден, когда адрес есть: выбран или сохранён.
+  const catalog = address.value && city
+    ? <>{A.catalogCity} <span className="font-medium text-foreground">{city.name}</span></>
+    : A.catalogHint;
   return (
     <div className="flex flex-col gap-1 text-sm">
       <AddressCombobox
-        // Свой мини-индекс и свой центр у каждого города: смена города — новое поле.
-        key={city.id}
+        // Свой мини-индекс и свой центр у каждого региона: смена поиска — новое поле.
+        key={searchCity.id}
         id={ADDRESS_ID}
-        citySlug={city.slug}
-        cityName={city.name}
-        geo={city.geo}
+        citySlug={searchCity.slug}
+        cityName={searchCity.name}
+        geo={searchCity.geo}
         value={address.value}
-        onPick={(hit) => onChange(city.id, { value: addressValueOf(hit, city.name), payload: pickPayload(hit) })}
-        onClear={() => onChange(city.id, { value: null, payload: null })}
+        onPick={(hit) => {
+          // Подпись в поле — как сохранится: без пункта, если он и есть город объявления.
+          const target = cityOfHit(hit) ?? searchCity;
+          onChange(key, { value: addressValueOf(hit, target.name), payload: pickPayload(hit) }, target.id);
+        }}
+        onClear={() => onChange(key, { value: null, payload: null })}
         mode="listing"
         label={A.label}
         labelClassName="mb-1"
@@ -463,6 +558,10 @@ function AddressField({
       />
       {legacy && <p id={hintId} className="text-xs text-muted-foreground">{legacy}</p>}
       {errorLine}
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+        <p className="text-xs text-muted-foreground" aria-live="polite">{catalog}</p>
+        {cities.some((c) => !c.geo) && switchLink(A.otherCity, "text")}
+      </div>
     </div>
   );
 }

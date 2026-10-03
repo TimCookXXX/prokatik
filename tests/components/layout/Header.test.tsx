@@ -5,9 +5,10 @@ vi.mock("@/lib/auth", () => ({ auth: vi.fn(async () => null) }));
 // Header renders HeaderSearch and CitySelector: both read the URL with client
 // hooks, and useRouter() is called at render — without mocks jsdom throws
 // "invariant expected app router to be mounted".
+const nav = vi.hoisted(() => ({ pathname: "/" }));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
-  usePathname: () => "/",
+  usePathname: () => nav.pathname,
   useSearchParams: () => new URLSearchParams(""),
 }));
 // City row is untyped in the mock: only slug/name are read; no need to satisfy the
@@ -19,9 +20,10 @@ vi.mock("@/server/catalog", () => ({
   getActiveCities: vi.fn(async () => activeCities.current),
 }));
 // The geo context of the search panel comes from geo_imports, not from the
-// engine; no city here has geodata, so «Где» is not rendered.
+// engine. By default no city has geodata, so «Где» is not rendered.
+const citiesGeo = vi.hoisted(() => ({ current: new Map<string, unknown>() }));
 vi.mock("@/server/city", () => ({
-  getCitiesGeo: vi.fn(async () => new Map()),
+  getCitiesGeo: vi.fn(async () => citiesGeo.current),
 }));
 
 // Экшен выбора города ходит в куки и в базу — в jsdom его не поднять.
@@ -86,5 +88,35 @@ describe("Header search", () => {
     const form = screen.getByRole("search");
     expect(form).toHaveAttribute("action", "/search");
     expect(form.querySelector('input[type="hidden"][name="city"]')).toHaveValue("spb");
+  });
+
+  // Город шапка узнаёт на клиенте и при переходе не перерисовывается
+  // сервером: «Где» и его мини-индекс обязаны следовать за городом адреса.
+  it("follows the city of the address: «Где» only where the city has geodata", async () => {
+    activeCities.current = [
+      { id: "1", slug: "krasnodar", name: "Краснодар" },
+      { id: "2", slug: "kazan", name: "Казань" },
+    ];
+    citiesGeo.current = new Map([
+      ["krasnodar", { region: "krasnodar", centre: { lat: 45.035, lon: 38.975 }, token: "krasnodar:v1" }],
+    ]);
+    const whereField = () => document.getElementById("where-header-input");
+    try {
+      nav.pathname = "/krasnodar";
+      const header = await Header();
+      const { rerender } = render(<CityPreferenceProvider initialSlug="kazan">{header}</CityPreferenceProvider>);
+      expect(whereField()).toBeInTheDocument();
+
+      nav.pathname = "/kazan/instrumenty";
+      rerender(<CityPreferenceProvider initialSlug="kazan">{header}</CityPreferenceProvider>);
+      expect(whereField()).toBeNull();
+
+      nav.pathname = "/krasnodar/instrumenty";
+      rerender(<CityPreferenceProvider initialSlug="kazan">{header}</CityPreferenceProvider>);
+      expect(whereField()).toBeInTheDocument();
+    } finally {
+      nav.pathname = "/";
+      citiesGeo.current = new Map();
+    }
   });
 });

@@ -7,6 +7,7 @@
 
 import type { SuggestResult } from "@/server/search";
 import type { DateRange } from "@/lib/catalog/filters";
+import type { LocationQuery } from "@/lib/geo/location";
 
 export type { SuggestCategory, SuggestItem, SuggestResult } from "@/server/search";
 
@@ -30,9 +31,13 @@ export function suggestQuery(q: string): string {
 const cache = new Map<string, { value: SuggestResult; at: number }>();
 const inflight = new Map<string, Promise<SuggestResult | null>>();
 
-// Даты — часть ключа: с ними сервер отсеивает занятые на эти дни.
-const keyOf = (city: string, q: string, dates?: DateRange | null) =>
-  `${city}|${q}|${dates?.from ?? ""}|${dates?.to ?? ""}`;
+/** Точка «Где» для подсказок: с ней сервер ищет по всем городам региона, как выдача. */
+export type SuggestWhere = Pick<LocationQuery, "loc" | "lp">;
+
+// Даты и «Где» — часть ключа: с датами сервер отсеивает занятые на эти дни, с
+// точкой — ищет по региону. Точность (lp) набора городов не меняет.
+const keyOf = (city: string, q: string, dates?: DateRange | null, where?: SuggestWhere | null) =>
+  `${city}|${q}|${dates?.from ?? ""}|${dates?.to ?? ""}|${where?.loc ?? ""}`;
 
 function remember(key: string, value: SuggestResult, at = Date.now()) {
   cache.delete(key);
@@ -41,8 +46,10 @@ function remember(key: string, value: SuggestResult, at = Date.now()) {
 }
 
 /** Ответ из кэша без сети — чтобы стирание и повторный набор не ждали дебаунса. */
-export function cachedSuggest(city: string, q: string, dates?: DateRange | null): SuggestResult | undefined {
-  const key = keyOf(city, suggestQuery(q), dates);
+export function cachedSuggest(
+  city: string, q: string, dates?: DateRange | null, where?: SuggestWhere | null,
+): SuggestResult | undefined {
+  const key = keyOf(city, suggestQuery(q), dates, where);
   const hit = cache.get(key);
   if (!hit) return undefined;
   if (Date.now() - hit.at >= CACHE_TTL_MS) {
@@ -55,14 +62,17 @@ export function cachedSuggest(city: string, q: string, dates?: DateRange | null)
 
 /**
  * Подсказки города по запросу; пустой запрос — популярные разделы. С датами в
- * подсказки идут только вещи, свободные на эти дни. null — ответа нет (429,
+ * подсказки идут только вещи, свободные на эти дни; с точкой «Где» — вещи
+ * всего региона, как в выдаче по тому же адресу. null — ответа нет (429,
  * сеть, 5xx): поле показывает «подсказок нет», а строка «Показать все»
  * работает и так. Неудачи не кэшируются.
  */
-export function fetchSuggest(city: string, q: string, dates?: DateRange | null): Promise<SuggestResult | null> {
+export function fetchSuggest(
+  city: string, q: string, dates?: DateRange | null, where?: SuggestWhere | null,
+): Promise<SuggestResult | null> {
   const query = suggestQuery(q);
-  const key = keyOf(city, query, dates);
-  const hit = cachedSuggest(city, query, dates);
+  const key = keyOf(city, query, dates, where);
+  const hit = cachedSuggest(city, query, dates, where);
   if (hit) return Promise.resolve(hit);
   const pending = inflight.get(key);
   if (pending) return pending;
@@ -71,6 +81,10 @@ export function fetchSuggest(city: string, q: string, dates?: DateRange | null):
   if (dates) {
     params.set("from", dates.from);
     params.set("to", dates.to);
+  }
+  if (where) {
+    params.set("loc", where.loc);
+    if (where.lp) params.set("lp", where.lp);
   }
   const request = fetch(`/api/search/suggest?${params}`)
     .then(async (res) => {
