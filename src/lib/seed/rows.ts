@@ -25,6 +25,8 @@ export interface SeedCityRow {
   region: string | null;
   lat: number | null;
   lon: number | null;
+  /** Регион геоданных (cities.geo_region): ключ импорта `pnpm geo:import`. */
+  geoRegion: string | null;
 }
 
 export interface SeedUserRow {
@@ -70,7 +72,7 @@ export interface SeedIssue {
   message: string;
 }
 
-export const CITY_COLUMNS = ["slug", "name", "name_locative", "region", "lat", "lon"];
+export const CITY_COLUMNS = ["slug", "name", "name_locative", "region", "lat", "lon", "geo_region"];
 export const USER_COLUMNS = ["key", "email", "name", "phone", "city_slug", "bio", "cover", "is_verified"];
 export const LISTING_COLUMNS = [
   "owner", "city", "category", "title", "description", "location", "price_day",
@@ -152,6 +154,9 @@ const cityShape = z.object({
   name_locative: z.string().min(1, "name_locative пустой — без него заголовок каталога соберётся без предлога")
     .max(100, "name_locative длиннее 100 символов"),
   region: z.string().max(100, "region длиннее 100 символов"),
+  // Формат — как у ключа импорта (scripts/geo-import.ts, REGION_RE).
+  geo_region: z.string().regex(/^([a-z][a-z0-9-]{1,39})?$/,
+    "geo_region — ключ региона геоданных латиницей строчными, как в pnpm geo:import --region"),
 });
 
 const userShape = z.object({
@@ -176,6 +181,7 @@ function parseCityRow(row: CsvRow, push: (m: string) => void): SeedCityRow | nul
   const shape = cityShape.safeParse({
     slug: row.slug ?? "", name: row.name ?? "",
     name_locative: row.name_locative ?? "", region: row.region ?? "",
+    geo_region: (row.geo_region ?? "").trim(),
   });
   if (!shape.success) { push(firstZodMessage(shape.error)); return null; }
 
@@ -195,10 +201,22 @@ function parseCityRow(row: CsvRow, push: (m: string) => void): SeedCityRow | nul
     lon = parseFloatCell(row.lon);
     if (lon === null) { push("lon не число"); return null; }
   }
+  // Центр города — точка, а не половина точки.
+  if ((lat === null) !== (lon === null)) { push("lat и lon заполняются парой"); return null; }
+  if (lat !== null && Math.abs(lat) > 90) { push("lat вне диапазона −90…90"); return null; }
+  if (lon !== null && Math.abs(lon) > 180) { push("lon вне диапазона −180…180"); return null; }
+
+  const geoRegion = orNull(shape.data.geo_region);
+  // От центра ранжируются подсказки адресов: без него в пригороде они уезжали
+  // бы к самому крупному городу региона.
+  if (geoRegion && lat === null) {
+    push("geo_region без lat/lon — у города с геоданными нужен центр");
+    return null;
+  }
 
   return {
     slug, name: shape.data.name, nameLocative: shape.data.name_locative,
-    region: orNull(row.region), lat, lon,
+    region: orNull(row.region), lat, lon, geoRegion,
   };
 }
 

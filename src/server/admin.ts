@@ -4,7 +4,7 @@ import { count, desc, eq, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { getDb } from "@/lib/db";
 import {
-  bookingRequests, categories, cities, listings, users,
+  bookingRequests, categories, cities, geoImports, listings, users,
 } from "@db/schema";
 
 export async function adminListListings(limit = 200) {
@@ -31,6 +31,14 @@ export async function adminListCities() {
     })
     .from(cities)
     .orderBy(cities.name);
+}
+
+// Регионы геоданных, загруженные `pnpm geo:import`, — выбор в форме города.
+export async function adminListGeoRegions(): Promise<string[]> {
+  const rows = await getDb().selectDistinct({ region: geoImports.region })
+    .from(geoImports)
+    .orderBy(geoImports.region);
+  return rows.map((r) => r.region);
 }
 
 export async function adminListCategories() {

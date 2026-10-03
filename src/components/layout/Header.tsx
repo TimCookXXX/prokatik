@@ -7,13 +7,14 @@ import { auth } from "@/lib/auth";
 import { authPanelProps } from "@/lib/auth/panel-props";
 import { LoginTrigger } from "@/components/auth/LoginTrigger";
 import { getActiveCities } from "@/server/catalog";
+import { getCitiesGeo } from "@/server/city";
 import { UserMenu } from "@/components/auth/UserMenu";
 import { CitySelector } from "./CitySelector";
 import type { SearchCity } from "@/components/search/SearchBar";
 import { HeaderSearch } from "./HeaderSearch";
 
 export async function Header() {
-  const [session, cities] = await Promise.all([auth(), getActiveCities()]);
+  const [session, cities, citiesGeo] = await Promise.all([auth(), getActiveCities(), getCitiesGeo()]);
   const user = session?.user;
   // Аноним входит модалкой, остальные идут прямиком в создание объявления:
   // гейта на ник больше нет.
@@ -28,8 +29,10 @@ export async function Header() {
   // адреса, а где его там нет — из предпочтения, которое layout положил в
   // CityPreferenceProvider. Шапке нужен только список активных — с гео-контекстом
   // каждого, потому что поле «Где» тоже узнаёт свой город лишь на клиенте.
-  // Геоданных пока нет ни у одного города: geo null, «Где» не рисуется.
-  const searchCities: SearchCity[] = cities.map((c) => ({ slug: c.slug, name: c.name, geo: null }));
+  // Гео-контекст движок геокодера не грузит — это метка из geo_imports.
+  const searchCities: SearchCity[] = cities.map((c) => ({
+    slug: c.slug, name: c.name, geo: citiesGeo.get(c.slug) ?? null,
+  }));
 
   return (
     // Плавающая карточка: сам <header> — прозрачный sticky-контейнер, панель

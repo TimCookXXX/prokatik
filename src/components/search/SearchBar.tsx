@@ -16,13 +16,10 @@ import { WhatField } from "./WhatField";
 import { WhenChip, WhenField } from "./WhenField";
 import { usePopoverLayout } from "./MobileSuggestPanel";
 import { usePanelDates } from "./panel-dates";
+import type { CityGeoContext } from "@/lib/geo/context";
 
 /** Гео-контекст города для «Где»: регион геоданных, центр, версия мини-индекса. */
-export interface CityGeoContext {
-  region: string;
-  centre: { lat: number; lon: number };
-  token: string;
-}
+export type { CityGeoContext };
 
 /** Активный город для панели поиска; geo null — геоданных нет, «Где» не рисуется. */
 export interface SearchCity {

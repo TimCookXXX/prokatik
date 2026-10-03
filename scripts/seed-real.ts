@@ -89,13 +89,16 @@ async function writeAll(db: SeedDb, data: SeedData, photos: Map<string, Photo>):
 
   const cityIds = new Map<string, string>();
   for (const city of data.cities) {
-    // lat/lon пишутся только заполненными: пустая ячейка означает «не знаю», а
-    // не «обнули». Иначе координаты, проставленные руками, стирались бы каждым
-    // прогоном. isActive не трогаем вовсе — отключение города решение админа.
+    // lat/lon и geo_region пишутся только заполненными: пустая ячейка означает
+    // «не знаю», а не «обнули». Иначе координаты и регион, проставленные в
+    // админке, стирались бы каждым прогоном. Обратная сторона: регион,
+    // выключенный в админке аварийно, заполненная ячейка вернёт. isActive не
+    // трогаем вовсе — отключение города решение админа.
     const values = {
       name: city.name, nameLocative: city.nameLocative, region: city.region,
       ...(city.lat === null ? {} : { lat: city.lat }),
       ...(city.lon === null ? {} : { lon: city.lon }),
+      ...(city.geoRegion === null ? {} : { geoRegion: city.geoRegion }),
     };
     const found = await db.select().from(cities).where(eq(cities.slug, city.slug)).limit(1);
     if (found.length > 0) {

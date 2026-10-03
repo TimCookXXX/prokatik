@@ -41,6 +41,7 @@ pnpm db:migrate          # применить миграции
 pnpm db:seed             # демо-данные (идемпотентно)
 pnpm db:seed:real        # реальные данные из seed_real/ (идемпотентно)
 pnpm seed:photos         # фотографии сида: обработать и залить в бакет
+pnpm geo:import <file>   # геоданные региона из JSON в таблицы geo_* (--region krasnodar)
 pnpm db:studio           # drizzle studio
 ```
 
@@ -50,6 +51,9 @@ pnpm db:studio           # drizzle studio
 
 Поднять окружение: `docker compose up -d db` → `pnpm db:migrate && pnpm db:seed`
 → `pnpm dev`. Быстрый вход в dev: `GET /api/dev/login` (или `?role=admin`).
+Адреса в dev — `pnpm db:seed:real` (регион и центр городов) и
+`pnpm geo:import sravniprokat/data/geocoder/build/index.krasnodar.json`
+(выгрузка исходного проекта, в git её нет).
 
 ## Архитектурные принципы
 
@@ -125,6 +129,12 @@ pnpm db:studio           # drizzle studio
   масштабирование.
 - **Индекс поиска «Что» в памяти `app`** — один на процесс, не переживёт
   масштабирование; см. [0022](docs/decisions/0022-search-index-in-app-memory.md).
+- **Геокодер живёт в памяти `app`** — движок региона строится лениво первым
+  запросом к `/api/geo/*`, страницы его не грузят; после импорта геоданных `app`
+  перезапускают. См. [0021](docs/decisions/0021-own-geocoder-and-listing-coordinates.md).
+- **Импорт геоданных — только с машины разработчика.** `pnpm geo:import` поднимает
+  Node до гигабайта и больше; на прод — через SSH-туннель к Postgres
+  ([docs/DEPLOY.md](docs/DEPLOY.md)), не на сервере.
 - **Даты держит только подтверждённая заявка.** Создание заявки календарь не
   трогает.
 - **Диапазон брони включает обе границы.**

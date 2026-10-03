@@ -13,6 +13,9 @@ export interface EditableCity {
   name: string;
   region: string | null;
   nameLocative: string | null;
+  lat: number | null;
+  lon: number | null;
+  geoRegion: string | null;
 }
 
 /* Форма города — и добавление, и правка. Слаг не редактируется: он лежит в
@@ -21,10 +24,26 @@ export interface EditableCity {
  * Падеж («в Казани») предлагается правилом, пока его не тронули руками:
  * правило берёт частые формы, а «Нижний Новгород» и «Ростов-на-Дону» — забота
  * человека. Поле необязательное: пустое означает, что заголовки соберутся без
- * предлога, а не что покажется неверный падеж. */
-export function CityForm({ city, onDone }: { city?: EditableCity; onDone?: () => void }) {
+ * предлога, а не что покажется неверный падеж.
+ *
+ * Геоданные: центр города и регион из загруженных `pnpm geo:import`. Без
+ * региона у города нет поиска адресов; выбор «нет» — аварийный выключатель
+ * геокодера для города. Проверяет всё action — форма лишь собирает поля. */
+export function CityForm({
+  city,
+  geoRegions,
+  onDone,
+}: {
+  city?: EditableCity;
+  /** Загруженные регионы геоданных (geo_imports). */
+  geoRegions: readonly string[];
+  onDone?: () => void;
+}) {
   const [name, setName] = useState(city?.name ?? "");
   const [region, setRegion] = useState(city?.region ?? "");
+  const [lat, setLat] = useState(city?.lat?.toString() ?? "");
+  const [lon, setLon] = useState(city?.lon?.toString() ?? "");
+  const [geoRegion, setGeoRegion] = useState(city?.geoRegion ?? "");
   // У заведённого города падежа может не быть — тогда подсказываем его и здесь,
   // иначе поле открывалось бы пустым и «Сохранить» снова записало бы NULL.
   const [nameLocative, setNameLocative] = useState(
@@ -44,13 +63,16 @@ export function CityForm({ city, onDone }: { city?: EditableCity; onDone?: () =>
     e.preventDefault();
     setError(null);
     startTransition(async () => {
-      const payload = { name, region, nameLocative };
+      const payload = { name, region, nameLocative, lat, lon, geoRegion };
       const r = city
         ? await adminUpdateCity(city.id, payload)
         : await adminCreateCity(payload);
       if (!r.ok) { setError(r.error); return; }
       if (city) onDone?.();
-      else { setName(""); setRegion(""); setNameLocative(""); setLocativeTouched(false); }
+      else {
+        setName(""); setRegion(""); setNameLocative(""); setLocativeTouched(false);
+        setLat(""); setLon(""); setGeoRegion("");
+      }
     });
   };
 
@@ -72,6 +94,37 @@ export function CityForm({ city, onDone }: { city?: EditableCity; onDone?: () =>
       <label className="flex flex-col gap-1 text-xs text-muted-foreground">
         Регион
         <input value={region} onChange={(e) => setRegion(e.target.value)} className={INPUT} />
+      </label>
+      <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+        Широта центра
+        <input
+          inputMode="decimal"
+          value={lat}
+          placeholder="45.0351"
+          onChange={(e) => setLat(e.target.value)}
+          className={`${INPUT} w-28`}
+        />
+      </label>
+      <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+        Долгота центра
+        <input
+          inputMode="decimal"
+          value={lon}
+          placeholder="38.9772"
+          onChange={(e) => setLon(e.target.value)}
+          className={`${INPUT} w-28`}
+        />
+      </label>
+      <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+        Геоданные
+        <select value={geoRegion} onChange={(e) => setGeoRegion(e.target.value)} className={INPUT}>
+          <option value="">— нет —</option>
+          {/* Сохранённый регион, которого больше нет в импортах, остаётся в
+            * списке: иначе селект молча показал бы «нет», а «Сохранить»
+            * выключил бы геоданные. Action всё равно его отвергнет. */}
+          {geoRegion && !geoRegions.includes(geoRegion) && <option value={geoRegion}>{geoRegion}</option>}
+          {geoRegions.map((r) => <option key={r} value={r}>{r}</option>)}
+        </select>
       </label>
       <Button type="submit" size="sm" pending={pending}>{city ? "Сохранить" : "Добавить"}</Button>
       {city && onDone && (

@@ -9,7 +9,7 @@ export type LimitKind =
   | "mail_ip" | "mail_daily" | "mail_booking" | "password_change"
   | "chat_message" | "chat_thread" | "chat_read"
   | "realtime_sync"
-  | "search";
+  | "search" | "geo";
 
 // Потолок отправки на весь сервис за сутки. Яндекс даёт 300 писем в сутки по
 // SMTP и режет раньше, если письма однотипные, — упереться хочется в свой
@@ -82,6 +82,9 @@ const RULES: Record<LimitKind, Rule> = {
   // нажатие с дебаунсом, поэтому потолок высокий: он против выкачивания и
   // долбёжки, а не против быстрого набора.
   search: { windowMs: 60 * 1000, maxInWindow: 300, gapMs: 0, store: "public" },
+  // Подсказки адресов и обратный геокодер — тот же поток нажатий, тот же
+  // потолок; он же мешает выкачать базу адресов перебором.
+  geo: { windowMs: 60 * 1000, maxInWindow: 300, gapMs: 0, store: "public" },
 };
 
 // Аварийный выключатель на время ручных проверок. Читается один раз при старте

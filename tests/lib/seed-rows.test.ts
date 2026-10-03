@@ -4,7 +4,7 @@ import { parseHandover, parsePhotos, parseSeedData } from "@/lib/seed/rows";
 
 const city = (over: Partial<CsvRow> = {}): CsvRow => ({
   slug: "krasnodar", name: "Краснодар", name_locative: "Краснодаре",
-  region: "Краснодарский край", lat: "", lon: "", ...over,
+  region: "Краснодарский край", lat: "", lon: "", geo_region: "", ...over,
 });
 
 const user = (over: Partial<CsvRow> = {}): CsvRow => ({
@@ -214,6 +214,65 @@ describe("parseSeedData", () => {
       .toEqual([expect.stringContaining("без пути")]);
     expect(messages(parse({ listings: [listing({ photos: "Фото/a.webp" })] })))
       .toEqual([expect.stringContaining("без пути")]);
+  });
+});
+
+describe("parseSeedData: геоданные городов", () => {
+  it("центр и регион геоданных разбираются в числа и ключ", () => {
+    const res = parse({ cities: [city({ lat: "45.0351532", lon: "38,9772396", geo_region: "krasnodar" })] });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.data.cities[0]).toMatchObject({ lat: 45.0351532, lon: 38.9772396, geoRegion: "krasnodar" });
+  });
+
+  it("пустой geo_region — NULL: у города геоданных нет", () => {
+    const res = parse();
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.data.cities[0]).toMatchObject({ lat: null, lon: null, geoRegion: null });
+  });
+
+  it("регион без центра — ошибка: подсказки адресов ранжируются от него", () => {
+    expect(messages(parse({ cities: [city({ geo_region: "krasnodar" })] })))
+      .toEqual([expect.stringMatching(/^cities\.csv:2 geo_region без lat\/lon/)]);
+  });
+
+  it("lat без lon — ошибка", () => {
+    expect(messages(parse({ cities: [city({ lat: "45.03" })] })))
+      .toEqual([expect.stringMatching(/парой/)]);
+  });
+
+  it("координаты вне диапазона — ошибка", () => {
+    expect(messages(parse({ cities: [city({ lat: "95", lon: "38.97" })] })))
+      .toEqual([expect.stringMatching(/lat вне диапазона/)]);
+    expect(messages(parse({ cities: [city({ lat: "45", lon: "190" })] })))
+      .toEqual([expect.stringMatching(/lon вне диапазона/)]);
+  });
+
+  it("регион — ключ импорта латиницей", () => {
+    expect(messages(parse({ cities: [city({ lat: "45", lon: "39", geo_region: "Краснодар" })] })))
+      .toEqual([expect.stringMatching(/geo_region/)]);
+  });
+
+  it("нет колонки geo_region — ошибка про шапку", () => {
+    const { geo_region: _drop, ...noRegion } = city();
+    expect(messages(parse({ cities: [noRegion] })))
+      .toEqual([expect.stringMatching(/^cities\.csv:1 .*geo_region/)]);
+  });
+
+  // Реальный файл: оба города — один регион геоданных с центрами из индекса.
+  it("seed_real/cities.csv разбирается и несёт регион и центр обоих городов", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { parseCsv } = await import("@/lib/csv");
+    const rows = parseCsv(readFileSync("seed_real/cities.csv", "utf8"));
+    const res = parse({ cities: rows, users: [user({ city_slug: "" })], listings: [listing()] });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    for (const c of res.data.cities) {
+      expect(c.geoRegion).toBe("krasnodar");
+      expect(c.lat).not.toBeNull();
+      expect(c.lon).not.toBeNull();
+    }
   });
 });
 

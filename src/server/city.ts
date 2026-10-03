@@ -9,13 +9,15 @@
 // тестируется; этот модуль только собирает для неё входы.
 
 import { cookies } from "next/headers";
-import { eq } from "drizzle-orm";
+import { asc, desc, eq } from "drizzle-orm";
 import { getDb } from "@/lib/db";
-import { cities, users } from "@db/schema";
+import { cities, geoImports, users } from "@db/schema";
 import { auth } from "@/lib/auth";
 import { pickCitySlug } from "@/lib/catalog/current-city";
 import { CITY_COOKIE } from "@/lib/catalog/city-cookie";
+import type { CityGeoContext } from "@/lib/geo/context";
 import { getActiveCities, type City } from "@/server/catalog";
+import { geoDataToken, isoSeconds } from "@/server/geocoder-index";
 
 async function cookieCitySlug(): Promise<string | undefined> {
   return (await cookies()).get(CITY_COOKIE)?.value;
@@ -75,4 +77,73 @@ export async function resolveOwnCity(): Promise<City | null> {
     active.map((c) => c.slug),
   );
   return bySlug(active, slug);
+}
+
+// ------------------------------------------------------------------ геоданные
+
+export const CITIES_GEO_TTL_MS = 60_000;
+
+interface CitiesGeoCache {
+  at: number;
+  map: ReadonlyMap<string, CityGeoContext | null>;
+}
+
+// На globalThis, как кэши поиска и геокодера: шапка, роуты /api/geo/* и
+// actions живут в разных бандлах, а кэш нужен один.
+const G = globalThis as { __inrentaCitiesGeo?: CitiesGeoCache };
+
+/**
+ * Гео-контекст активных городов по слагу; null — у города геоданных нет
+ * (geo_region пуст, импорта региона нет или не задан центр), и «Где» у него не
+ * рисуется. Зовётся на каждой странице (шапка), поэтому движок геокодера не
+ * загружает: метка берётся из geo_imports. Кэш — 60 с; правки городов в
+ * админке сбрасывают его сразу.
+ *
+ * Ошибка чтения не роняет страницу: геоданные просто выключены до следующего
+ * запроса (ошибка не кэшируется). `strict` — для /api/geo/*: там ошибка уходит
+ * наверх, и роут отвечает некэшируемым 503, а не кэшируемым «адресов нет».
+ */
+export async function getCitiesGeo(
+  opts: { strict?: boolean } = {},
+): Promise<ReadonlyMap<string, CityGeoContext | null>> {
+  const hit = G.__inrentaCitiesGeo;
+  if (hit && Date.now() - hit.at < CITIES_GEO_TTL_MS) return hit.map;
+
+  try {
+    const db = getDb();
+    const [rows, imports] = await Promise.all([
+      db.select({ slug: cities.slug, lat: cities.lat, lon: cities.lon, geoRegion: cities.geoRegion })
+        .from(cities)
+        .where(eq(cities.isActive, true)),
+      // Последний импорт каждого региона (строка на регион, но порядок по id
+      // держит правило «последний» и без этого допущения).
+      db.selectDistinctOn([geoImports.region], {
+        region: geoImports.region, version: geoImports.version, builtAt: geoImports.builtAt,
+      })
+        .from(geoImports)
+        .orderBy(asc(geoImports.region), desc(geoImports.id)),
+    ]);
+
+    const tokens = new Map(imports.map((i) => [
+      i.region, geoDataToken(i.region, { version: i.version, builtAt: isoSeconds(i.builtAt) }),
+    ]));
+    const map = new Map<string, CityGeoContext | null>();
+    for (const c of rows) {
+      const token = c.geoRegion ? tokens.get(c.geoRegion) : undefined;
+      map.set(c.slug, token && c.lat !== null && c.lon !== null
+        ? { region: c.geoRegion!, centre: { lat: c.lat, lon: c.lon }, token }
+        : null);
+    }
+    G.__inrentaCitiesGeo = { at: Date.now(), map };
+    return map;
+  } catch (e) {
+    if (opts.strict) throw e;
+    console.error("[geo] cities geo context failed:", (e as Error).message);
+    return new Map();
+  }
+}
+
+/** Сброс кэша гео-контекста: правка города в админке, тесты. */
+export function invalidateCitiesGeo(): void {
+  G.__inrentaCitiesGeo = undefined;
 }

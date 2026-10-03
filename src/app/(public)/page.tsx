@@ -5,7 +5,7 @@ import { authPanelProps } from "@/lib/auth/panel-props";
 import {
   getAllCategories, getListingCountsByCategory, getRecentListings, rollupToRoots,
 } from "@/server/catalog";
-import { resolveViewerCity } from "@/server/city";
+import { getCitiesGeo, resolveViewerCity } from "@/server/city";
 import { Hero } from "@/components/home/Hero";
 import { CategoryTiles } from "@/components/home/CategoryTiles";
 import { RecentItems } from "@/components/home/RecentItems";
@@ -22,10 +22,11 @@ export const metadata: Metadata = {
 };
 
 export default async function HomePage() {
-  const [session, defaultCity, cats] = await Promise.all([
+  const [session, defaultCity, cats, citiesGeo] = await Promise.all([
     auth(),
     resolveViewerCity(),
     getAllCategories(),
+    getCitiesGeo(),
   ]);
 
   const roots = cats.filter((c) => c.parentId === null);
@@ -44,10 +45,9 @@ export default async function HomePage() {
         .map((c) => ({ slug: c.slug, name: c.name, vertical: c.vertical }))
     : [];
 
-  // Город поиска в hero — та же запись, что у шапки. Геоданных у городов пока
-  // нет: geo null, «Где» не рисуется.
+  // Город поиска в hero — та же запись, что у шапки, с тем же гео-контекстом.
   const heroCity = defaultCity
-    ? { slug: defaultCity.slug, name: defaultCity.name, geo: null }
+    ? { slug: defaultCity.slug, name: defaultCity.name, geo: citiesGeo.get(defaultCity.slug) ?? null }
     : undefined;
 
   const user = session?.user;

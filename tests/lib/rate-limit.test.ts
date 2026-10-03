@@ -158,4 +158,24 @@ describe("rate limit: публичные ручки", () => {
       vi.useRealTimers();
     }
   });
+
+  it("limits address suggestions as geo: 300 a minute per ip, apart from search", () => {
+    for (let i = 0; i < 300; i++) expect(checkLimit("1.2.3.4", "geo")).toEqual({ ok: true });
+    expect(checkLimit("1.2.3.4", "geo").ok).toBe(false);
+    // Свой счётчик: выжатый geo не трогает подсказки «Что» того же адреса.
+    expect(checkLimit("1.2.3.4", "search")).toEqual({ ok: true });
+    expect(checkLimit("5.6.7.8", "geo")).toEqual({ ok: true });
+  });
+
+  it("geo keys live in the public store: a flood does not evict a login counter", () => {
+    const login = "a@ya.ru|9.9.9.9";
+    for (let i = 0; i < 10; i++) checkLimit(login, "login");
+    const before = _storeSizesForTests().private;
+
+    for (let i = 0; i < 30_000; i++) checkLimit(`10.2.${i >> 8}.${i & 255}`, "geo");
+
+    expect(_storeSizesForTests().private).toBe(before);
+    expect(_storeSizesForTests().public).toBeLessThanOrEqual(20_000);
+    expect(checkLimit(login, "login").ok).toBe(false);
+  });
 });

@@ -11,13 +11,17 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(""),
 }));
 // City row is untyped in the mock: only slug/name are read; no need to satisfy the
-// full City type (real rows have more columns). The geo context of the search
-// panel is built from the same rows (geo: null until the geocoder stage).
+// full City type (real rows have more columns).
 const activeCities = vi.hoisted(() => ({
   current: [{ id: "1", slug: "msk", name: "Москва" }] as { id: string; slug: string; name: string }[],
 }));
 vi.mock("@/server/catalog", () => ({
   getActiveCities: vi.fn(async () => activeCities.current),
+}));
+// The geo context of the search panel comes from geo_imports, not from the
+// engine; no city here has geodata, so «Где» is not rendered.
+vi.mock("@/server/city", () => ({
+  getCitiesGeo: vi.fn(async () => new Map()),
 }));
 
 // Экшен выбора города ходит в куки и в базу — в jsdom его не поднять.
