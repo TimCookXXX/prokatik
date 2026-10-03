@@ -45,6 +45,7 @@ import { notify } from "@/server/notifications";
 import { publish } from "@/server/realtime";
 import { requestNotify } from "@/lib/realtime/events";
 import { invalidateSearchIndex } from "@/server/search-index";
+import { resolveListingAddress } from "@/server/listing-address";
 
 export type ActionResult<T = void> =
   | { ok: true; data: T }
@@ -74,6 +75,12 @@ export async function createListing(input: unknown): Promise<ActionResult<{ list
   const slug = slugify(form.title);
   if (!slug) return { ok: false, error: "Название должно содержать буквы или цифры" };
 
+  // До любой записи: отказ по адресу не должен оставить переименованного
+  // продавца без объявления. У новой вещи «оставить как было» нечего.
+  const address = await resolveListingAddress(form.address, { cityId: form.cityId, current: null });
+  if (!address.ok) return { ok: false, error: address.error };
+  if (!address.fields) return { ok: false, error: "invalid_input" };
+
   // Пустое поле не затирает имя: значит человек его просто не трогал.
   if (sellerName.name) {
     await getDb().update(users).set({ name: sellerName.name }).where(eq(users.id, owner.userId));
@@ -89,7 +96,7 @@ export async function createListing(input: unknown): Promise<ActionResult<{ list
     title: form.title,
     slug,
     description: form.description || null,
-    location: form.location || null,
+    ...address.fields,
     priceDay: form.priceDay,
     depositAmount: form.depositType === "money" ? form.depositAmount : null,
     depositType: form.depositType,
@@ -115,13 +122,27 @@ export async function updateListing(listingId: string, input: unknown): Promise<
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "invalid_input" };
   const form = parsed.data;
 
-  const res = await getDb().update(listings)
+  // Текущий адрес — для `keep`: правка цены или фото адрес не переспрашивает,
+  // но смена города или строка без адреса требуют выбрать его заново.
+  const db = getDb();
+  const currentRows = await db
+    .select({ cityId: listings.cityId, address: listings.address, geoPrecision: listings.geoPrecision })
+    .from(listings)
+    .where(and(eq(listings.id, listingId), eq(listings.ownerUserId, owner.userId)))
+    .limit(1);
+  if (currentRows.length === 0) return { ok: false, error: "not_found" };
+
+  const address = await resolveListingAddress(form.address, { cityId: form.cityId, current: currentRows[0] });
+  if (!address.ok) return { ok: false, error: address.error };
+
+  const res = await db.update(listings)
     .set({
       cityId: form.cityId,
       categoryId: form.categoryId,
       title: form.title, // слаг сохраняем: URL позиции не должен ломаться
       description: form.description || null,
-      location: form.location || null,
+      // keep — колонок адреса в .set() нет вовсе, сохранённая точка остаётся.
+      ...address.fields,
       priceDay: form.priceDay,
       depositAmount: form.depositType === "money" ? form.depositAmount : null,
       depositType: form.depositType,

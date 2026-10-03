@@ -11,6 +11,15 @@ import { formatMonthYearGen } from "@/lib/catalog/dates";
 // Карты-заглушки тут больше нет. Она занимала 280×220 ради серой сетки и
 // названия города, которое и так стоит строкой левее; интеграции карт нет, и
 // пустая рамка только отодвигала описание вниз.
+/* Город дописывается к подписи сам: в location его нет, если пункт адреса и
+ * есть город объявления. Подпись, равная городу (адрес — сам Яблоновский или
+ * текст «Казань» в городе без геоданных), второй раз его не повторяет. */
+function placeLine(location: string | null | undefined, cityName: string): string {
+  const label = location?.trim();
+  if (!label || label.toLowerCase() === cityName.toLowerCase()) return cityName;
+  return `${label}, ${cityName}`;
+}
+
 export function OwnerCard({
   name, href, image, isVerified, location, cityName, createdAt,
   chatHref, isAuthed, isOwn, authProps,
@@ -19,6 +28,10 @@ export function OwnerCard({
   href: string;
   image: string | null;
   isVerified: boolean;
+  /**
+   * Публичная подпись адреса (listings.location): улица, ЖК или пункт — без
+   * номера дома. Полный адрес и точка сюда не приходят вовсе.
+   */
   location?: string | null;
   cityName: string;
   createdAt: Date;
@@ -62,7 +75,7 @@ export function OwnerCard({
         <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
           <span className="inline-flex items-center gap-1.5">
             <MapPin className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-            {location ? `${location}, ${cityName}` : cityName}
+            {placeLine(location, cityName)}
           </span>
           <span className="inline-flex items-center gap-1.5">
             <CalendarClock className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />

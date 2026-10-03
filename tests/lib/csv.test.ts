@@ -1,5 +1,6 @@
+import { readFileSync } from "node:fs";
 import { describe, it, expect } from "vitest";
-import { CsvError, parseCsv } from "@/lib/csv";
+import { CsvError, parseCsv, stringifyCsv } from "@/lib/csv";
 
 describe("parseCsv", () => {
   it("разбирает шапку и строки", () => {
@@ -78,5 +79,30 @@ describe("parseCsv", () => {
   it("файл без строк данных — пустой список", () => {
     expect(parseCsv("a,b\n")).toEqual([]);
     expect(parseCsv("")).toEqual([]);
+  });
+});
+
+describe("stringifyCsv", () => {
+  it("кавычит только ячейки с запятой, кавычкой или переводом строки", () => {
+    const out = stringifyCsv(
+      [{ a: "дрель", b: 'Доска 10"10, надувная', c: "первая\nвторая" }],
+      ["a", "b", "c"],
+    );
+    expect(out).toBe('a,b,c\nдрель,"Доска 10""10, надувная","первая\nвторая"\n');
+  });
+
+  it("пишет колонки в заданном порядке, отсутствующие — пустыми", () => {
+    expect(stringifyCsv([{ b: "2", a: "1" }], ["a", "c", "b"])).toBe("a,c,b\n1,,2\n");
+  });
+
+  // Её пишет geo:backfill поверх таблицы, которую правит человек: описания там
+  // многострочные, с запятыми и кавычками. Сдвиг хотя бы одной ячейки
+  // перепутал бы описание с адресом.
+  it("кругооборот на реальном seed_real/listings.csv даёт те же строки", () => {
+    const text = readFileSync("seed_real/listings.csv", "utf8");
+    const rows = parseCsv(text);
+    const columns = Object.keys(rows[0]);
+    expect(rows.length).toBeGreaterThan(0);
+    expect(parseCsv(stringifyCsv(rows, columns))).toEqual(rows);
   });
 });

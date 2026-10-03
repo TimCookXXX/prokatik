@@ -4,6 +4,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { requireAuthState } from "@/lib/auth/guard";
 import { countNewRequestsByListing, getOwnerListings } from "@/server/owner";
+import { getCitiesGeo } from "@/server/city";
 import {
   getActiveCities, getAllCategories, getAvailabilityRows, listingPhotos,
 } from "@/server/catalog";
@@ -35,11 +36,12 @@ export default async function CabinetListingsPage({
 
   const view = parseView((await searchParams).view);
 
-  const [items, cities, cats, pendingByListing] = await Promise.all([
+  const [items, cities, cats, pendingByListing, citiesGeo] = await Promise.all([
     getOwnerListings(session.user.id),
     getActiveCities(),
     getAllCategories(),
     countNewRequestsByListing(session.user.id),
+    getCitiesGeo(),
   ]);
   const citySlug = new Map(cities.map((c) => [c.id, c.slug]));
   const catSlug = new Map(cats.map((c) => [c.id, c.slug]));
@@ -83,6 +85,10 @@ export default async function CabinetListingsPage({
       // ждущей ответа — прочерк тут врал бы.
       pendingRequests: pendingByListing.get(l.id) ?? 0,
       publicHref,
+      // Без точки и в городе, где адрес можно выбрать из подсказок. Архив не
+      // просим: в каталоге его нет, и расстояния там некому показывать.
+      needsAddress: l.status !== "archived" && l.geoPrecision === "city"
+        && !!cSlug && !!citiesGeo.get(cSlug),
     };
   });
 

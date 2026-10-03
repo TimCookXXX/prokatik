@@ -146,6 +146,8 @@ async function writeAll(db: SeedDb, data: SeedData, photos: Map<string, Photo>):
     }
   }
 
+  const cityNames = new Map(data.cities.map((c) => [c.slug, c.name]));
+
   let photoCount = 0;
   let created = 0;
   let updated = 0;
@@ -161,7 +163,15 @@ async function writeAll(db: SeedDb, data: SeedData, photos: Map<string, Photo>):
       categoryId: categoryIds.get(categoryPath(listing.categoryRoot, listing.categoryChild))!,
       title: listing.title,
       description: listing.description,
+      // Адрес и точку ищет pnpm geo:backfill --csv, сид их только переносит —
+      // и сравнивает в differs() наравне с прочими полями. Пустой адрес бывает
+      // лишь в городе без геоданных: тогда он — подпись или сам город, как у
+      // формы, где адрес такого города вводится текстом.
       location: listing.location,
+      address: listing.address ?? listing.location ?? cityNames.get(listing.city)!,
+      lat: listing.lat,
+      lon: listing.lon,
+      geoPrecision: listing.precision,
       priceDay: listing.priceDay,
       depositAmount: listing.depositAmount,
       depositType: listing.depositType,

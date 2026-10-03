@@ -146,6 +146,10 @@ export const categories = pgTable("categories", {
 
 export const depositType = pgEnum("deposit_type", ["money", "document", "none"]);
 export const listingStatus = pgEnum("listing_status", ["active", "hidden", "archived"]);
+// Точность точки адреса объявления: дом, до улицы, до пункта (микрорайон,
+// посёлок, ЖК) или точки нет вовсе — город без геоданных или адрес не нашёлся.
+// Значения — GEO_PRECISIONS в src/lib/geo/precision.ts.
+export const listingGeoPrecision = pgEnum("listing_geo_precision", ["house", "street", "place", "city"]);
 
 // Товар принадлежит юзеру напрямую. Город и категория — атрибуты товара.
 // slug читаемый и НЕ уникальный: уникальность URL даёт id в хвосте пути.
@@ -158,7 +162,16 @@ export const listings = pgTable("listings", {
   title: varchar("title", { length: 200 }).notNull(),
   slug: varchar("slug", { length: 80 }).notNull(),
   description: text("description"),
-  location: varchar("location", { length: 120 }),   // район/ориентир выдачи, опц.
+  // Адрес получения. address — полная подпись, выбранная владельцем (может
+  // быть с номером дома), её видит только он сам в форме. location — публичная
+  // подпись без номера дома: её показывает страница объявления. Точку и
+  // address публичные чтения не выбирают вовсе (publicListingColumns в
+  // src/server/catalog.ts). NULL в address — только у строк до backfill.
+  location: varchar("location", { length: 120 }),
+  address: varchar("address", { length: 200 }),
+  lat: doublePrecision("lat"),
+  lon: doublePrecision("lon"),
+  geoPrecision: listingGeoPrecision("geo_precision").notNull().default("city"),
   // Цена одна: аренда посуточная — см. docs/BACKLOG.md о снятых тарифах.
   priceDay: integer("price_day").notNull(),
   depositAmount: integer("deposit_amount"),
@@ -182,6 +195,8 @@ export const listings = pgTable("listings", {
 }, (t) => ({
   cityCategoryStatusIdx: index("listings_city_category_status_idx").on(t.cityId, t.categoryId, t.status),
   ownerIdx: index("listings_owner_idx").on(t.ownerUserId),
+  // Точка — пара, а не половина: расстояние считается только по обеим.
+  pointPair: check("listings_point_pair", sql`(${t.lat} is null) = (${t.lon} is null)`),
 }));
 
 // availability — по строке на (listing, дата). Свободно = quantity - booked - blocked.

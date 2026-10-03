@@ -77,8 +77,12 @@ www.{$DOMAIN} {
 	#     точно, а не префиксом, поэтому один только `.../bucket` разрешил бы
 	#     ровно этот адрес и ни одной картинки внутри. Вариант со слэшем даёт
 	#     префикс; вариант без — страхует значение, уже пришедшее со слэшем.
+	#   worker-src 'self' — воркер подсказок адресов (src/components/search/
+	#     geo-worker.ts). Turbopack собирает его чанком со своего домена
+	#     (/_next/static/chunks/turbopack-worker-*.js), не blob:, — blob: не
+	#     разрешаем. Без воркера поле собирает мини-индекс в главном потоке.
 	# Одной строкой намеренно: перенос внутри значения заголовка недопустим.
-	header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' https://mc.yandex.ru; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://mc.yandex.ru {$STORAGE_PUBLIC_BASE} {$STORAGE_PUBLIC_BASE}/; connect-src 'self' wss://{$DOMAIN} https://mc.yandex.ru; frame-src https://mc.yandex.ru; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; upgrade-insecure-requests"
+	header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' https://mc.yandex.ru; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://mc.yandex.ru {$STORAGE_PUBLIC_BASE} {$STORAGE_PUBLIC_BASE}/; connect-src 'self' wss://{$DOMAIN} https://mc.yandex.ru; frame-src https://mc.yandex.ru; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; upgrade-insecure-requests"
 
 	header {
 		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"

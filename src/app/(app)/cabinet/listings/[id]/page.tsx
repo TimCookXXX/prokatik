@@ -17,6 +17,7 @@ import { getListingThreads } from "@/server/chat";
 import {
   getActiveCities, getAllCategories, getAvailabilityRows, listingPhotos,
 } from "@/server/catalog";
+import { getCitiesGeo } from "@/server/city";
 import { leafCategories } from "@/lib/owner/categories";
 import { listingPath } from "@/lib/catalog/listing-path";
 import { ListingForm } from "@/components/cabinet/ListingForm";
@@ -96,7 +97,7 @@ export default async function CabinetListingPage({
 
   // Справочники нужны только форме — на самой странице вещи их не читаем.
   if (editing) {
-    const [cities, cats] = await Promise.all([getActiveCities(), getAllCategories()]);
+    const [cities, cats, geo] = await Promise.all([getActiveCities(), getAllCategories(), getCitiesGeo()]);
     // Та же раскладка, что и у страницы вещи: отступ под стрелкой задаёт gap
     // родителя, а не собственный margin ссылки. Иначе он складывался с gap'ом
     // на одном экране и не складывался на другом.
@@ -107,13 +108,21 @@ export default async function CabinetListingPage({
           mode="edit"
           listingId={listing.id}
           returnHref={selfHref}
-          cities={cities.map((c) => ({ id: c.id, name: c.name }))}
+          cities={cities.map((c) => ({ id: c.id, name: c.name, slug: c.slug, geo: geo.get(c.slug) ?? null }))}
           categories={leafCategories(cats)}
+          // Полный адрес и точка — владельцу в его же форме; публичные
+          // страницы их не выбирают (publicListingColumns).
+          savedAddress={listing.address === null ? null : {
+            label: listing.address,
+            precision: listing.geoPrecision,
+            point: listing.lat !== null && listing.lon !== null
+              ? { lat: listing.lat, lon: listing.lon }
+              : null,
+          }}
           initial={{
             title: listing.title,
             cityId: listing.cityId,
             categoryId: listing.categoryId,
-            location: listing.location ?? "",
             description: listing.description ?? "",
             priceDay: String(listing.priceDay),
             depositType: listing.depositType,

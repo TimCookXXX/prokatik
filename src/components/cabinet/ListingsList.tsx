@@ -12,7 +12,8 @@
 
 import Link from "next/link";
 import Image from "next/image";
-import { ImageOff } from "lucide-react";
+import { ImageOff, MapPin } from "lucide-react";
+import { content } from "@theme/content";
 import { formatDeposit, formatPrice } from "@/lib/catalog/format";
 import { ListingRowActions } from "@/components/cabinet/ListingRowActions";
 
@@ -30,6 +31,12 @@ export interface ListingRow {
   quantity: number;
   pendingRequests: number;
   publicHref: string | null;
+  /**
+   * Точки у адреса нет, а у города есть геоданные: legacy-строка или адрес, не
+   * найденный при backfill. Покупатели не видят расстояния, и форма правки не
+   * сохранится без выбора адреса из подсказок, — говорим об этом заранее.
+   */
+  needsAddress: boolean;
 }
 
 const STATUS_LABEL = { active: "Активно", hidden: "Скрыто", archived: "Архив" } as const;
@@ -113,6 +120,24 @@ function Price({ row }: { row: ListingRow }) {
   );
 }
 
+/* Ссылка сразу в правку: метка — не только предупреждение, но и путь к
+ * исправлению. Охра, как у ждущих заявок: это «требует внимания», а не
+ * ошибка. Подсказка объясняет зачем — в строке на неё места нет. */
+function NeedsAddress({ row }: { row: ListingRow }) {
+  if (!row.needsAddress) return null;
+  const t = content.address.listing;
+  return (
+    <Link
+      href={`/cabinet/listings/${row.id}?tab=edit` as never}
+      title={t.refineHint}
+      className="inline-flex items-center gap-1 whitespace-nowrap rounded-pill bg-accent/15 px-2 py-0.5 text-2xs font-bold text-foreground hoverable"
+    >
+      <MapPin className="h-3 w-3 shrink-0" aria-hidden="true" />
+      {t.refine}
+    </Link>
+  );
+}
+
 function TitleLink({ row, className }: { row: ListingRow; className?: string }) {
   return (
     <Link
@@ -165,6 +190,9 @@ export function ListingsList({ rows }: { rows: ListingRow[] }) {
                           {row.categoryName}
                         </span>
                       )}
+                      {row.needsAddress && (
+                        <span className="mt-1 block"><NeedsAddress row={row} /></span>
+                      )}
                     </span>
                   </div>
                 </td>
@@ -213,6 +241,7 @@ export function ListingsList({ rows }: { rows: ListingRow[] }) {
                   ? <Today row={row} labelled />
                   : <StatusChip status={row.status} />}
                 {row.pendingRequests > 0 && <Pending n={row.pendingRequests} labelled />}
+                <NeedsAddress row={row} />
               </div>
             </div>
             <ListingRowActions

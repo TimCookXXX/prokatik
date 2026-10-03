@@ -1,6 +1,7 @@
 // Валидация формы товара кабинета.
 
 import { z } from "zod";
+import { content } from "@theme/content";
 
 const priceField = z.union([z.literal(""), z.coerce.number().int().min(0).max(10_000_000)])
   .optional()
@@ -31,12 +32,48 @@ const handoverField = z.boolean({
   invalid_type_error: "Форма устарела — обновите страницу",
 });
 
+const T = content.address.listing;
+
+// Адрес получения (docs/decisions/0021). Три варианта:
+//  - keep — правка, поле адреса не трогали: сохранённые адрес и точка
+//    остаются как есть, без похода в геокодер;
+//  - pick — выбрана подсказка. Координаты здесь — заявка браузера, а не
+//    истина: сервер находит тот же адрес у себя и пишет свою точку
+//    (src/server/listing-address.ts);
+//  - text — город без геоданных: адрес текстом, точки нет.
+// Ключа нет вовсе — это бандл формы, где поля адреса ещё не было: updateListing
+// пишет .set() всеми полями, и молча «оставить как есть» за него нельзя.
+const pickedAddress = z.object({
+  mode: z.literal("pick"),
+  kind: z.enum(["house", "street", "place", "poi"], { message: T.pickFromList }),
+  title: z.string({ message: T.pickFromList }).trim().min(1, T.pickFromList).max(300, T.pickFromList),
+  subtitle: z.string({ message: T.pickFromList }).trim().max(300, T.pickFromList),
+  lat: z.number({ message: T.pickFromList }).min(-90, T.pickFromList).max(90, T.pickFromList),
+  lon: z.number({ message: T.pickFromList }).min(-180, T.pickFromList).max(180, T.pickFromList),
+});
+
+export const listingAddressSchema = z.discriminatedUnion("mode", [
+  z.object({ mode: z.literal("keep") }),
+  pickedAddress,
+  z.object({
+    mode: z.literal("text"),
+    text: z.string({ message: T.textLength }).trim().min(3, T.textLength).max(200, T.textLength),
+  }),
+], {
+  // Сообщение самого объединения: ключа нет, это не объект или вариант
+  // неизвестен. Всё это шлёт не человек, а форма другой версии.
+  errorMap: () => ({ message: T.stale }),
+});
+
+export type ListingAddressInput = z.output<typeof listingAddressSchema>;
+export type PickedAddress = z.output<typeof pickedAddress>;
+
 export const listingFormSchema = z.object({
   title: z.string().trim().min(3, "Название от 3 символов").max(200),
   categoryId: z.string().min(1, "Выберите категорию"),
   cityId: z.string().min(1, "Выберите город"),
   description: z.string().trim().max(3000).optional().default(""),
-  location: z.string().trim().max(120).optional().default(""),  // район/ориентир, опц.
+  address: listingAddressSchema,
   priceDay: priceDayField,
   depositType: z.enum(["money", "document", "none"]),
   depositAmount: priceField,

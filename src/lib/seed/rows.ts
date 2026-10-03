@@ -12,6 +12,7 @@
 import { z } from "zod";
 import type { CsvRow } from "@/lib/csv";
 import { COVER_PRESETS } from "@/lib/covers";
+import type { GeoPrecision } from "@/lib/geo/precision";
 import { slugify } from "@/lib/slugify";
 import { allCategoryPaths, hasCategoryPath, parseCategoryPath } from "./categories";
 
@@ -48,7 +49,14 @@ export interface SeedListingRow {
   title: string;
   slug: string;
   description: string | null;
+  /** Публичная подпись адреса — без номера дома (listings.location). */
   location: string | null;
+  /** Полный адрес, видит только владелец; пусто — город без геоданных. */
+  address: string | null;
+  /** Точка — парой; пусто — точки нет, и тогда precision = city. */
+  lat: number | null;
+  lon: number | null;
+  precision: GeoPrecision;
   priceDay: number;
   depositType: SeedDepositType;
   depositAmount: number | null;
@@ -74,8 +82,12 @@ export interface SeedIssue {
 
 export const CITY_COLUMNS = ["slug", "name", "name_locative", "region", "lat", "lon", "geo_region"];
 export const USER_COLUMNS = ["key", "email", "name", "phone", "city_slug", "bio", "cover", "is_verified"];
+// address, lat, lon и precision заполняет pnpm geo:backfill --csv: точки
+// руками никто не ищет, человек правит только ячейку address, если адрес не
+// нашёлся.
 export const LISTING_COLUMNS = [
-  "owner", "city", "category", "title", "description", "location", "price_day",
+  "owner", "city", "category", "title", "description", "location",
+  "address", "lat", "lon", "precision", "price_day",
   "deposit_type", "deposit_amount", "quantity", "handover", "status", "photos",
 ];
 
@@ -95,6 +107,11 @@ const DEPOSIT: Record<string, SeedDepositType> = {
 const STATUS: Record<string, SeedStatus> = {
   active: "active", hidden: "hidden", archived: "archived",
   "активно": "active", "скрыто": "hidden", "архив": "archived", "в архиве": "archived",
+};
+
+const PRECISION: Record<string, GeoPrecision> = {
+  house: "house", street: "street", place: "place", city: "city",
+  "дом": "house", "улица": "street", "пункт": "place", "город": "city",
 };
 
 const TRUE = new Set(["yes", "да", "true", "1", "+"]);
@@ -168,7 +185,9 @@ const userShape = z.object({
 
 const listingShape = z.object({
   title: z.string().min(1, "title пустой").max(200, "title длиннее 200 символов"),
+  // Те же длины, что у колонок и формы объявления.
   location: z.string().max(120, "location длиннее 120 символов"),
+  address: z.string().max(200, "address длиннее 200 символов"),
 });
 
 // ----------------------------------------------------------------- строки
@@ -251,9 +270,51 @@ function parseUserRow(row: CsvRow, push: (m: string) => void): SeedUserRow | nul
   };
 }
 
+/**
+ * Точка адреса и её точность. Точка — парой, в диапазоне; точность у точки
+ * есть всегда и не `city`, а без точки — только `city` (или пусто).
+ */
+function parseListingPoint(
+  row: CsvRow, push: (m: string) => void,
+): Pick<SeedListingRow, "lat" | "lon" | "precision"> | null {
+  let lat: number | null = null;
+  let lon: number | null = null;
+  if (!blank(row.lat)) {
+    lat = parseFloatCell(row.lat);
+    if (lat === null) { push("lat не число"); return null; }
+  }
+  if (!blank(row.lon)) {
+    lon = parseFloatCell(row.lon);
+    if (lon === null) { push("lon не число"); return null; }
+  }
+  if ((lat === null) !== (lon === null)) { push("lat и lon заполняются парой"); return null; }
+  if (lat !== null && Math.abs(lat) > 90) { push("lat вне диапазона −90…90"); return null; }
+  if (lon !== null && Math.abs(lon) > 180) { push("lon вне диапазона −180…180"); return null; }
+
+  const rawPrecision = (row.precision ?? "").trim().toLowerCase();
+  const precision = rawPrecision === "" ? null : PRECISION[rawPrecision];
+  if (precision === undefined) {
+    push(`precision «${row.precision}» — ожидается house, street, place или city`);
+    return null;
+  }
+  if (lat === null) {
+    if (precision !== null && precision !== "city") {
+      push(`precision = ${precision}, а lat/lon пусты — точности без точки не бывает`);
+      return null;
+    }
+    return { lat: null, lon: null, precision: "city" };
+  }
+  if (precision === null || precision === "city") {
+    push("у точки lat/lon нужна precision: house, street или place");
+    return null;
+  }
+  if (blank(row.address)) { push("lat/lon заполнены, а address пуст"); return null; }
+  return { lat, lon, precision };
+}
+
 function parseListingRow(row: CsvRow, push: (m: string) => void): SeedListingRow | null {
   const shape = listingShape.safeParse({
-    title: row.title ?? "", location: row.location ?? "",
+    title: row.title ?? "", location: row.location ?? "", address: row.address ?? "",
   });
   if (!shape.success) { push(firstZodMessage(shape.error)); return null; }
 
@@ -310,6 +371,9 @@ function parseListingRow(row: CsvRow, push: (m: string) => void): SeedListingRow
     return null;
   }
 
+  const point = parseListingPoint(row, push);
+  if (!point) return null;
+
   const photos = parsePhotos(row.photos ?? "");
   // Тот же потолок, что у формы объявления (lib/owner/validation.ts). Сид,
   // положивший одиннадцатое фото, сделал бы объявление несохраняемым в
@@ -332,6 +396,8 @@ function parseListingRow(row: CsvRow, push: (m: string) => void): SeedListingRow
     title, slug,
     description: orNull(row.description),
     location: orNull(row.location),
+    address: orNull(row.address),
+    ...point,
     priceDay, depositType, depositAmount, quantity,
     handoverPickup: handover.pickup,
     handoverDelivery: handover.delivery,
@@ -430,8 +496,17 @@ export function parseSeedData(input: {
   // Пара (владелец, заголовок) — ключ идемпотентности: по ней сид находит, что
   // обновить. Два одинаковых заголовка у одного владельца сделали бы её
   // неоднозначной, и второй прогон переписывал бы одну и ту же строку дважды.
+  // Город с геоданными без точек у объявлений — почти наверняка таблица, где
+  // geo:backfill ещё не прогнан. Сид записал бы строки без точек, а повторный
+  // прогон стёр бы точки, найденные с тех пор.
+  const geoCities = new Set(cities.filter((c) => c.row.geoRegion).map((c) => c.row.slug));
+
   const pairs = new Set<string>();
   for (const { row: l, line } of listings) {
+    if (!citiesBroken && geoCities.has(l.city) && l.lat === null) {
+      add("listings.csv", line,
+        `у города «${l.city}» есть геоданные, а lat пуст — запустите pnpm geo:backfill --csv seed_real/listings.csv`);
+    }
     if (!usersBroken && !declaredUsers.has(l.owner)) {
       add("listings.csv", line, `owner «${l.owner}» — нет такого key в users.csv`);
     }

@@ -191,6 +191,9 @@ async function main() {
       title,
       slug: slugify(title),
       description: `${title}. Тестовый товар из сидов.`,
+      // У Казани геоданных нет: адрес — сам город, точки нет.
+      address: "Казань",
+      geoPrecision: "city",
       priceDay,
       depositAmount,
       depositType,

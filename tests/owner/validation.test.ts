@@ -10,6 +10,7 @@ const base = {
   priceDay: 500,
   handoverPickup: true,
   handoverDelivery: false,
+  address: { mode: "keep" },
 };
 
 describe("listingFormSchema", () => {
@@ -18,9 +19,12 @@ describe("listingFormSchema", () => {
     expect(r.success).toBe(false);
   });
 
-  it("accepts valid listing with city and optional location", () => {
+  // Публичную подпись сервер собирает из выбранного адреса сам: поле формы
+  // «Район или ориентир» ушло, и присланный ключ просто отбрасывается.
+  it("drops location from the form: the server derives it from the address", () => {
     const r = listingFormSchema.safeParse({ ...base, location: "ул. Баумана" });
     expect(r.success).toBe(true);
+    expect(r.data).not.toHaveProperty("location");
   });
 
   // Цена за сутки — единственная: аренда посуточная, других тарифов у брони
@@ -86,5 +90,43 @@ describe("listingFormSchema", () => {
     const r = listingFormSchema.safeParse({ ...base, handoverPickup: "on" });
     expect(r.success).toBe(false);
     expect(r.error?.issues[0]?.message).toBe("Форма устарела — обновите страницу");
+  });
+});
+
+describe("listingFormSchema: address", () => {
+  const pick = {
+    mode: "pick", kind: "street", title: "улица Красная", subtitle: "Краснодар", lat: 45.035, lon: 38.975,
+  };
+  const parse = (address: unknown) => listingFormSchema.safeParse({ ...base, address });
+  const message = (address: unknown) => parse(address).error?.issues[0]?.message;
+
+  it("accepts the three variants: keep, pick and text", () => {
+    expect(parse({ mode: "keep" }).success).toBe(true);
+    expect(parse(pick).data?.address).toEqual(pick);
+    expect(parse({ mode: "text", text: "  ул. Баумана " }).data?.address).toEqual({ mode: "text", text: "ул. Баумана" });
+  });
+
+  // Тот же приём, что у флагов способа получения: updateListing пишет .set()
+  // всеми полями, и молча «оставить как есть» за бандл старой формы нельзя.
+  it("a payload without the address key is a stale form, not a kept address", () => {
+    const { address: _drop, ...withoutAddress } = base;
+    expect(listingFormSchema.safeParse(withoutAddress).error?.issues[0]?.message)
+      .toBe("Форма устарела — обновите страницу");
+    expect(message(null)).toBe("Форма устарела — обновите страницу");
+    expect(message("улица Красная")).toBe("Форма устарела — обновите страницу");
+    expect(message({ mode: "teleport" })).toBe("Форма устарела — обновите страницу");
+  });
+
+  it("a malformed pick asks to pick from the suggestions", () => {
+    expect(message({ ...pick, lat: "45.035" })).toBe("Выберите адрес из подсказок");
+    expect(message({ ...pick, lat: 95 })).toBe("Выберите адрес из подсказок");
+    expect(message({ ...pick, kind: "planet" })).toBe("Выберите адрес из подсказок");
+    expect(message({ ...pick, title: "" })).toBe("Выберите адрес из подсказок");
+  });
+
+  it("free text is 3 to 200 characters", () => {
+    expect(message({ mode: "text", text: "ул" })).toBe("Адрес — от 3 до 200 символов");
+    expect(message({ mode: "text", text: "а".repeat(201) })).toBe("Адрес — от 3 до 200 символов");
+    expect(message({ mode: "text" })).toBe("Адрес — от 3 до 200 символов");
   });
 });

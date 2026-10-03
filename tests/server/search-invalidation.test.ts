@@ -29,8 +29,19 @@ const { authMock, invalidate, dbCalls, refs, db } = vi.hoisted(() => {
     });
     return self;
   };
+  // Текущий адрес объявления (updateListing читает его для keep) — строка
+  // есть: иначе правка ответила бы not_found раньше записи.
+  const currentAddress = { cityId: "city", address: "улица Красная", geoPrecision: "street" };
   const op = (name: string) => (table?: unknown) => {
     dbCalls.push(name);
+    if (name === "select" && table && typeof table === "object" && "geoPrecision" in table) {
+      const rows: unknown = new Proxy({}, {
+        get: (_t, prop) => (prop === "then"
+          ? (resolve: (r: unknown[]) => void) => resolve([currentAddress])
+          : () => rows),
+      });
+      return rows;
+    }
     return chain(table);
   };
   const db = {
@@ -51,6 +62,14 @@ vi.mock("@/server/realtime", () => ({ publish: vi.fn() }));
 vi.mock("@/server/notifications", () => ({ notify: vi.fn() }));
 vi.mock("@/server/deal-note", () => ({ writeDealNote: vi.fn() }));
 vi.mock("@/server/booking-mail", () => ({ queueBookingMail: vi.fn() }));
+// Адрес проверяется своим тестом (listing-actions, listing-address); здесь он
+// просто проходит.
+vi.mock("@/server/listing-address", () => ({
+  resolveListingAddress: async () => ({
+    ok: true,
+    fields: { address: "улица Красная", location: "улица Красная", lat: 45.03, lon: 38.97, geoPrecision: "street" },
+  }),
+}));
 
 import { bookingRequests } from "@db/schema";
 import { createListing, updateListing, setListingStatus } from "@/server/actions/owner";
@@ -68,6 +87,7 @@ const form = {
   title: "Перфоратор Bosch", categoryId: "cat", cityId: "city", description: "",
   priceDay: 500, depositType: "none", quantity: 1,
   handoverPickup: true, handoverDelivery: false, photos: [],
+  address: { mode: "keep" },
 };
 
 beforeEach(() => {

@@ -51,4 +51,20 @@ describe("OwnerCard", () => {
     expect(screen.queryByRole("link", { name: "Написать" })).toBeNull();
     expect(screen.getByRole("link", { name: "Профиль" })).toBeInTheDocument();
   });
+
+  // Публичная подпись адреса — улица без номера дома, город OwnerCard
+  // дописывает сам. Полного адреса у компонента нет вовсе.
+  it("shows the public address label followed by the city", () => {
+    render(<OwnerCard {...base} location="улица Баумана" />);
+    expect(screen.getByText("улица Баумана, Казань")).toBeInTheDocument();
+  });
+
+  it("shows just the city when there is no label or the label is the city", () => {
+    const { unmount } = render(<OwnerCard {...base} location={null} />);
+    expect(screen.getByText("Казань")).toBeInTheDocument();
+    unmount();
+    render(<OwnerCard {...base} location="Казань" />);
+    expect(screen.getByText("Казань")).toBeInTheDocument();
+    expect(screen.queryByText("Казань, Казань")).toBeNull();
+  });
 });

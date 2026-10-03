@@ -10,7 +10,7 @@ import {
   getCityBySlug, getActiveListingById, getListingCountsByCategory, getSellerById,
   getActiveListingCardsByOwner, getListingsForCategories,
   listingPhotos,
-  type Category, type City, type Listing, type Seller,
+  type Category, type City, type PublicListing, type Seller,
 } from "@/server/catalog";
 import { canonicalHref, extractListingId, listingPath } from "@/lib/catalog/listing-path";
 import { carryParams } from "@/lib/catalog/filters";
@@ -48,7 +48,7 @@ interface Props {
 
 type Resolved =
   | { kind: "subcategory"; city: City; root: Category; sub: Category }
-  | { kind: "listing"; city: City; category: Category; listing: Listing; seller: Seller };
+  | { kind: "listing"; city: City; category: Category; listing: PublicListing; seller: Seller };
 
 async function resolve(citySlug: string, seg: string, sub: string): Promise<Resolved | null> {
   const city = await getCityBySlug(citySlug);

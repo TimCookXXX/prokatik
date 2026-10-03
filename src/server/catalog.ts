@@ -4,7 +4,7 @@
 import { cache } from "react";
 
 import {
-  and, asc, desc, eq, gte, ilike, inArray, lte, or, sql,
+  and, asc, desc, eq, getTableColumns, gte, ilike, inArray, lte, or, sql,
 } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import { todayStr } from "@/lib/catalog/dates";
@@ -16,9 +16,19 @@ export type City = typeof cities.$inferSelect;
 export type Category = typeof categories.$inferSelect;
 export type Listing = typeof listings.$inferSelect;
 
+// Публичная строка объявления — без полного адреса и точки. address может
+// содержать номер дома, а по lat/lon дом находится и без номера; публично
+// видна только подпись location (docs/decisions/0021). Колонки отрезаются в
+// самом select, а не при рендере: что не выбрано, то не уедет ни в HTML, ни в
+// RSC-payload клиентских компонентов. Полные колонки читают только кабинет
+// владельца и actions.
+const { address: _address, lat: _lat, lon: _lon, ...publicColumns } = getTableColumns(listings);
+export const publicListingColumns = publicColumns;
+export type PublicListing = Omit<Listing, "address" | "lat" | "lon">;
+
 export interface ListingPhoto { url: string; width: number; height: number }
 
-export function listingPhotos(listing: Listing): ListingPhoto[] {
+export function listingPhotos(listing: Pick<Listing, "photosJson">): ListingPhoto[] {
   return Array.isArray(listing.photosJson) ? (listing.photosJson as ListingPhoto[]) : [];
 }
 
@@ -183,7 +193,7 @@ function orderBy(f: ListingFilters, today: string, ids?: readonly string[]) {
 // Всё, что карточке в выдаче нужно показать, кроме занятости: её страница
 // грузит отдельно, одним запросом на все карточки сразу.
 export interface ListingWithOwner {
-  listing: Listing;
+  listing: PublicListing;
   ownerName: string | null;
   ownerImage: string | null;
   /** Галочка «проверенный продавец» на плашке владельца. */
@@ -196,7 +206,7 @@ export interface ListingWithOwner {
 // держим их одним объектом, чтобы новая колонка не появилась в трёх запросах
 // из четырёх.
 const CARD_COLUMNS = {
-  listing: listings,
+  listing: publicListingColumns,
   ownerName: users.name,
   ownerImage: users.image,
   ownerIsVerified: users.isVerified,
@@ -430,15 +440,15 @@ export async function getCategoryStats(cityId: string, categoryIds: string[]): P
 }
 
 // Активные товары продавца — для профиля /u/{id}.
-export async function getActiveListingsByOwner(userId: string): Promise<Listing[]> {
-  return getDb().select().from(listings)
+export async function getActiveListingsByOwner(userId: string): Promise<PublicListing[]> {
+  return getDb().select(publicListingColumns).from(listings)
     .where(and(eq(listings.ownerUserId, userId), eq(listings.status, "active")))
     .orderBy(desc(listings.createdAt));
 }
 
 // Карточка товара резолвится по id (из хвоста URL /{city}/{cat}/{slug}-{id}).
-export async function getActiveListingById(id: string): Promise<Listing | null> {
-  const rows = await getDb().select().from(listings)
+export async function getActiveListingById(id: string): Promise<PublicListing | null> {
+  const rows = await getDb().select(publicListingColumns).from(listings)
     .where(and(eq(listings.id, id), eq(listings.status, "active")))
     .limit(1);
   return rows[0] ?? null;
