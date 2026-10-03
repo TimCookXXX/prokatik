@@ -21,7 +21,7 @@ vi.mock("@/lib/db", async () => {
   return { getDb: () => db, getPool: () => ({}) };
 });
 
-import { searchListings, getSearchFacets } from "@/server/catalog";
+import { searchListings, getSearchFacets, getFreeListingIds } from "@/server/catalog";
 
 const CITY = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
 
@@ -86,6 +86,29 @@ describe("searchListings", () => {
     expect(params).toContain("%дрель%");
     expect(text).not.toMatch(/array_position/);
     expect(text).toMatch(/order by "listings"\."created_at" desc/);
+  });
+});
+
+// Подсказки «Что» с датами отсеивают занятых getFreeListingIds, выдача — фильтром
+// дат. Условие обязано быть одним, иначе верх выдачи разошёлся бы с подсказками.
+describe("getFreeListingIds", () => {
+  it("uses the same free-in-range condition as the results", async () => {
+    const notExists = (text: string) => text.match(/not exists \([\s\S]*?\)/)?.[0].replace(/\$\d+/g, "$");
+
+    await getFreeListingIds(["A", "B"], "2026-10-05", "2026-10-07");
+    const free = queries[0]!;
+    queries.length = 0;
+    await searchListings(CITY, { ids: ["A", "B"] }, { availableFrom: "2026-10-05", availableTo: "2026-10-07" });
+    const results = itemsQuery();
+
+    expect(notExists(free.text)).toBeDefined();
+    expect(notExists(free.text)).toBe(notExists(results.text));
+    expect(free.params).toEqual(expect.arrayContaining(["2026-10-05", "2026-10-07"]));
+  });
+
+  it("answers an empty id set without going to the database", async () => {
+    expect(await getFreeListingIds([], "2026-10-05", "2026-10-07")).toEqual(new Set());
+    expect(queries).toHaveLength(0);
   });
 });
 

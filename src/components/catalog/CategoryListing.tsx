@@ -10,7 +10,7 @@ import {
   type City,
 } from "@/server/catalog";
 import {
-  defaultSort, filterParams, parseFilters, sortOptionsFor, type CategorySearchParams,
+  carryParams, defaultSort, filterParams, parseFilters, sortOptionsFor, type CategorySearchParams,
 } from "@/lib/catalog/filters";
 import { todayStr, addDaysStr } from "@/lib/catalog/dates";
 import { formatPrice, listingsCountLabel, ownersCountLabel } from "@/lib/catalog/format";
@@ -35,7 +35,8 @@ export async function CategoryListing({
   activeLabel: string;     // подпись на мобильной кнопке выбора раздела
   searchParams: CategorySearchParams;
 }) {
-  const filters = parseFilters(searchParams);
+  const today = todayStr();
+  const filters = parseFilters(searchParams, { today });
   const [{ items, total }, stats, cats, directCounts] = await Promise.all([
     getListingsForCategories(city.id, categoryIds, filters),
     getCategoryStats(city.id, categoryIds),
@@ -51,11 +52,18 @@ export async function CategoryListing({
       ? { min: stats.minPriceDay, max: stats.maxPriceDay }
       : undefined;
 
-  // Занятость всех карточек страницы на неделю — одним запросом.
-  const from = todayStr();
-  const to = addDaysStr(from, 6);
+  // Занятость всех карточек страницы одним запросом: на выбранные даты, а без
+  // них — неделя от сегодня. Диапазон уже нормализован parseFilters (from не
+  // раньше сегодня), так что карточка показывает свободу на те же дни, по
+  // которым отфильтрована выдача, а не «Занято» из-за сегодняшнего дня.
+  const from = filters.availableFrom ?? today;
+  const to = filters.availableTo ?? addDaysStr(today, 6);
   const availRows = await getAvailabilityRows(items.map((i) => i.listing.id), from, to);
   const availByListing = buildAvailabilityByListing(availRows);
+  // Переносимые параметры (даты) едут дальше по каталогу: в карточки, в ветки
+  // дерева разделов и в скрытые поля фильтров — «Показать» их не теряет.
+  const carry = carryParams(searchParams, { today });
+  const carryQuery = carry.toString();
 
   const filterState: FilterState = {
     priceMin: filters.priceMin, priceMax: filters.priceMax,
@@ -67,7 +75,7 @@ export async function CategoryListing({
   const totalPages = Math.max(1, Math.ceil(total / DEFAULT_PAGE_SIZE));
   const view = parseView(searchParams.view);
   const withParams = (mutate: (q: URLSearchParams) => void) => {
-    const q = filterParams(searchParams);
+    const q = filterParams(searchParams, { today });
     mutate(q);
     const qs = q.toString();
     return qs ? `${basePath}?${qs}` : basePath;
@@ -79,14 +87,14 @@ export async function CategoryListing({
   // Адреса сортировки собирает сервер: SortMenu клиентский, и функцию через
   // границу ему не передать. Умолчание в адрес не пишется.
   const sortOptions = sortOptionsFor().map((o) => {
-    const q = filterParams(searchParams);
+    const q = filterParams(searchParams, { today });
     if (o.value === defaultSort()) q.delete("sort"); else q.set("sort", o.value);
     const qs = q.toString();
     return { ...o, href: qs ? `${basePath}?${qs}` : basePath };
   });
 
   const pageHref = (p: number) => {
-    const q = filterParams(searchParams);
+    const q = filterParams(searchParams, { today });
     if (p > 1) q.set("page", String(p));
     const qs = q.toString();
     return qs ? `${basePath}?${qs}` : basePath;
@@ -119,9 +127,8 @@ export async function CategoryListing({
             basePath={basePath}
             state={filterState}
             hidden={{
+              ...Object.fromEntries(carry),
               view: searchParams.view ?? "",
-              from: searchParams.from ?? "",
-              to: searchParams.to ?? "",
               sort: searchParams.sort ?? "",
             }}
             priceBounds={priceBounds}
@@ -132,6 +139,7 @@ export async function CategoryListing({
                 citySlug={city.slug}
                 activeRootSlug={activeRootSlug}
                 activeSubSlug={activeSubSlug}
+                carryQuery={carryQuery}
               />
             }
           />
@@ -143,10 +151,10 @@ export async function CategoryListing({
             * сбрасывало остальные и не тащило номер страницы. */}
           <div className="surface flex items-center justify-between gap-2 p-1.5">
             <DateRangeFilter
-              from={searchParams.from}
-              to={searchParams.to}
+              from={filters.availableFrom}
+              to={filters.availableTo}
               resetHref={datesResetHref}
-              today={from}
+              today={today}
             />
             <div className="flex items-center gap-2">
               <SortMenu options={sortOptions} current={filters.sort} />
@@ -167,6 +175,8 @@ export async function CategoryListing({
                   citySlug={city.slug}
                   availabilityMap={availByListing.get(item.listing.id) ?? new Map()}
                   from={from}
+                  to={filters.availableTo}
+                  hrefQuery={carryQuery}
                   view={view}
                 />
               ))}

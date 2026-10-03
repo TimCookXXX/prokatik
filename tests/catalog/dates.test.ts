@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { formatMonthYearGen, todayStr, formatDayMonthNum, formatTimeLeft } from "@/lib/catalog/dates";
+import {
+  dateRangeLabel, daysLabel, shortRangeLabel, formatMonthYearGen, todayStr, formatDayMonthNum, formatTimeLeft,
+  isDateStr, rangeDaysCount, weekdayShort,
+} from "@/lib/catalog/dates";
 
 describe("todayStr", () => {
   it("takes the calendar day in the business zone, not in UTC", () => {
@@ -91,5 +94,88 @@ describe("formatTimeLeft", () => {
   it("без параметра ведёт себя как раньше", () => {
     expect(formatTimeLeft(at(23 * 60 + 51), now, false))
       .toBe(formatTimeLeft(at(23 * 60 + 51), now));
+  });
+});
+
+/* Строгая проверка дня: регэкспа мало, а Date.parse молча переносит
+ * 30 февраля на 2 марта. Обратный ход ловит такие дни. */
+describe("isDateStr", () => {
+  it("принимает существующий день", () => {
+    expect(isDateStr("2026-10-03")).toBe(true);
+    expect(isDateStr("2028-02-29")).toBe(true);
+  });
+
+  it("отвергает несуществующий день", () => {
+    expect(isDateStr("2026-02-30")).toBe(false);
+    expect(isDateStr("2027-02-29")).toBe(false);
+    expect(isDateStr("2026-04-31")).toBe(false);
+    expect(isDateStr("2026-13-01")).toBe(false);
+    expect(isDateStr("2026-00-10")).toBe(false);
+  });
+
+  it("отвергает другой формат и не строки", () => {
+    expect(isDateStr("2026-10-3")).toBe(false);
+    expect(isDateStr("03.10.2026")).toBe(false);
+    expect(isDateStr("2026-10-03T00:00:00Z")).toBe(false);
+    expect(isDateStr("")).toBe(false);
+    expect(isDateStr(undefined)).toBe(false);
+    expect(isDateStr(20261003)).toBe(false);
+  });
+});
+
+describe("weekdayShort", () => {
+  it("день недели по календарному дню, без зоны", () => {
+    expect(weekdayShort("2026-10-03")).toBe("сб");
+    expect(weekdayShort("2026-10-05")).toBe("пн");
+    expect(weekdayShort("2026-10-04")).toBe("вс");
+  });
+});
+
+/* Подпись поля «Когда»: месяц один раз, если он общий. */
+describe("dateRangeLabel", () => {
+  it("один месяц — месяц справа", () => {
+    expect(dateRangeLabel("2026-10-03", "2026-10-05")).toBe("сб 3 — пн 5 окт");
+  });
+
+  it("разные месяцы — у обеих границ", () => {
+    expect(dateRangeLabel("2026-09-30", "2026-10-02")).toBe("ср 30 сен — пт 2 окт");
+  });
+
+  it("тот же месяц другого года — тоже у обеих границ", () => {
+    expect(dateRangeLabel("2026-10-30", "2027-10-01")).toBe("пт 30 окт — пт 1 окт");
+  });
+
+  it("один день — без тире", () => {
+    expect(dateRangeLabel("2026-10-03", "2026-10-03")).toBe("сб 3 окт");
+  });
+});
+
+/* Обе границы включены: 3–5 октября — три дня аренды, а не две ночи. */
+describe("daysLabel", () => {
+  it("считает дни включительно и склоняет", () => {
+    expect(daysLabel("2026-10-03", "2026-10-03")).toBe("1 день");
+    expect(daysLabel("2026-10-03", "2026-10-05")).toBe("3 дня");
+    expect(daysLabel("2026-10-03", "2026-10-07")).toBe("5 дней");
+    expect(daysLabel("2026-10-03", "2026-10-23")).toBe("21 день");
+    expect(daysLabel("2026-10-03", "2026-10-13")).toBe("11 дней");
+  });
+
+  it("переживает переход на другой год", () => {
+    expect(rangeDaysCount("2026-12-30", "2027-01-02")).toBe(4);
+  });
+});
+
+describe("shortRangeLabel", () => {
+  it("writes the month once inside one month", () => {
+    expect(shortRangeLabel("2026-10-10", "2026-10-12")).toBe("10–12 окт");
+  });
+  it("writes both months across a month boundary", () => {
+    expect(shortRangeLabel("2026-09-30", "2026-10-02")).toBe("30 сен – 2 окт");
+  });
+  it("keeps the months apart across a year boundary", () => {
+    expect(shortRangeLabel("2026-12-31", "2027-01-02")).toBe("31 дек – 2 янв");
+  });
+  it("gives a single day for a one-day range", () => {
+    expect(shortRangeLabel("2026-10-10", "2026-10-10")).toBe("10 окт");
   });
 });

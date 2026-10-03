@@ -18,7 +18,7 @@ import {
 } from "@/server/catalog";
 import { rankListingIds, type RankedIds } from "@/server/search";
 import {
-  defaultSort, filterParams, parseFilters, sortOptionsFor, type CategorySearchParams,
+  carryParams, defaultSort, filterParams, parseFilters, sortOptionsFor, type CategorySearchParams,
 } from "@/lib/catalog/filters";
 import { todayStr, addDaysStr } from "@/lib/catalog/dates";
 import { buildAvailabilityByListing } from "@/lib/catalog/availability";
@@ -47,7 +47,8 @@ export async function SearchResults({
   // Без набора id сортировать по релевантности нечем — тогда и умолчание, и
   // меню как без запроса.
   const sortCtx = { q: "ids" in match ? q : undefined };
-  const filters = parseFilters(searchParams, sortCtx);
+  const today = todayStr();
+  const filters = parseFilters(searchParams, { ...sortCtx, today });
 
   // Сужение по разделу: слаг из адреса → корень и все его подкатегории. Раздела
   // нет или слаг чужой — сужения нет, ищем по всему городу.
@@ -63,10 +64,17 @@ export async function SearchResults({
     getSearchFacets(city.id, match, filters),
   ]);
 
-  const from = todayStr();
-  const to = addDaysStr(from, 6);
+  // Занятость всех карточек страницы одним запросом: на выбранные даты, а без
+  // них — неделя от сегодня. Диапазон уже нормализован parseFilters (from не
+  // раньше сегодня), так что карточка показывает свободу на те же дни, по
+  // которым отфильтрована выдача, а не «Занято» из-за сегодняшнего дня.
+  const from = filters.availableFrom ?? today;
+  const to = filters.availableTo ?? addDaysStr(today, 6);
   const availRows = await getAvailabilityRows(items.map((i) => i.listing.id), from, to);
   const availByListing = buildAvailabilityByListing(availRows);
+  // Переносимые параметры (даты) — в ссылки карточек и скрытые поля фильтров.
+  const carry = carryParams(searchParams, { today });
+  const carryQuery = carry.toString();
 
   // Границы слайдера — по результатам запроса, а не по всему городу: иначе
   // ручки стояли бы на ценах, которых в выдаче нет. Исключение — сам ценовой
@@ -89,18 +97,18 @@ export async function SearchResults({
   const categoryFacets = cats
     .filter((c) => c.parentId === null && (rootCounts.get(c.id) ?? 0) > 0)
     .map((c) => {
-      const params = filterParams(searchParams);
+      const params = filterParams(searchParams, { today });
       params.set("category", c.slug);
       return { slug: c.slug, name: c.name, count: rootCounts.get(c.id) ?? 0, href: searchHref(params) };
     });
   const allCategoriesHref = (() => {
-    const params = filterParams(searchParams);
+    const params = filterParams(searchParams, { today });
     params.delete("category");
     return searchHref(params);
   })();
 
   const withParams = (mutate: (q: URLSearchParams) => void) => {
-    const q = filterParams(searchParams);
+    const q = filterParams(searchParams, { today });
     mutate(q);
     return searchHref(q);
   };
@@ -129,7 +137,7 @@ export async function SearchResults({
   // Умолчание в адрес не пишется: при запросе это «подходящие», и тогда
   // «новые» — явное `sort=new`.
   const sortOptions = sortOptionsFor(sortCtx).map((o) => {
-    const params = filterParams(searchParams);
+    const params = filterParams(searchParams, { today });
     if (q) params.set("q", q);
     params.set("city", city.slug);
     if (o.value === defaultSort(sortCtx)) params.delete("sort"); else params.set("sort", o.value);
@@ -137,7 +145,7 @@ export async function SearchResults({
   });
 
   const pageHref = (p: number) => {
-    const params = filterParams(searchParams);
+    const params = filterParams(searchParams, { today });
     if (q) params.set("q", q);
     params.set("city", city.slug);
     if (p > 1) params.set("page", String(p));
@@ -152,12 +160,11 @@ export async function SearchResults({
           state={filterState}
           priceBounds={priceBounds}
           hidden={{
+            ...Object.fromEntries(carry),
             q,
             city: city.slug,
             category: searchParams.category ?? "",
             view: searchParams.view ?? "",
-            from: searchParams.from ?? "",
-            to: searchParams.to ?? "",
             sort: searchParams.sort ?? "",
           }}
           categoryLabel={activeRoot?.name ?? "Все разделы"}
@@ -178,10 +185,10 @@ export async function SearchResults({
           * даты стало бы нечем убрать, кроме правки адреса. */}
         <div className="surface flex items-center justify-between gap-2 p-1.5">
           <DateRangeFilter
-            from={searchParams.from}
-            to={searchParams.to}
+            from={filters.availableFrom}
+            to={filters.availableTo}
             resetHref={datesResetHref}
-            today={from}
+            today={today}
           />
           <div className="flex items-center gap-2">
             <SortMenu options={sortOptions} current={filters.sort} />
@@ -224,6 +231,8 @@ export async function SearchResults({
                   citySlug={city.slug}
                   availabilityMap={availByListing.get(item.listing.id) ?? new Map()}
                   from={from}
+                  to={filters.availableTo}
+                  hrefQuery={carryQuery}
                   view={view}
                 />
               ))}

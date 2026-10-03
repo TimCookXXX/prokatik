@@ -4,7 +4,7 @@ import { BadgeCheck, ImageOff } from "lucide-react";
 import { listingPhotos, type Listing, type ListingWithOwner } from "@/server/catalog";
 import { formatDeposit, formatHandoverShort, formatPrice } from "@/lib/catalog/format";
 import { listingPath } from "@/lib/catalog/listing-path";
-import { freeQty, type AvailabilityMap } from "@/lib/catalog/availability";
+import { eachDate, freeQty, type AvailabilityMap } from "@/lib/catalog/availability";
 import { Avatar } from "@/components/ui/Avatar";
 import { cardFrame } from "@/components/ui/card-frame";
 import { HandoverIcon } from "@/components/catalog/HandoverIcon";
@@ -32,25 +32,33 @@ export function ListingCard({
   citySlug,
   availabilityMap,
   from,
+  to = from,
+  hrefQuery,
   view = "grid",
 }: {
   item: ListingWithOwner;
   citySlug: string;
   availabilityMap: AvailabilityMap;
+  /** Дни, на которые показывается свобода: выбранный «Когда» или один сегодняшний. */
   from: string;
+  to?: string;
+  /** Переносимые параметры выдачи (даты): карточка открывается с ними, и виджет брони — тоже. */
+  hrefQuery?: string;
   /** Списком фото уезжает влево, остальное — в колонку рядом. */
   view?: "grid" | "list";
 }) {
   const list = view === "list";
   const { listing, ownerName, ownerImage, ownerIsVerified, categorySlug, cityName } = item;
   const photo = listingPhotos(listing)[0];
-  const href = listingPath(citySlug, categorySlug, listing.slug, listing.id);
+  const path = listingPath(citySlug, categorySlug, listing.slug, listing.id);
+  const href = hrefQuery ? `${path}?${hrefQuery}` : path;
   const price = formatPrice(listing.priceDay);
-  // Карточке нужен только сегодняшний день: дату «свободно с» она больше не
-  // показывает, а календарь на самой позиции скажет точнее.
-  const free = freeQty(listing.quantity, availabilityMap.get(from));
+  // Сколько единиц свободно на ВСЕ дни периода — минимум по дням: аренде
+  // нужна одна и та же вещь с первого дня по последний. Дату «свободно с»
+  // карточка не показывает, календарь на самой позиции скажет точнее.
+  const free = Math.min(...eachDate(from, to).map((d) => freeQty(listing.quantity, availabilityMap.get(d))));
 
-  // Зелёный — свободно всё, охра — часть занята, серый — сегодня мест нет.
+  // Зелёный — свободно всё, охра — часть занята, серый — мест нет.
   // Красный не берём: занятость это состояние предмета, а не отмена и спор.
   const busy = free <= 0;
   const partial = free > 0 && free < listing.quantity;

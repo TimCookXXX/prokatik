@@ -2,8 +2,7 @@
 // OAuth-redirect на чужой origin и восстанавливается после входа без
 // sessionStorage. Здесь — чистый разбор и сборка этих параметров.
 
-import { assertDateString } from "@/lib/catalog/availability";
-import { addDaysStr } from "@/lib/catalog/dates";
+import { addDaysStr, isDateStr, rangeDaysCount } from "@/lib/catalog/dates";
 
 export interface BookingSelection {
   from: string;
@@ -13,11 +12,6 @@ export interface BookingSelection {
 
 export const BOOKING_HORIZON_DAYS = 180;
 
-function isValidDate(s: string | undefined): s is string {
-  if (!s) return false;
-  try { assertDateString(s); return true; } catch { return false; }
-}
-
 // Мусор на входе не ломает страницу — сводится к дефолтам и клампам:
 // from ∈ [today, today+horizon], to ∈ [from, today+horizon], qty ∈ [1, maxQty].
 export function parseBookingParams(
@@ -26,11 +20,11 @@ export function parseBookingParams(
 ): BookingSelection {
   const horizon = addDaysStr(opts.today, opts.horizonDays ?? BOOKING_HORIZON_DAYS);
 
-  let from = isValidDate(sp.from) ? sp.from : opts.today;
+  let from = isDateStr(sp.from) ? sp.from : opts.today;
   if (from < opts.today) from = opts.today;
   if (from > horizon) from = horizon;
 
-  let to = isValidDate(sp.to) ? sp.to : from;
+  let to = isDateStr(sp.to) ? sp.to : from;
   if (to < from) to = from;
   if (to > horizon) to = horizon;
 
@@ -64,6 +58,26 @@ export function isSelectionShifted(
 }
 
 export function rentalDaysCount(sel: BookingSelection): number {
-  const ms = Date.parse(`${sel.to}T00:00:00Z`) - Date.parse(`${sel.from}T00:00:00Z`);
-  return ms / (24 * 60 * 60 * 1000) + 1;
+  return rangeDaysCount(sel.from, sel.to);
+}
+
+const BOOKING_KEYS = ["from", "to", "qty"] as const;
+
+/* Query страницы позиции после выбора в виджете: в текущем адресе заменяются
+ * только from/to/qty, остальное остаётся как есть. Виджет пишет адрес через
+ * replaceState, и сборка query с нуля стирала бы чужие параметры — «Где» с
+ * расстоянием, метки переходов — из перезагрузки, «поделиться» и callbackUrl
+ * входа. sel = null — выбор не закончен: from/to/qty убираются. Дефолты
+ * опускаются так же, как в buildBookingQuery. Возвращает query без «?». */
+export function mergeBookingQuery(
+  current: string | URLSearchParams,
+  sel: BookingSelection | null,
+  today: string,
+): string {
+  const out = new URLSearchParams(current);
+  for (const key of BOOKING_KEYS) out.delete(key);
+  if (sel) {
+    for (const [key, value] of new URLSearchParams(buildBookingQuery(sel, today))) out.set(key, value);
+  }
+  return out.toString();
 }

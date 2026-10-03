@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  eachDate, freeQty, canBook, applyBookingDelta, unavailableDates,
+  assertDateString, eachDate, freeQty, canBook, applyBookingDelta, unavailableDates,
   type AvailabilityMap,
 } from "@/lib/catalog/availability";
 
@@ -28,6 +28,25 @@ describe("eachDate()", () => {
   it("бросает на мусорной дате", () => {
     expect(() => eachDate("2026-13-40", "2026-07-20")).toThrow(/invalid date/);
     expect(() => eachDate("garbage", "2026-07-20")).toThrow(/invalid date/);
+  });
+});
+
+// Разбор дня стал строже: Date.parse переносил несуществующий день на
+// следующий месяц, и бронь на «30 февраля» уходила на 2 марта.
+describe("assertDateString()", () => {
+  it("пропускает существующий день", () => {
+    expect(() => assertDateString("2026-02-28")).not.toThrow();
+    expect(() => assertDateString("2028-02-29")).not.toThrow();
+  });
+
+  it("бросает на несуществующем дне", () => {
+    expect(() => assertDateString("2026-02-30")).toThrow(/invalid date/);
+    expect(() => assertDateString("2027-02-29")).toThrow(/invalid date/);
+    expect(() => assertDateString("2026-06-31")).toThrow(/invalid date/);
+  });
+
+  it("eachDate не перескакивает через несуществующий день в март", () => {
+    expect(() => eachDate("2026-02-27", "2026-02-30")).toThrow(/invalid date/);
   });
 });
 

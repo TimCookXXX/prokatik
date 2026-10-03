@@ -48,6 +48,31 @@ export function addDaysStr(dateStr: string, days: number): string {
   return new Date(t).toISOString().slice(0, 10);
 }
 
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/* Календарный день "YYYY-MM-DD", который существует. Одного регэкспа мало, и
+ * Date.parse не спасает: "2026-02-30" он молча переносит на 2 марта. Поэтому
+ * обратный ход — день, собранный из разобранного момента, обязан совпасть со
+ * входом. */
+export function isDateStr(s: unknown): s is string {
+  if (typeof s !== "string" || !DATE_RE.test(s)) return false;
+  const t = Date.parse(`${s}T00:00:00Z`);
+  return !Number.isNaN(t) && new Date(t).toISOString().slice(0, 10) === s;
+}
+
+/* Дней в диапазоне, обе границы включены: аренда посуточная, день возврата
+ * тоже занят (docs/domain.md). Один и тот же день — одни сутки. */
+export function rangeDaysCount(from: string, to: string): number {
+  return (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / DAY_MS + 1;
+}
+
+const WEEKDAYS_SHORT = ["вс", "пн", "вт", "ср", "чт", "пт", "сб"] as const;
+
+/* «сб» */
+export function weekdayShort(dateStr: string): string {
+  return WEEKDAYS_SHORT[new Date(`${dateStr}T00:00:00Z`).getUTCDay()];
+}
+
 const MONTHS_GEN = [
   "января", "февраля", "марта", "апреля", "мая", "июня",
   "июля", "августа", "сентября", "октября", "ноября", "декабря",
@@ -72,6 +97,36 @@ export function formatDayMonthNum(dateStr: string): string {
   const dd = String(d.getUTCDate()).padStart(2, "0");
   const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
   return `${dd}.${mm}`;
+}
+
+/* Диапазон для поля «Когда»: «сб 12 — пн 14 окт». Месяц пишется один раз,
+ * если он общий; разные месяцы — у обеих границ: «ср 30 сен — пт 2 окт».
+ * Один день — «сб 12 окт». */
+export function dateRangeLabel(from: string, to: string): string {
+  const day = (s: string) => `${weekdayShort(s)} ${new Date(`${s}T00:00:00Z`).getUTCDate()}`;
+  const month = (s: string) => MONTHS_SHORT[new Date(`${s}T00:00:00Z`).getUTCMonth()];
+  const right = `${day(to)} ${month(to)}`;
+  if (from === to) return right;
+  return month(from) === month(to) && from.slice(0, 4) === to.slice(0, 4)
+    ? `${day(from)} — ${right}`
+    : `${day(from)} ${month(from)} — ${right}`;
+}
+
+/* Короткий диапазон для чипа на узком экране: «10–12 окт», «30 сен – 2 окт»,
+ * один день — «10 окт». Без дней недели: чип делит строку с сортировкой и
+ * видом, и полная подпись на телефоне переносилась в три строки. */
+export function shortRangeLabel(from: string, to: string): string {
+  if (from === to) return formatDayMonthShort(to);
+  const sameMonth = from.slice(0, 7) === to.slice(0, 7);
+  return sameMonth
+    ? `${new Date(`${from}T00:00:00Z`).getUTCDate()}–${formatDayMonthShort(to)}`
+    : `${formatDayMonthShort(from)} – ${formatDayMonthShort(to)}`;
+}
+
+/* «3 дня» — длина диапазона с обеими границами: 12–14 — это три дня аренды. */
+export function daysLabel(from: string, to: string): string {
+  const n = rangeDaysCount(from, to);
+  return `${n} ${ruPlural(n, "день", "дня", "дней")}`;
 }
 
 export function formatDayMonth(dateStr: string): string {

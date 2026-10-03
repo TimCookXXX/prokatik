@@ -85,6 +85,13 @@ describe("tokenForms", () => {
     expect(parts("велики")).toContain("велосипед");
   });
 
+  it("expands a word still being typed into differently spelled synonyms", () => {
+    const forms = tokenForms("керх");
+    expect(forms.find((f) => f.parts.join(" ") === "karcher")?.weight).toBeCloseTo(0.72);
+    expect(parts("керх")).not.toContain("керхер");
+    expect(parts("бол")).not.toContain("ушм");
+  });
+
   it("a word being typed is not a short synonym: «перфо» is not «перф»", () => {
     expect(parts("перфо")).not.toContain("перфоратор");
     expect(parts("перф")).toContain("перфоратор");

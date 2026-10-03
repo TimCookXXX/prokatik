@@ -5,10 +5,11 @@ import { NextRequest } from "next/server";
 // Город и индекс мокаются: индекс собирается из фикстуры поиска тем же
 // buildListingIndex, что и в проде, — проверяется сборка ответа, а не скоринг
 // (его покрывает tests/search).
-vi.mock("@/server/catalog", () => ({ getCityBySlug: vi.fn() }));
+vi.mock("@/server/catalog", () => ({ getCityBySlug: vi.fn(), getFreeListingIds: vi.fn() }));
 vi.mock("@/server/search-index", () => ({ getSearchIndex: vi.fn() }));
 
-import { getCityBySlug } from "@/server/catalog";
+import { getCityBySlug, getFreeListingIds } from "@/server/catalog";
+import { addDaysStr, todayStr } from "@/lib/catalog/dates";
 import { getSearchIndex } from "@/server/search-index";
 import { buildListingIndex } from "@/lib/search/listing-index";
 import { _resetForTests } from "@/lib/rate-limit";
@@ -43,6 +44,7 @@ beforeEach(() => {
   vi.mocked(getCityBySlug).mockImplementation(async (slug) => (slug === CITY.slug ? CITY : null) as never);
   vi.mocked(getSearchIndex).mockReset();
   vi.mocked(getSearchIndex).mockResolvedValue(index() as never);
+  vi.mocked(getFreeListingIds).mockReset();
 });
 
 describe("GET /api/search/suggest", () => {
@@ -135,5 +137,60 @@ describe("GET /api/search/suggest", () => {
     } finally {
       err.mockRestore();
     }
+  });
+
+  // Даты — те же правила, что у выдачи: с валидным диапазоном в подсказки идут
+  // только свободные на все дни, иначе подсказка вела бы на карточку, где
+  // виджет сразу скажет «Занято».
+  describe("with dates", () => {
+    const from = addDaysStr(todayStr(), 3);
+    const to = addDaysStr(todayStr(), 5);
+    const q = encodeURIComponent("перфоратор");
+
+    it("filters busy listings out and checks the candidates in one query", async () => {
+      const plain = await (await get(`city=krasnodar&q=${q}`)).json();
+      const busy = plain.items[0].id;
+      vi.mocked(getFreeListingIds).mockImplementation(async (ids) => new Set(ids.filter((id) => id !== busy)));
+
+      const body = await (await get(`city=krasnodar&q=${q}&from=${from}&to=${to}`)).json();
+      expect(body.items.map((i: { id: string }) => i.id)).not.toContain(busy);
+      expect(body.items.length).toBeGreaterThan(0);
+      expect(body.items.length).toBeLessThanOrEqual(6);
+
+      expect(getFreeListingIds).toHaveBeenCalledTimes(1);
+      const [ids, f, t] = vi.mocked(getFreeListingIds).mock.calls[0];
+      expect(ids).toContain(busy);
+      expect(ids.length).toBeLessThanOrEqual(50);
+      expect([f, t]).toEqual([from, to]);
+    });
+
+    it("fills six free suggestions from deeper candidates", async () => {
+      // «инструмент» совпадает у 18 объявлений фикстуры: первые шесть заняты,
+      // и на их место поднимаются свободные кандидаты ниже по списку.
+      const many = encodeURIComponent("инструмент");
+      const plain = await (await get(`city=krasnodar&q=${many}`)).json();
+      expect(plain.items).toHaveLength(6);
+      const top = new Set<string>(plain.items.map((i: { id: string }) => i.id));
+      vi.mocked(getFreeListingIds).mockImplementation(async (ids) => new Set(ids.filter((id) => !top.has(id))));
+
+      const body = await (await get(`city=krasnodar&q=${many}&from=${from}&to=${to}`)).json();
+      expect(body.items).toHaveLength(6);
+      for (const item of body.items) expect(top.has(item.id)).toBe(false);
+    });
+
+    it("does not filter by a broken, half or past range", async () => {
+      for (const dates of [`from=${from}`, "from=2027-02-30&to=2027-03-02", "from=2020-01-01&to=2020-01-03"]) {
+        const body = await (await get(`city=krasnodar&q=${q}&${dates}`)).json();
+        expect(body.items.length).toBeGreaterThan(0);
+      }
+      expect(getFreeListingIds).not.toHaveBeenCalled();
+    });
+
+    it("keeps sections when every candidate is busy", async () => {
+      vi.mocked(getFreeListingIds).mockResolvedValue(new Set());
+      const body = await (await get(`city=krasnodar&q=${encodeURIComponent("электроинструменты")}&from=${from}&to=${to}`)).json();
+      expect(body.items).toEqual([]);
+      expect(body.categories.length).toBeGreaterThan(0);
+    });
   });
 });

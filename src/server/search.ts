@@ -7,13 +7,20 @@ import {
   isBlankQuery, rankListings, rankResults, suggestCategories,
 } from "@/lib/search/listing-index";
 import { hasSearchWords, MAX_QUERY_LENGTH } from "@/lib/search/match";
-import { getCityBySlug } from "@/server/catalog";
+import type { DateRange } from "@/lib/catalog/filters";
+import { getCityBySlug, getFreeListingIds } from "@/server/catalog";
 import { getSearchIndex } from "@/server/search-index";
 
 /** Потолок совпадений выдачи: дальше фильтры, счёт и страницы считает SQL по этим id. */
 export const RESULTS_LIMIT = 1000;
 export const SUGGEST_LISTINGS = 6;
 export const SUGGEST_CATEGORIES = 4;
+/**
+ * Сколько лучших кандидатов проверять на свободу, когда выбраны даты. Занятые
+ * отсеиваются, в ответ идут первые SUGGEST_LISTINGS свободных; если свободных
+ * среди них меньше — подсказок меньше, а не хуже по тексту.
+ */
+export const SUGGEST_DATE_CANDIDATES = 50;
 
 export interface RankedIds {
   /**
@@ -70,19 +77,29 @@ export interface SuggestResult {
  * Подсказки панели «Что» в городе. Пустой или односимвольный запрос —
  * популярные разделы без объявлений. null — города нет или он отключён.
  * `cityIds` — набор городов индекса, когда он шире города (регион при точке
- * «Где»); по умолчанию — сам город.
+ * «Где»); по умолчанию — сам город. `dates` — уже разобранный диапазон
+ * (parseDateRange): с ним в подсказки идут только свободные на все эти дни,
+ * как и в выдаче с теми же датами. Счётчики разделов даты не учитывают.
  */
 export async function suggestForCity(
   citySlug: string,
   q: string,
-  { cityIds }: { cityIds?: readonly string[] } = {},
+  { cityIds, dates }: { cityIds?: readonly string[]; dates?: DateRange } = {},
 ): Promise<SuggestResult | null> {
   const city = await getCityBySlug(citySlug);
   if (!city) return null;
   const { ix, categories, citySlugs } = await getSearchIndex(cityIds ?? [city.id]);
 
+  let hits = rankListings(ix, q, {
+    mode: "suggest", limit: dates ? SUGGEST_DATE_CANDIDATES : SUGGEST_LISTINGS,
+  });
+  if (dates && hits.length > 0) {
+    const free = await getFreeListingIds(hits.map((h) => h.row.id), dates.from, dates.to);
+    hits = hits.filter((h) => free.has(h.row.id)).slice(0, SUGGEST_LISTINGS);
+  }
+
   const items: SuggestItem[] = [];
-  for (const { row } of rankListings(ix, q, { mode: "suggest", limit: SUGGEST_LISTINGS })) {
+  for (const { row } of hits) {
     const category = categories.get(row.categoryId);
     const rowCity = citySlugs.get(row.cityId);
     // Строки без раздела или города не бывает (FK и join сборки); проверка —

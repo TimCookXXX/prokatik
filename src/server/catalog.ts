@@ -564,6 +564,24 @@ export interface AvailabilityRow {
   blockedQty: number;
 }
 
+/**
+ * Какие из позиций свободны во все дни диапазона — тем же условием, что фильтр
+ * дат в выдаче (freeInRange), одним запросом. Для подсказок «Что» при выбранных
+ * датах: они не должны вести на карточку, где виджет сразу скажет «Занято».
+ */
+export async function getFreeListingIds(
+  listingIds: readonly string[],
+  dateFrom: string,
+  dateTo: string,
+): Promise<Set<string>> {
+  if (listingIds.length === 0) return new Set();
+  const rows = await getDb()
+    .select({ id: listings.id })
+    .from(listings)
+    .where(and(inArray(listings.id, [...listingIds]), freeInRange(dateFrom, dateTo)));
+  return new Set(rows.map((r) => r.id));
+}
+
 // Занятость набора позиций на диапазон дат (для мини-календарей листинга — одним запросом).
 export async function getAvailabilityRows(
   listingIds: string[],

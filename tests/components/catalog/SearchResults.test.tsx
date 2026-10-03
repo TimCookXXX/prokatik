@@ -22,6 +22,7 @@ import {
 } from "@/server/catalog";
 import { rankListingIds } from "@/server/search";
 import { SearchResults } from "@/components/catalog/SearchResults";
+import { addDaysStr, shortRangeLabel, todayStr } from "@/lib/catalog/dates";
 
 const city = { id: "c1", slug: "kazan", name: "Казань" } as never;
 
@@ -78,11 +79,26 @@ describe("SearchResults", () => {
   // Панель — единственный способ снять фильтр дат, поэтому она обязана быть на
   // месте и тогда, когда выдача пуста.
   it("keeps dates, sorting and view controls on an empty result", async () => {
-    render(await SearchResults({
-      city, q: "", searchParams: { from: "2026-09-10", to: "2026-09-12" },
-    }));
+    // Даты от сегодняшнего дня: прошедший диапазон фильтром больше не считается.
+    const from = addDaysStr(todayStr(), 7);
+    const to = addDaysStr(todayStr(), 9);
+    render(await SearchResults({ city, q: "", searchParams: { from, to } }));
 
-    expect(screen.getByText("10 сен — 12 сен")).toBeInTheDocument();
+    expect(screen.getByText(shortRangeLabel(from, to))).toBeInTheDocument();
+  });
+
+  // Карточки показывают свободу на выбранные дни, а не на сегодня: выдача уже
+  // отфильтрована по ним, и «Занято» из-за сегодняшнего дня было бы ложью.
+  it("loads availability for the selected range", async () => {
+    vi.mocked(searchListings).mockResolvedValue({ items: [item("L1", "Дрель")], total: 1 } as never);
+    const from = addDaysStr(todayStr(), 7);
+    const to = addDaysStr(todayStr(), 20);
+    await SearchResults({ city, q: "", searchParams: { from, to } });
+    expect(getAvailabilityRows).toHaveBeenCalledWith(["L1"], from, to);
+
+    vi.mocked(getAvailabilityRows).mockClear();
+    await SearchResults({ city, q: "", searchParams: {} });
+    expect(getAvailabilityRows).toHaveBeenCalledWith(["L1"], todayStr(), addDaysStr(todayStr(), 6));
   });
 
   it("shows section facets in the sidebar without a query", async () => {

@@ -11,6 +11,7 @@ import { formatPrice } from "@/lib/catalog/format";
 import { compact } from "@/lib/search/text";
 import { highlight } from "@/lib/search/match";
 import type { WhatValue } from "@/lib/search/submit-href";
+import type { DateRange } from "@/lib/catalog/filters";
 import { PopoverContent } from "@/components/ui/Popover";
 import { MobileSuggestPanel, usePopoverLayout } from "./MobileSuggestPanel";
 import {
@@ -26,6 +27,8 @@ type Row =
 interface Reply {
   city: string;
   q: string;
+  /** Даты запроса ключом: ответ на прежние даты не про этот выбор. */
+  dates: string;
   result: SuggestResult;
 }
 
@@ -33,8 +36,9 @@ const prevent = (e: React.SyntheticEvent | Event) => e.preventDefault();
 
 // «Что» (перенос WhatField из sravniprokat). Подсказки — объявления и разделы
 // города с сервера (/api/search/suggest), а не из клиентского индекса.
-// Выбор подсказки или строка «Показать все» сразу отдаётся наверх (onPick);
-// Enter без выделенной строки отправляет форму — свободный текст.
+// Выбор подсказки или строка «Показать все» сразу отдаётся наверх (onPick):
+// куда дальше — к «Когда» или в переход, — решает панель. Enter без
+// выделенной строки отправляет форму — свободный текст.
 //
 // Поле прозрачное: вид несёт обёртка fieldWithin в SearchBar.
 //
@@ -42,13 +46,15 @@ const prevent = (e: React.SyntheticEvent | Event) => e.preventDefault();
 // (MobileSuggestPanel). Фокус всегда остаётся в поле: курсор по строкам
 // ведётся aria-activedescendant, строки отмечены data-active (globals.css).
 export function WhatField({
-  id, citySlug, value, onChange, onPick, inputRef, label, labelClassName, placeholder,
-  inputClassName, className, redirectFocus,
+  id, citySlug, dates = null, value, onChange, onPick, inputRef, label, labelClassName, placeholder,
+  inputClassName, clearClassName, className, redirectFocus, panelToolbar,
 }: {
   /** Стабильный id: не useId, поле рендерится и на сервере, ids совпадают при гидрации. */
   id: string;
   /** Город подсказок; без него поле — просто ввод со строкой «Показать все». */
   citySlug: string | undefined;
+  /** Даты «Когда»: с ними подсказки — только свободные на эти дни вещи. */
+  dates?: DateRange | null;
   value: string;
   onChange: (text: string) => void;
   onPick: (what: WhatValue) => void;
@@ -57,6 +63,8 @@ export function WhatField({
   labelClassName?: string;
   placeholder: string;
   inputClassName?: string;
+  /** Классы крестика очистки: в узкой шапке он прячется, чтобы не съесть поле. */
+  clearClassName?: string;
   className?: string;
   /**
    * Ниже lg — куда отдать фокус вместо своего списка. Hero на телефоне так
@@ -66,6 +74,8 @@ export function WhatField({
    * не пройти. С клавиатуры поле ниже lg — простой ввод без списка.
    */
   redirectFocus?: () => HTMLElement | null;
+  /** Чипы других полей в верхней строке панели подсказок (ниже lg). */
+  panelToolbar?: React.ReactNode;
 }) {
   const popover = usePopoverLayout();
   const anchorRef = useRef<HTMLDivElement>(null);
@@ -85,6 +95,8 @@ export function WhatField({
   textRef.current = value;
 
   const query = suggestQuery(value);
+  const { from: datesFrom, to: datesTo } = dates ?? {};
+  const datesKey = datesFrom && datesTo ? `${datesFrom}|${datesTo}` : "";
   // Одна значимая буква — не запрос (как на сервере): показываем популярное.
   const typing = compact(value).length >= 2;
 
@@ -92,25 +104,26 @@ export function WhatField({
   // ответ (пришёл позже более нового или на стёртый текст) отбрасывается.
   useEffect(() => {
     if (!open || !citySlug || !typing) return;
+    const range = datesFrom && datesTo ? { from: datesFrom, to: datesTo } : null;
     const apply = (mine: number, result: SuggestResult | null) => {
       if (!shouldApply({ seq: mine, q: query }, shownSeq.current, textRef.current)) return;
       shownSeq.current = mine;
       // Ошибка (429, сеть, 5xx) выглядит как «подсказок нет»: строка
       // «Показать все» работает и без них.
-      setReply({ city: citySlug, q: query, result: result ?? EMPTY_SUGGEST });
+      setReply({ city: citySlug, q: query, dates: datesKey, result: result ?? EMPTY_SUGGEST });
       setActive(-1);
     };
-    const cached = cachedSuggest(citySlug, query);
+    const cached = cachedSuggest(citySlug, query, range);
     if (cached) {
       apply(++seq.current, cached);
       return;
     }
     const t = setTimeout(() => {
       const mine = ++seq.current;
-      void fetchSuggest(citySlug, query).then((result) => apply(mine, result));
+      void fetchSuggest(citySlug, query, range).then((result) => apply(mine, result));
     }, SUGGEST_DEBOUNCE_MS);
     return () => clearTimeout(t);
-  }, [open, citySlug, typing, query]);
+  }, [open, citySlug, typing, query, datesFrom, datesTo, datesKey]);
 
   // Популярные разделы — при первом фокусе, дальше из кэша.
   const popularHere = popular?.city === citySlug ? popular : null;
@@ -119,14 +132,16 @@ export function WhatField({
     if (!open || !citySlug || typing || popularReady) return;
     let live = true;
     void fetchSuggest(citySlug, "").then((result) => {
-      if (live && result) setPopular({ city: citySlug, q: "", result });
+      if (live && result) setPopular({ city: citySlug, q: "", dates: "", result });
     });
     return () => { live = false; };
   }, [open, citySlug, typing, popularReady]);
 
   // Прошлый ответ держится, пока летит новый (без спиннера и мигания), — если
   // он про этот же ввод, а не про стёртый целиком.
-  const shown = typing && reply && reply.city === citySlug && sameTyping(reply.q, query) ? reply : null;
+  const shown = typing && reply && reply.city === citySlug && reply.dates === datesKey && sameTyping(reply.q, query)
+    ? reply
+    : null;
   const sections: { title: string; rows: Row[] }[] = typing
     ? [
       {
@@ -312,7 +327,7 @@ export function WhatField({
                 aria-label={content.search.clear}
                 onMouseDown={prevent}
                 onClick={() => { onChange(""); setOpen(true); setActive(-1); inputRef.current?.focus(); }}
-                className="hoverable grid h-7 w-7 shrink-0 place-items-center rounded-sm text-muted-foreground"
+                className={cn("hoverable grid h-7 w-7 shrink-0 place-items-center rounded-sm text-muted-foreground", clearClassName)}
               >
                 <X className="h-4 w-4" aria-hidden="true" />
               </button>
@@ -341,7 +356,7 @@ export function WhatField({
       )}
 
       {!popover && open && (
-        <MobileSuggestPanel onClose={() => inputRef.current?.blur()}>{list}</MobileSuggestPanel>
+        <MobileSuggestPanel onClose={() => inputRef.current?.blur()} toolbar={panelToolbar}>{list}</MobileSuggestPanel>
       )}
     </PopoverPrimitive.Root>
   );

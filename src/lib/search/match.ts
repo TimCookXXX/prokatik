@@ -15,6 +15,7 @@ export const CONTEXT_WEIGHT = 0.6;
 export const EXTRA_WEIGHT = 0.35;
 const CONVERTED_WEIGHT = 0.95;
 const SYNONYM_WEIGHT = 0.9;
+const SYNONYM_PREFIX_WEIGHT = 0.8;
 const FUZZY = 0.8;
 
 /**
@@ -50,6 +51,21 @@ export function wordScorer(t: string, strict = false): (w: string) => number {
     }
     return 0;
   };
+}
+
+/** Средняя оценка слова, ниже которой запись совпала только опечатками. */
+export const CLEAR_MATCH = 1;
+
+/**
+ * Опечатки — только когда яснее ничего нет. «палатк» находит «Палатку» по
+ * началу слова, и «Платье» (две правки) рядом с ней — шум: на маркетплейсе
+ * «возможно, вы имели в виду» показывают, когда точных совпадений нет. Если хоть
+ * одна запись совпала ясно (точно, по началу, по основе, подстрокой), записи с
+ * одними опечатками отбрасываются. Оценка — средняя по словам запроса, поэтому
+ * запрос, где опечатка лишь в одном слове из двух, ясным остаётся.
+ */
+export function withoutTypoNoise<H extends { score: number }>(hits: H[]): H[] {
+  return hits.some((h) => h.score >= CLEAR_MATCH) ? hits.filter((h) => h.score >= CLEAR_MATCH) : hits;
 }
 
 /**
@@ -146,10 +162,30 @@ const SYNONYMS_BY_STEM = (() => {
   return map;
 })();
 
-function synonymGroups(t: string): string[][] {
-  return (SYNONYMS_BY_STEM.get(stem(t)) ?? [])
+/** Однословные варианты синонимов — для раскрытия по началу слова. */
+const SYNONYM_WORDS = [...SYNONYMS_BY_STEM.values()].flat();
+
+/** Короче — по началу слова синоним не раскрывается: «бол» — это не «болгарка». */
+const SYNONYM_PREFIX_MIN = 4;
+
+function synonymGroups(t: string): { words: string[]; prefix: boolean }[] {
+  const exact = (SYNONYMS_BY_STEM.get(stem(t)) ?? [])
     .filter(({ word }) => word === t || (word.length >= 5 && t.length >= 5))
     .map(({ group }) => group);
+  const out = exact.map((words) => ({ words, prefix: false }));
+  // Слово ещё набирают: «керх» — начало «керхер», и подсказки уже должны
+  // показать Karcher, как на маркетплейсе. Добавляются только варианты,
+  // написанные иначе («karcher», «кархер»): само набираемое слово найдётся по
+  // началу и так, а его сокращение («перфо» → «перф») — не синоним. Вес ниже,
+  // чем у слова, набранного целиком.
+  if (t.length >= SYNONYM_PREFIX_MIN && !/\d/.test(t)) {
+    for (const { word, group } of SYNONYM_WORDS) {
+      if (word === t || !word.startsWith(t) || exact.includes(group)) continue;
+      const words = group.filter((w) => !w.startsWith(t) && !t.startsWith(w));
+      if (words.length) out.push({ words, prefix: true });
+    }
+  }
+  return out;
 }
 
 /**
@@ -179,8 +215,8 @@ export function tokenForms(raw: string): TokenForm[] {
   // Синонимы: «болгарку» → «ушм», «ецм» (раскладка «ушм») → «болгарка».
   for (const f of [...forms]) {
     if (f.parts.length !== 1) continue;
-    for (const group of synonymGroups(f.parts[0])) {
-      for (const s of group) add(s, f.weight * SYNONYM_WEIGHT);
+    for (const { words, prefix } of synonymGroups(f.parts[0])) {
+      for (const s of words) add(s, f.weight * SYNONYM_WEIGHT * (prefix ? SYNONYM_PREFIX_WEIGHT : 1));
     }
   }
   return forms;

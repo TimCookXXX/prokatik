@@ -1,6 +1,7 @@
 import { render } from "@testing-library/react";
 import { describe, it, expect } from "vitest";
 import { ListingFilters } from "@/components/catalog/ListingFilters";
+import { carryParams } from "@/lib/catalog/filters";
 
 const radio = (value: string) =>
   document.querySelector<HTMLInputElement>(`input[name="deposit"][value="${value}"]`)!;
@@ -35,12 +36,16 @@ describe("ListingFilters", () => {
   // Вид, даты и сортировка живут в верхней панели, полей у формы не имеют, и
   // без скрытых копий сабмит «Показать» возвращал список в сетку и терял
   // выбранный диапазон дат.
+  //
+  // Даты приходят из carryParams, как их собирают выдачи: нормализованными —
+  // форма отправляет те же даты, что применены, а не сырой query.
   it("переносит состояние верхней панели скрытыми полями", () => {
+    const carry = carryParams({ from: "2026-08-25", to: "2026-09-04" }, { today: "2026-08-29" });
     render(
       <ListingFilters
         basePath="/kazan/tools"
         state={{ deposit: "money" }}
-        hidden={{ view: "list", from: "2026-08-29", to: "2026-09-04", sort: "price_asc" }}
+        hidden={{ ...Object.fromEntries(carry), view: "list", sort: "price_asc" }}
       />,
     );
     const hiddenField = (name: string) =>
@@ -53,8 +58,10 @@ describe("ListingFilters", () => {
   });
 
   // Пустые значения полями не становятся: иначе адрес обрастал бы `view=&from=`.
+  // Половинчатые даты carryParams не переносит вовсе.
   it("не создаёт полей для незаданных параметров", () => {
-    render(<ListingFilters basePath="/kazan/tools" state={{}} hidden={{ view: "", from: "" }} />);
+    const carry = carryParams({ from: "2026-09-01" }, { today: "2026-08-29" });
+    render(<ListingFilters basePath="/kazan/tools" state={{}} hidden={{ ...Object.fromEntries(carry), view: "" }} />);
     expect(document.querySelectorAll('input[type="hidden"]')).toHaveLength(0);
   });
 

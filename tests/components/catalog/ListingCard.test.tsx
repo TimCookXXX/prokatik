@@ -98,4 +98,53 @@ describe("ListingCard", () => {
     expect(screen.getByRole("link", { name: /Артём/ }))
       .toHaveAttribute("href", "/u/01ARZ3NDEKTSV4RRFFQ69G5FAV");
   });
+
+  // Даты выдачи едут в карточку: виджет брони откроется на них.
+  it("ведёт на позицию с переносимыми параметрами выдачи", () => {
+    render(card({}, { hrefQuery: "from=2026-09-10&to=2026-09-12" }));
+    expect(screen.getByRole("link", { name: "Перфоратор Bosch GBH 2-26" })).toHaveAttribute(
+      "href",
+      "/kazan/elektroinstrumenty/perforator-bosch-01ARZ3NDEKTSV4RRFFQ69G5FAW?from=2026-09-10&to=2026-09-12",
+    );
+  });
+
+  it("без параметров ведёт на канонический адрес", () => {
+    render(card());
+    expect(screen.getByRole("link", { name: "Перфоратор Bosch GBH 2-26" })).toHaveAttribute(
+      "href",
+      "/kazan/elektroinstrumenty/perforator-bosch-01ARZ3NDEKTSV4RRFFQ69G5FAW",
+    );
+  });
+
+  // Свобода считается на весь выбранный период — минимум по дням: аренде
+  // нужна одна и та же вещь с первого дня по последний.
+  describe("свобода на выбранные даты", () => {
+    const range = { from: "2026-09-10", to: "2026-09-12" };
+    const badge = () => screen.getByText(/^(Свободно|Занято)$/);
+    const busyOn = (date: string, bookedQty: number): AvailabilityMap =>
+      new Map([[date, { bookedQty, blockedQty: 0 }]]);
+
+    it("зелёная, когда свободно всё во все дни", () => {
+      render(card({}, { ...range, availabilityMap: busyOn("2026-09-20", 3) }));
+      expect(badge()).toHaveTextContent("Свободно");
+      expect(badge()).toHaveClass("text-primary");
+    });
+
+    it("охряная, когда в какой-то из дней занята часть", () => {
+      render(card({}, { ...range, availabilityMap: busyOn("2026-09-12", 1) }));
+      expect(badge()).toHaveTextContent("Свободно");
+      expect(badge()).toHaveClass("text-accent");
+    });
+
+    // Свободно в первый день — ещё не свободно на период.
+    it("«Занято», когда в какой-то из дней не осталось ни одной", () => {
+      render(card({}, { ...range, availabilityMap: busyOn("2026-09-11", 3) }));
+      expect(badge()).toHaveTextContent("Занято");
+    });
+
+    it("без периода смотрит только на день from", () => {
+      render(card({}, { from: "2026-09-10", availabilityMap: busyOn("2026-09-11", 3) }));
+      expect(badge()).toHaveTextContent("Свободно");
+    });
+  });
 });

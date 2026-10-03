@@ -20,7 +20,7 @@ import { categoryKeywords } from "@/lib/seed/categories";
 import { compact, stem, words } from "./text";
 import {
   CONTEXT_WEIGHT, EXTRA_WEIGHT, extraWordScore, queryTokens, stopWordSet, subsets, tokenForms, wordScorer,
-  matchToken, type MatchFields, type TokenForm,
+  matchToken, withoutTypoNoise, type MatchFields, type TokenForm,
 } from "./match";
 
 /** Сколько слов описания попадает в индекс. */
@@ -317,10 +317,12 @@ function rankTokens<T extends IndexListing>(
       .map(([e, sum]) => ({ e, score: sum / tokens.length }))
       .sort((a, b) => b.score - a.score || ix.created[b.e] - ix.created[a.e] || a.e - b.e);
 
-  const main = order(scoreListings(scorer, forms, false));
+  const all = order(scoreListings(scorer, forms, false));
+  const main = withoutTypoNoise(all);
   const out: ListingHit<T>[] = main.slice(0, limit).map(({ e, score }) => ({ row: ix.listings[e], score, byDescription: false }));
   if (mode === "results" && out.length < limit) {
-    const matched = new Set(main.map(({ e }) => e));
+    // Отброшенные как шум опечаток в хвост через описание не возвращаются.
+    const matched = new Set(all.map(({ e }) => e));
     for (const { e, score } of order(scoreListings(scorer, forms, true), matched).slice(0, limit - out.length)) {
       out.push({ row: ix.listings[e], score, byDescription: true });
     }
@@ -391,7 +393,7 @@ export function suggestCategories(ix: ListingIndex, q: string, limit = 4): Categ
   const tokens = queryTokens(q, ix.stopWords);
   if (tokens.length === 0) return [];
   const forms = tokens.map(tokenForms);
-  const scored: CategoryHit[] = [];
+  const scored: (CategoryHit & { clear: number })[] = [];
   for (const entry of ix.categories) {
     let sum = 0;
     let anyOwn = false;
@@ -404,10 +406,16 @@ export function suggestCategories(ix: ListingIndex, q: string, limit = 4): Categ
     }
     if (!ok || !anyOwn) continue;
     const { fields: _fields, ...hit } = entry;
-    scored.push({ ...hit, score: sum / forms.length + CATEGORY_BONUS + Math.min(entry.count, 20) * 0.01 });
+    const clear = sum / forms.length;
+    scored.push({ ...hit, clear, score: clear + CATEGORY_BONUS + Math.min(entry.count, 20) * 0.01 });
   }
+  // Шум опечаток — по оценке совпадения, без бонусов раздела.
+  const kept = withoutTypoNoise(scored.map((h) => ({ h, score: h.clear }))).map(({ h }) => h);
   // Сортировка устойчивая: при равенстве — порядок дерева.
-  return scored.sort((a, b) => b.score - a.score).slice(0, limit);
+  return kept
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit)
+    .map(({ clear: _clear, ...hit }) => hit);
 }
 
 /** Подразделы с наибольшим числом объявлений в городе. */

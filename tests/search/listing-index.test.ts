@@ -3,7 +3,7 @@ import {
   listingFields, popularCategories, rankListings, rankResults, suggestCategories,
   type IndexCategory, type ListingIndex,
 } from "@/lib/search/listing-index";
-import { matchToken, queryTokens, tokenForms } from "@/lib/search/match";
+import { matchToken, queryTokens, tokenForms, withoutTypoNoise } from "@/lib/search/match";
 import { compact } from "@/lib/search/text";
 import { CATEGORIES, ROWS, fixtureIndex, type FixtureListing } from "./fixture";
 
@@ -83,6 +83,22 @@ describe("results start with the suggestions", () => {
   }
 });
 
+// R8 с датами. Подсказки берут верх ранжирования подсказок и отсеивают занятые
+// (getFreeListingIds), выдача — свой список и то же условие в SQL с порядком по
+// позиции id. Отсев порядок не меняет, поэтому подсказки остаются началом
+// выдачи; что условие одно и то же — tests/server/catalog-search.test.ts.
+describe("results start with the suggestions when dates are set", () => {
+  const busy = new Set(ROWS.filter((_, i) => i % 3 === 0).map((r) => r.id));
+  const free = (h: { row: FixtureListing }) => !busy.has(h.row.id);
+  for (const q of ["перфоратор", "makita", "болгарка", "велик", "дача", "бетон"]) {
+    it(q, () => {
+      const suggest = rankListings(ix, q, { mode: "suggest", limit: 50 }).filter(free).slice(0, 6);
+      const results = rankListings(ix, q, { mode: "results", limit: 100 }).filter(free);
+      expect(results.slice(0, suggest.length)).toEqual(suggest);
+    });
+  }
+});
+
 // Наивный перебор — matchToken по каждой записи, как в sravniprokat.
 function naive(index: ListingIndex<FixtureListing>, rows: FixtureListing[], q: string, withExtra: boolean) {
   if (compact(q).length < 2) return [];
@@ -121,11 +137,13 @@ describe("dictionary and postings equal the naive scan", () => {
   for (const q of queries) {
     it(q, () => {
       const suggest = rankListings(index, q, { mode: "suggest", limit: 1000 });
-      const expectSuggest = naive(index, rows, q, false);
+      const matched = naive(index, rows, q, false);
+      const expectSuggest = withoutTypoNoise(matched);
       expect(suggest.map((h) => [h.row.id, h.score])).toEqual(expectSuggest.map((h) => [h.id, h.score]));
 
       const results = rankListings(index, q, { mode: "results", limit: 1000 });
-      const inSuggest = new Set(expectSuggest.map((h) => h.id));
+      // Отброшенные как шум опечаток в хвост не возвращаются.
+      const inSuggest = new Set(matched.map((h) => h.id));
       const tail = naive(index, rows, q, true).filter((h) => !inSuggest.has(h.id));
       expect(results.map((h) => [h.row.id, h.score])).toEqual(
         [...expectSuggest, ...tail].map((h) => [h.id, h.score]),
@@ -194,5 +212,26 @@ describe("categories", () => {
     expect(popular[0].category.name).toBe("Электроинструменты");
     expect(popular.every((c) => c.root)).toBe(true);
     expect(popular.map((c) => c.count)).toEqual([...popular.map((c) => c.count)].sort((a, b) => b - a));
+  });
+});
+
+describe("typos only when nothing matches clearly", () => {
+  it("does not offer a dress next to the tent a prefix already found", () => {
+    expect(titles("палатк")).toEqual(["Палатка четырёхместная Naturehike с тамбуром"]);
+    expect(suggestCategories(ix, "палатк").map((c) => c.category.name)).not.toContain("Вечерняя одежда");
+  });
+
+  it("still finds by a typo when that is all there is", () => {
+    expect(titles("перфаратор").length).toBeGreaterThan(0);
+    expect(titles("перфаратор").every((t) => t.startsWith("Перфоратор"))).toBe(true);
+  });
+
+  it("keeps a two-word query where only one word has a typo", () => {
+    expect(titles("палатка тамбуор")).toEqual(["Палатка четырёхместная Naturehike с тамбуром"]);
+  });
+
+  it("keeps the noise out of the results tail too", () => {
+    const results = rankListings(ix, "палатк", { mode: "results", limit: 100 }).map((h) => h.row.title);
+    expect(results.some((t) => /платье/i.test(t))).toBe(false);
   });
 });

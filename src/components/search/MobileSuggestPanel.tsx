@@ -43,9 +43,12 @@ export function usePopoverLayout(): boolean {
  */
 export function MobileSuggestPanel({
   onClose,
+  toolbar,
   children,
 }: {
   onClose: () => void;
+  /** Чипы «Когда» и «Где» с текущими значениями — слева в верхней строке. */
+  toolbar?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return createPortal(
@@ -57,10 +60,11 @@ export function MobileSuggestPanel({
       onMouseDown={(e) => e.preventDefault()}
       className="fixed inset-x-0 top-[var(--header-total)] z-50 h-[calc(100dvh-var(--header-total))] overflow-y-auto overscroll-contain bg-background text-foreground"
     >
-      {/* Верхняя строка панели. Закрыть её иначе нечем: она закрывает всё под
-        * шапкой, а Android прячет клавиатуру кнопкой «назад», не снимая
-        * фокуса. */}
-      <div className="flex justify-end px-2 pt-2">
+      {/* Верхняя строка панели: чипы остальных полей и крестик. Закрыть
+        * панель иначе нечем: она закрывает всё под шапкой, а Android прячет
+        * клавиатуру кнопкой «назад», не снимая фокуса. */}
+      <div className="flex items-center gap-2 pl-4 pr-2 pt-2">
+        <div className="flex min-w-0 flex-1 items-center gap-2">{toolbar}</div>
         <button
           type="button"
           onClick={onClose}

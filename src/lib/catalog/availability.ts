@@ -13,13 +13,14 @@ export interface DayLoad {
 
 export type AvailabilityMap = Map<string, DayLoad>; // date -> load
 
-const DAY_MS = 24 * 60 * 60 * 1000;
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+import { isDateStr } from "@/lib/catalog/dates";
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+// Несуществующий день ("2026-02-30") — тоже мусор: Date.parse перенёс бы его
+// на март, и бронь ушла бы не на те даты, что в запросе.
 export function assertDateString(s: string): void {
-  if (!DATE_RE.test(s) || Number.isNaN(Date.parse(`${s}T00:00:00Z`))) {
-    throw new Error(`invalid date string: ${s}`);
-  }
+  if (!isDateStr(s)) throw new Error(`invalid date string: ${s}`);
 }
 
 // Все даты диапазона включительно. Бросает на некорректном диапазоне —

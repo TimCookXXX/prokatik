@@ -5,6 +5,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Search } from "lucide-react";
 import { content } from "@theme/content";
 import { cn } from "@/lib/utils";
+import { parseDateRange } from "@/lib/catalog/filters";
 import { fieldWithin } from "@/components/ui/field";
 import { Button } from "@/components/ui/button";
 import { useCurrentCity } from "@/components/layout/use-current-city";
@@ -12,6 +13,9 @@ import {
   WHERE_PARAMS, searchSubmitHref, type WhatValue, type WhereParams,
 } from "@/lib/search/submit-href";
 import { WhatField } from "./WhatField";
+import { WhenChip, WhenField } from "./WhenField";
+import { usePopoverLayout } from "./MobileSuggestPanel";
+import { usePanelDates } from "./panel-dates";
 
 /** Гео-контекст города для «Где»: регион геоданных, центр, версия мини-индекса. */
 export interface CityGeoContext {
@@ -27,11 +31,12 @@ export interface SearchCity {
   geo: CityGeoContext | null;
 }
 
-// Панель поиска «Что · Когда · Где»; пока в ней только поле «Что».
+// Панель поиска «Что · Когда · Где»; пока в ней поля «Что» и «Когда».
 // Одна форма на поверхность: в шапке — узкая строка, в hero — большая плашка.
+// «Когда» в шапке видно с lg; ниже его открывает чип в панели подсказок.
 //
 // Без JS и до гидрации это обычная GET-форма на /search: поле «Что» названо q,
-// город и известные из адреса даты и «Где» лежат скрытыми полями. После
+// город, даты и известное из адреса «Где» лежат скрытыми полями. После
 // гидрации отправку перехватывает onSubmit и ведёт по searchSubmitHref —
 // карточка, раздел или выдача.
 export function SearchBar({
@@ -55,6 +60,10 @@ export function SearchBar({
   const citySlug = fixedCity ?? current.slug;
   const header = variant === "header";
   const inputRef = useRef<HTMLInputElement>(null);
+  const popover = usePopoverLayout();
+  // Выбранная подсказка «Что»: держится, пока текст не тронули.
+  const [picked, setPicked] = useState<WhatValue | null>(null);
+  const [whenSheet, setWhenSheet] = useState(false);
 
   // Шапка живёт в корневом layout'е и не перемонтируется: текст «Что» выводится
   // из адреса и пересчитывается при его смене — но не под руками. Иначе после
@@ -66,13 +75,29 @@ export function SearchBar({
   const [editing, setEditing] = useState(false);
   if (urlQ !== syncedQ) {
     setSyncedQ(urlQ);
-    if (!editing) setText(urlQ);
+    if (!editing) {
+      setText(urlQ);
+      setPicked(null);
+    }
   }
+  const onText = (next: string) => {
+    setText(next);
+    setPicked(null);
+  };
 
-  // Даты и «Где» — что известно из адреса: их полей в панели ещё нет, но
-  // поиск из выдачи с датами не должен их терять.
-  const from = searchParams.get("from");
-  const to = searchParams.get("to");
+  // Даты «Когда» — из адреса, уже нормализованные, как их видит выдача; выбор
+  // в панели держится черновиком до перехода (общим с другой панелью страницы).
+  const fromUrl = useMemo(
+    () => parseDateRange({
+      from: searchParams.get("from") ?? undefined,
+      to: searchParams.get("to") ?? undefined,
+    }) ?? null,
+    [searchParams],
+  );
+  const [dates, setDates] = usePanelDates(`${pathname}?${searchParams.toString()}`, fromUrl);
+
+  // «Где» — что известно из адреса: поля в панели ещё нет, но поиск из выдачи
+  // с точкой не должен её терять.
   const loc: WhereParams = {};
   for (const key of WHERE_PARAMS) {
     const v = searchParams.get(key);
@@ -80,13 +105,17 @@ export function SearchBar({
   }
 
   const submit = (what: WhatValue) => {
-    const href = searchSubmitHref({ what, from, to, loc }, { pathname, searchParams, citySlug });
+    const href = searchSubmitHref(
+      { what, from: dates?.from, to: dates?.to, loc },
+      { pathname, searchParams, citySlug },
+    );
     if (!href) {
       // Не сказали, что нужно, — открываем подсказки вместо пустого перехода.
       inputRef.current?.focus();
       return;
     }
     inputRef.current?.blur();
+    setPicked(null);
     // Поле шапки сразу показывает то, что будет в адресе перехода: запрос
     // выдачи или пусто. Иначе после выбора подсказки в шапке осталось бы
     // название вещи — адрес без q синхронизацию не запустит.
@@ -97,15 +126,25 @@ export function SearchBar({
     router.push(href as never);
   };
 
-  // Выбор в «Что» ведёт сразу: других полей в панели пока нет. С «Когда»
-  // фокус будет переходить к нему, как в sravniprokat.
-  const onPick = (what: WhatValue) => submit(what);
+  // Выбранная подсказка не уводит со страницы: фокус переходит к «Когда»,
+  // как в sravniprokat, а переход — кнопкой поиска. Так это, пока «Когда» видно
+  // рядом (с lg). Ниже lg его поля в шапке нет — только чип в панели
+  // подсказок, которая с выбором закрывается, — и подсказка ведёт сразу, с
+  // датами, выбранными до неё. «Показать все» — сам поиск, он ведёт всегда.
+  const onPick = (what: WhatValue) => {
+    if (what.kind === "text" || !popover) {
+      submit(what);
+      return;
+    }
+    setPicked(what);
+    inputRef.current?.form?.querySelector<HTMLElement>("[data-when]")?.focus();
+  };
 
   const hidden = (
     <>
       {citySlug && <input type="hidden" name="city" value={citySlug} />}
-      {from && <input type="hidden" name="from" value={from} />}
-      {to && <input type="hidden" name="to" value={to} />}
+      {dates && <input type="hidden" name="from" value={dates.from} />}
+      {dates && <input type="hidden" name="to" value={dates.to} />}
       {WHERE_PARAMS.map((key) => loc[key] && <input key={key} type="hidden" name={key} value={loc[key]} />)}
     </>
   );
@@ -116,7 +155,7 @@ export function SearchBar({
     method: "get",
     onSubmit: (e: React.FormEvent<HTMLFormElement>) => {
       e.preventDefault();
-      submit({ kind: "text", q: text });
+      submit(picked ?? { kind: "text", q: text });
     },
     onFocus: (e: React.FocusEvent<HTMLFormElement>) => {
       if ((e.target as Node) === inputRef.current) setEditing(true);
@@ -136,24 +175,49 @@ export function SearchBar({
         <WhatField
           id="what-header"
           citySlug={citySlug}
+          dates={dates}
           value={text}
-          onChange={setText}
+          onChange={onText}
           onPick={onPick}
           inputRef={inputRef}
           label={content.search.whatLabel}
           labelClassName="sr-only"
           placeholder={content.nav.searchPlaceholder}
           inputClassName="text-sm"
+          clearClassName="hidden sm:grid"
           className="flex-1"
+          panelToolbar={<WhenChip value={dates} onClick={() => setWhenSheet(true)} />}
+        />
+        {/* Ниже lg поля «Когда» в шапке нет — выбранные даты выдаёт точка на
+          * кнопке поиска (ширину поля она не ест), а сами они видны в чипе
+          * панели подсказок. */}
+        {dates && <span className="sr-only lg:hidden">{content.search.when.datesSet}</span>}
+        <span aria-hidden="true" className="hidden h-5 w-px shrink-0 bg-border lg:block" />
+        <WhenField
+          variant="header"
+          value={dates}
+          onChange={setDates}
+          sheetOpen={whenSheet}
+          onSheetOpenChange={setWhenSheet}
+          // Чип, открывший шторку, размонтирован вместе с панелью: фокус
+          // возвращается в поле, и панель подсказок открывается снова.
+          returnFocus={() => inputRef.current}
+          className="hidden lg:flex"
         />
         {hidden}
         {/* Единственная лупа — и есть кнопка: зелёная справа, как «Найти» в hero. */}
         <button
           type="submit"
           aria-label={content.nav.search}
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-sm bg-primary text-primary-foreground transition-transform active:scale-[0.94]"
+          className="relative flex h-7 w-7 shrink-0 items-center justify-center rounded-sm bg-primary text-primary-foreground transition-transform active:scale-[0.94]"
         >
           <Search className="h-3.5 w-3.5" aria-hidden="true" />
+          {dates && (
+            <span
+              aria-hidden="true"
+              className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-accent ring-2 ring-background lg:hidden"
+            />
+          )}
         </button>
       </form>
     );
@@ -168,8 +232,9 @@ export function SearchBar({
       <WhatField
         id="what-hero"
         citySlug={citySlug}
+        dates={dates}
         value={text}
-        onChange={setText}
+        onChange={onText}
         onPick={onPick}
         inputRef={inputRef}
         label={content.search.whatLabel}
@@ -180,8 +245,10 @@ export function SearchBar({
         // Ниже lg — та же панель подсказок, что у шапки: её поле и получает фокус.
         redirectFocus={() => document.querySelector<HTMLElement>("[data-site-header] [data-what-input]")}
       />
+      <span aria-hidden="true" className="mx-3 h-px shrink-0 bg-border md:mx-0 md:my-2 md:h-auto md:w-px" />
+      <WhenField variant="hero" value={dates} onChange={setDates} className="md:w-48 md:shrink-0" />
       {hidden}
-      <Button type="submit" className="h-12 shrink-0 px-7 text-base font-semibold md:h-auto md:min-h-12">
+      <Button type="submit" className="h-12 shrink-0 px-6 text-base font-semibold md:h-auto md:min-h-12">
         {content.nav.search}
       </Button>
     </form>

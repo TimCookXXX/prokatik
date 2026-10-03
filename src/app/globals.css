@@ -714,6 +714,10 @@
 .rdp-theme .rdp-month_grid { width: 100%; table-layout: fixed; }
 .rdp-theme .rdp-day { width: auto; }
 .rdp-theme .rdp-day_button { width: 100%; }
+/* Два месяца рядом (поле «Когда» в шапке): месяцы делят ширину поровну, а не
+ * переносятся друг под друга, как вышло бы с width: 100% у каждого. */
+.rdp-theme.rdp-pair .rdp-months { flex-wrap: nowrap; gap: 1.5rem; }
+.rdp-theme.rdp-pair .rdp-month { flex: 1 1 0; min-width: 0; width: auto; }
 /* Шапка: месяц по центру, стрелки по краям (nav на всю ширину, space-between). */
 .rdp-theme .rdp-nav {
   inset-inline-start: 0;

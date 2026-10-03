@@ -6,6 +6,7 @@
 // ошибкой. Вместо отмены ответ сверяется — shouldApply ниже.
 
 import type { SuggestResult } from "@/server/search";
+import type { DateRange } from "@/lib/catalog/filters";
 
 export type { SuggestCategory, SuggestItem, SuggestResult } from "@/server/search";
 
@@ -29,7 +30,9 @@ export function suggestQuery(q: string): string {
 const cache = new Map<string, { value: SuggestResult; at: number }>();
 const inflight = new Map<string, Promise<SuggestResult | null>>();
 
-const keyOf = (city: string, q: string, from = "", to = "") => `${city}|${q}|${from}|${to}`;
+// Даты — часть ключа: с ними сервер отсеивает занятые на эти дни.
+const keyOf = (city: string, q: string, dates?: DateRange | null) =>
+  `${city}|${q}|${dates?.from ?? ""}|${dates?.to ?? ""}`;
 
 function remember(key: string, value: SuggestResult, at = Date.now()) {
   cache.delete(key);
@@ -38,8 +41,8 @@ function remember(key: string, value: SuggestResult, at = Date.now()) {
 }
 
 /** Ответ из кэша без сети — чтобы стирание и повторный набор не ждали дебаунса. */
-export function cachedSuggest(city: string, q: string): SuggestResult | undefined {
-  const key = keyOf(city, suggestQuery(q));
+export function cachedSuggest(city: string, q: string, dates?: DateRange | null): SuggestResult | undefined {
+  const key = keyOf(city, suggestQuery(q), dates);
   const hit = cache.get(key);
   if (!hit) return undefined;
   if (Date.now() - hit.at >= CACHE_TTL_MS) {
@@ -51,19 +54,24 @@ export function cachedSuggest(city: string, q: string): SuggestResult | undefine
 }
 
 /**
- * Подсказки города по запросу; пустой запрос — популярные разделы. null —
- * ответа нет (429, сеть, 5xx): поле показывает «подсказок нет», а строка
- * «Показать все» работает и так. Неудачи не кэшируются.
+ * Подсказки города по запросу; пустой запрос — популярные разделы. С датами в
+ * подсказки идут только вещи, свободные на эти дни. null — ответа нет (429,
+ * сеть, 5xx): поле показывает «подсказок нет», а строка «Показать все»
+ * работает и так. Неудачи не кэшируются.
  */
-export function fetchSuggest(city: string, q: string): Promise<SuggestResult | null> {
+export function fetchSuggest(city: string, q: string, dates?: DateRange | null): Promise<SuggestResult | null> {
   const query = suggestQuery(q);
-  const key = keyOf(city, query);
-  const hit = cachedSuggest(city, query);
+  const key = keyOf(city, query, dates);
+  const hit = cachedSuggest(city, query, dates);
   if (hit) return Promise.resolve(hit);
   const pending = inflight.get(key);
   if (pending) return pending;
 
   const params = new URLSearchParams({ city, q: query });
+  if (dates) {
+    params.set("from", dates.from);
+    params.set("to", dates.to);
+  }
   const request = fetch(`/api/search/suggest?${params}`)
     .then(async (res) => {
       if (!res.ok) return null;

@@ -2,6 +2,8 @@
 // чтобы тестировать без рендера.
 
 import type { ListingFilters } from "@/server/catalog";
+import { BOOKING_HORIZON_DAYS } from "@/lib/booking/params";
+import { addDaysStr, isDateStr, todayStr } from "@/lib/catalog/dates";
 
 export interface CategorySearchParams {
   price_min?: string;
@@ -53,15 +55,38 @@ export function sortOptionsFor(ctx: SortContext = {}) {
   return SORT_OPTIONS.filter((o) => o.value !== "relevance" || Boolean(ctx.q));
 }
 
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+/** Контекст разбора адреса: сортировки плюс «сегодня», от которого меряются даты. */
+export interface FilterContext extends SortContext {
+  /** Сегодня "YYYY-MM-DD" в деловой зоне; по умолчанию — todayStr(). */
+  today?: string;
+}
 
-// Диапазон дат из адреса. Обе границы обязаны быть валидными и упорядоченными,
-// иначе фильтра нет: половинчатый диапазон молча сужал бы выдачу непонятно как.
-function parseDateRange(sp: { from?: string; to?: string }): { from: string; to: string } | undefined {
+export interface DateRange {
+  from: string;
+  to: string;
+}
+
+/**
+ * Диапазон дат из адреса — строго, по правилам брони (docs/domain.md):
+ * - обе границы — существующие дни и from ≤ to, иначе фильтра нет: половинчатый
+ *   диапазон молча сужал бы выдачу непонятно как;
+ * - диапазон целиком в прошлом или хоть одной границей за горизонтом брони —
+ *   фильтра нет: таких дат пикер не даёт, а забронировать их нельзя;
+ * - from в прошлом подтягивается к сегодня. Прошедшие дни забронировать нельзя,
+ *   смысл фильтра от этого не меняется — это единственный кламп;
+ * - длина не ограничена, как и у брони.
+ * Результат — нормализованный диапазон: его же видит UI и несут ссылки.
+ */
+export function parseDateRange(
+  sp: { from?: string; to?: string },
+  today: string = todayStr(),
+): DateRange | undefined {
   const { from, to } = sp;
-  if (!from || !to || !DATE_RE.test(from) || !DATE_RE.test(to)) return undefined;
-  if (Number.isNaN(Date.parse(`${from}T00:00:00Z`)) || Number.isNaN(Date.parse(`${to}T00:00:00Z`))) return undefined;
-  return from <= to ? { from, to } : undefined;
+  if (!isDateStr(from) || !isDateStr(to) || from > to) return undefined;
+  if (to < today) return undefined;
+  const horizon = addDaysStr(today, BOOKING_HORIZON_DAYS);
+  if (from > horizon || to > horizon) return undefined;
+  return { from: from < today ? today : from, to };
 }
 
 const DEPOSITS = ["money", "document", "none"] as const;
@@ -96,10 +121,10 @@ function num(s: string | undefined): number | undefined {
 // умолчание контекста. Меню подсвечивает именно её, а не сырой `sort`: при
 // пустом параметре оно иначе показывало бы первый пункт, а порядок был другим.
 // Явное `sort=new` допустимо: при запросе новизна не умолчание.
-export function parseFilters(sp: CategorySearchParams, ctx: SortContext = {}): ListingFilters {
+export function parseFilters(sp: CategorySearchParams, ctx: FilterContext = {}): ListingFilters {
   const sort = sortOptionsFor(ctx).find((o) => o.value === sp.sort)?.value ?? defaultSort(ctx);
   const page = num(sp.page);
-  const range = parseDateRange(sp);
+  const range = parseDateRange(sp, ctx.today);
   return {
     availableFrom: range?.from,
     availableTo: range?.to,
@@ -115,16 +140,40 @@ export function parseFilters(sp: CategorySearchParams, ctx: SortContext = {}): L
   };
 }
 
+/**
+ * Параметры, которые едут за человеком по каталогу: из выдачи в раздел, из
+ * раздела в карточку, через отправку фильтров. Сейчас это даты «Когда» — уже
+ * нормализованные parseDateRange, чтобы ссылка несла те же даты, что
+ * применены. Ключи «Где» (`loc`, `la`, `src`, `lp`) ложатся сюда же.
+ * Пустое не попадает: адрес не должен обрастать `from=`.
+ */
+export function carryParams(
+  sp: Pick<CategorySearchParams, "from" | "to">,
+  ctx: Pick<FilterContext, "today"> = {},
+): URLSearchParams {
+  const out = new URLSearchParams();
+  const range = parseDateRange(sp, ctx.today);
+  if (range) {
+    out.set("from", range.from);
+    out.set("to", range.to);
+  }
+  return out;
+}
+
 // Параметры фильтров для ссылок (пагинация, сброс) — без page и без контекста
-// поиска. Пустые значения не попадают: адрес не должен обрастать `deposit=`.
-export function filterParams(sp: CategorySearchParams): URLSearchParams {
+// поиска, зато с переносимыми (carryParams). Пустые значения не попадают:
+// адрес не должен обрастать `deposit=`.
+export function filterParams(
+  sp: CategorySearchParams,
+  ctx: Pick<FilterContext, "today"> = {},
+): URLSearchParams {
   const out = new URLSearchParams();
   for (const key of [
-    "price_min", "price_max", "deposit", "handover", "verified", "category",
-    "from", "to", "view", "sort",
+    "price_min", "price_max", "deposit", "handover", "verified", "category", "view", "sort",
   ] as const) {
     const v = sp[key];
     if (v !== undefined && v !== "") out.set(key, v);
   }
+  for (const [key, value] of carryParams(sp, ctx)) out.set(key, value);
   return out;
 }

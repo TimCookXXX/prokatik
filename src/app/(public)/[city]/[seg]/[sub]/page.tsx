@@ -12,7 +12,8 @@ import {
   listingPhotos,
   type Category, type City, type Listing, type Seller,
 } from "@/server/catalog";
-import { extractListingId, listingPath } from "@/lib/catalog/listing-path";
+import { canonicalHref, extractListingId, listingPath } from "@/lib/catalog/listing-path";
+import { carryParams } from "@/lib/catalog/filters";
 import { formatPrice } from "@/lib/catalog/format";
 import { addDaysStr, todayStr } from "@/lib/catalog/dates";
 import type { AvailabilityMap } from "@/lib/catalog/availability";
@@ -106,16 +107,20 @@ export default async function CitySubPage({ params, searchParams }: Props) {
   const r = await resolve(citySlug, seg, sub);
   if (!r) notFound();
 
+  const sp = await searchParams;
   if (r.kind === "subcategory") {
-    return <SubcategoryPage r={r} searchParams={await searchParams} />;
+    return <SubcategoryPage r={r} searchParams={sp} />;
   }
 
   // Каноничность URL товара: seg = слаг категории, slug-часть = listing.slug.
+  // Даты, количество и «Где» переезжают вместе с ним (белый список
+  // canonicalHref) — иначе старая ссылка теряла бы выбор в виджете брони.
   const parsed = extractListingId(sub);
   if (seg !== r.category.slug || parsed?.slug !== r.listing.slug) {
-    permanentRedirect(listingPath(r.city.slug, r.category.slug, r.listing.slug, r.listing.id) as never);
+    const path = listingPath(r.city.slug, r.category.slug, r.listing.slug, r.listing.id);
+    permanentRedirect(canonicalHref(path, { ...sp }) as never);
   }
-  return <ListingPage r={r} searchParams={await searchParams} />;
+  return <ListingPage r={r} searchParams={sp} />;
 }
 
 async function SubcategoryPage({
@@ -130,6 +135,9 @@ async function SubcategoryPage({
   if ((directCounts.get(sub.id) ?? 0) === 0) notFound();
 
   const categoryBasePath = `/${city.slug}/${root.slug}`;
+  // Крошки несут переносимые параметры (даты), JSON-LD — нет: там канон.
+  const carry = carryParams(searchParams).toString();
+  const withCarry = (path: string) => (carry ? `${path}?${carry}` : path);
 
   return (
     <main className="mx-auto w-full max-w-[1200px] px-4 py-6">
@@ -141,8 +149,8 @@ async function SubcategoryPage({
       ], siteConfig.url)} />
       <Breadcrumbs items={[
         { label: "Главная", href: "/" },
-        { label: city.name, href: `/${city.slug}` },
-        { label: root.name, href: categoryBasePath },
+        { label: city.name, href: withCarry(`/${city.slug}`) },
+        { label: root.name, href: withCarry(categoryBasePath) },
         { label: sub.name },
       ]} />
       <h1 className="mb-4 mt-3 font-display text-2xl font-bold">
@@ -224,6 +232,12 @@ async function ListingPage({
     { label: category.name, href: categoryHref },
     { label: listing.title },
   ];
+  // Крошки на странице несут даты обратно в выдачу; JSON-LD строится из crumbs
+  // без query — там канонические адреса.
+  const carry = carryParams(searchParams, { today: from }).toString();
+  const visibleCrumbs = carry
+    ? crumbs.map((c) => (c.href && c.href !== "/" ? { ...c, href: `${c.href}?${carry}` } : c))
+    : crumbs;
 
   const weekDates = Array.from({ length: 7 }, (_, i) => addDaysStr(from, i));
   const available = weekDates.some((d) => freeQty(listing.quantity, map.get(d)) > 0);
@@ -259,7 +273,7 @@ async function ListingPage({
         crumbs.map((c) => ({ name: c.label, url: c.href })),
         siteConfig.url,
       )} />
-      <Breadcrumbs items={crumbs} />
+      <Breadcrumbs items={visibleCrumbs} />
       <h1 className="mt-2 font-display text-xl font-bold sm:text-2xl">{listing.title}</h1>
 
       <div className="mt-3 grid grid-cols-1 gap-6 md:grid-cols-[1fr_360px]">
@@ -353,7 +367,6 @@ async function ListingPage({
             handoverDelivery={listing.handoverDelivery}
             sellerName={sellerName}
             sellerHref={sellerHref}
-            sellerLocation={listing.location}
             isAuthed={isAuthed}
             isOwn={isOwn}
             authProps={authProps}

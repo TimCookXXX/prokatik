@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  defaultSort, filterParams, parseFilters, sortOptionsFor,
+  carryParams, defaultSort, filterParams, parseDateRange, parseFilters, sortOptionsFor,
 } from "@/lib/catalog/filters";
 
 describe("parseFilters()", () => {
@@ -119,5 +119,90 @@ describe("действующая сортировка", () => {
     const without = sortOptionsFor({}).map((o) => o.value);
     expect(withQ).toEqual(["relevance", "free", "new", "price_asc", "price_desc"]);
     expect(without).toEqual(["free", "new", "price_asc", "price_desc"]);
+  });
+});
+
+// Даты выдачи разбираются строго, по правилам брони (docs/domain.md): мусор и
+// половинка — фильтра нет, прошлое начало подтягивается к сегодня, горизонт —
+// 180 дней. «Сегодня» передаётся явно: иначе тест зависел бы от дня прогона.
+describe("диапазон дат", () => {
+  const today = "2026-10-03";
+  const range = (from?: string, to?: string) => parseDateRange({ from, to }, today);
+
+  it("валидный диапазон проходит как есть, один день — тоже диапазон", () => {
+    expect(range("2026-10-10", "2026-10-12")).toEqual({ from: "2026-10-10", to: "2026-10-12" });
+    expect(range("2026-10-10", "2026-10-10")).toEqual({ from: "2026-10-10", to: "2026-10-10" });
+  });
+
+  // Date.parse переносит 30 февраля на 2 марта; раньше такой «день» проходил.
+  it("несуществующий день — фильтра нет", () => {
+    expect(range("2027-02-30", "2027-03-02")).toBeUndefined();
+    expect(range("2026-10-10", "2026-10-32")).toBeUndefined();
+  });
+
+  it("мусор и половинка — фильтра нет", () => {
+    expect(range("garbage", "2026-10-12")).toBeUndefined();
+    expect(range("2026-10-10", undefined)).toBeUndefined();
+    expect(range(undefined, "2026-10-12")).toBeUndefined();
+    expect(range("", "")).toBeUndefined();
+  });
+
+  it("перевёрнутый диапазон не чинится, а отбрасывается", () => {
+    expect(range("2026-10-12", "2026-10-10")).toBeUndefined();
+  });
+
+  it("начало в прошлом подтягивается к сегодня", () => {
+    expect(range("2026-09-28", "2026-10-05")).toEqual({ from: today, to: "2026-10-05" });
+    expect(range("2026-09-28", today)).toEqual({ from: today, to: today });
+  });
+
+  it("диапазон целиком в прошлом — фильтра нет", () => {
+    expect(range("2026-09-28", "2026-10-02")).toBeUndefined();
+  });
+
+  it("граница за горизонтом брони — фильтра нет, а не кламп", () => {
+    // today + 180 = 2027-04-01
+    expect(range("2027-03-25", "2027-04-01")).toEqual({ from: "2027-03-25", to: "2027-04-01" });
+    expect(range("2027-03-25", "2027-04-02")).toBeUndefined();
+    expect(range("2027-04-02", "2027-04-05")).toBeUndefined();
+  });
+
+  it("длина не ограничена", () => {
+    expect(range(today, "2027-04-01")).toEqual({ from: today, to: "2027-04-01" });
+  });
+
+  it("parseFilters отдаёт нормализованный диапазон", () => {
+    const f = parseFilters({ from: "2026-09-28", to: "2026-10-05" }, { today });
+    expect(f).toMatchObject({ availableFrom: today, availableTo: "2026-10-05" });
+    const bad = parseFilters({ from: "2027-02-30", to: "2027-03-02" }, { today });
+    expect(bad.availableFrom).toBeUndefined();
+    expect(bad.availableTo).toBeUndefined();
+  });
+});
+
+// Ссылки несут те же даты, что применены к выдаче, — нормализованные, а не
+// сырые из адреса: иначе человек видел бы в ссылке одно, а в выдаче другое.
+describe("carryParams()", () => {
+  const today = "2026-10-03";
+
+  it("переносит нормализованные даты", () => {
+    expect(carryParams({ from: "2026-09-28", to: "2026-10-05" }, { today }).toString())
+      .toBe("from=2026-10-03&to=2026-10-05");
+  });
+
+  it("без валидного диапазона ничего не переносит", () => {
+    expect(carryParams({}, { today }).toString()).toBe("");
+    expect(carryParams({ from: "2026-10-10" }, { today }).toString()).toBe("");
+    expect(carryParams({ from: "2027-02-30", to: "2027-03-02" }, { today }).toString()).toBe("");
+  });
+
+  it("filterParams включает переносимые параметры", () => {
+    const qs = filterParams({ price_min: "300", from: "2026-09-28", to: "2026-10-05" }, { today });
+    expect(qs.toString()).toBe("price_min=300&from=2026-10-03&to=2026-10-05");
+  });
+
+  it("filterParams не тащит битые даты", () => {
+    const qs = filterParams({ deposit: "none", from: "2026-10-10", to: "garbage" }, { today });
+    expect(qs.toString()).toBe("deposit=none");
   });
 });
