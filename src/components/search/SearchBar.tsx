@@ -279,15 +279,11 @@ export function SearchBar({
     <form
       {...formProps}
       aria-label={content.search.heroLabel}
-      className={cn(
-        fieldWithin,
-        "flex flex-col gap-2 p-2 text-left md:flex-row md:items-stretch",
-        // С wide hero делит ряд с плитками, и колонка уже ≈ 540 px: три поля
-        // и кнопка в строку там не входят. «Что» уходит в свою строку сверху,
-        // «Когда», «Где» и «Найти» — под ним.
-        whereCity && "wide:flex-wrap",
-        className,
-      )}
+      // По этой метке шапка на главной узнаёт, виден ли поиск hero (HeaderSearch).
+      data-hero-search
+      // Hero — одна колонка во всю ширину своего текста: с md три поля и
+      // кнопка встают в одну строку.
+      className={cn(fieldWithin, "flex flex-col gap-2 p-2 text-left md:flex-row md:items-stretch", className)}
     >
       <WhatField
         id="what-hero"
@@ -302,23 +298,19 @@ export function SearchBar({
         labelClassName="text-xs text-muted-foreground"
         placeholder={content.search.heroPlaceholder}
         inputClassName="py-0.5 text-base font-semibold placeholder:font-normal md:text-[17px]"
-        className={cn("flex-1 justify-center gap-0.5 px-3 py-1.5 md:px-4", whereCity && "wide:basis-full")}
+        className="flex-1 justify-center gap-0.5 px-3 py-1.5 md:px-4"
         // Ниже lg — та же панель подсказок, что у шапки: её поле и получает фокус.
-        redirectFocus={() => document.querySelector<HTMLElement>("[data-site-header] [data-what-input]")}
+        // На главной поиск шапки может быть скрыт (inert, HeaderSearch): inert
+        // не принимает и программный фокус, поэтому снимается здесь; фокус
+        // внутри держит поиск видимым, и вернёт inert уже его уход.
+        redirectFocus={() => {
+          const target = document.querySelector<HTMLElement>("[data-site-header] [data-what-input]");
+          target?.closest<HTMLElement>("[inert]")?.removeAttribute("inert");
+          return target;
+        }}
       />
-      <span
-        aria-hidden="true"
-        className={cn(
-          "mx-3 h-px shrink-0 bg-border md:mx-0 md:my-2 md:h-auto md:w-px",
-          whereCity && "wide:my-0 wide:h-px wide:basis-full",
-        )}
-      />
-      <WhenField
-        variant="hero"
-        value={dates}
-        onChange={setDates}
-        className={cn("md:w-48 md:shrink-0", whereCity && "wide:w-auto wide:flex-1")}
-      />
+      <span aria-hidden="true" className="mx-3 h-px shrink-0 bg-border md:mx-0 md:my-2 md:h-auto md:w-px" />
+      <WhenField variant="hero" value={dates} onChange={setDates} className="md:w-48 md:shrink-0" />
       {whereCity && (
         <>
           <span aria-hidden="true" className="mx-3 h-px shrink-0 bg-border md:mx-0 md:my-2 md:h-auto md:w-px" />
@@ -329,7 +321,7 @@ export function SearchBar({
             value={where}
             onChange={setWhere}
             track={track}
-            className="md:w-48 md:shrink-0 lg:w-56 wide:w-auto wide:flex-1"
+            className="md:w-48 md:shrink-0 lg:w-56"
           />
         </>
       )}

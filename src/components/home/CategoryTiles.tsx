@@ -28,9 +28,13 @@ export function CategoryTiles({
     // стать больше, и на телефоне перенос разворачивал их в три ряда, отжимая
     // витрину за сгиб. Отрицательные поля гасят отступ страницы — чипы
     // прокручиваются от кромки до кромки, а не внутри колонки.
+    //
+    // Правый край гаснет маской — намёк, что строка прокручивается. Ширина
+    // гашения равна концевому отступу (16px): в конце прокрутки «Все
+    // категории →» стоит перед ним и читается целиком.
     <section
       aria-label={content.home.categoriesHeading}
-      className="-mx-4 flex items-center gap-2 overflow-x-auto px-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      className="-mx-4 flex items-center gap-2 overflow-x-auto px-4 [mask-image:linear-gradient(to_left,transparent,black_16px)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
     >
       {categories.map((c) => {
         const Icon = verticalIcon(c.vertical);

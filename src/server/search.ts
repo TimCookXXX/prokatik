@@ -9,7 +9,7 @@ import {
 import { hasSearchWords, MAX_QUERY_LENGTH } from "@/lib/search/match";
 import type { DateRange } from "@/lib/catalog/filters";
 import { getFreeListingIds, type City } from "@/server/catalog";
-import { getSearchIndex } from "@/server/search-index";
+import { getSearchIndex, type SearchIndex } from "@/server/search-index";
 
 /** Потолок совпадений выдачи: дальше фильтры, счёт и страницы считает SQL по этим id. */
 export const RESULTS_LIMIT = 1000;
@@ -121,4 +121,39 @@ export async function suggestForCity(
   }));
 
   return { items, categories: cats };
+}
+
+/** Сколько чипов популярных запросов показывает главная. */
+export const POPULAR_QUERIES_MAX = 8;
+
+// Подсчёт чипов — при индексе, на котором он сделан: пока версия набора не
+// сменилась, getSearchIndex отдаёт тот же объект, и главная берёт готовый
+// список, а не прогоняет кандидатов через скоринг на каждый рендер. Новый
+// индекс (правка, сверка версии, инвалидация) — новый ключ; старый подсчёт
+// уходит вместе со старым индексом.
+const popularMemo = new WeakMap<SearchIndex, { candidates: readonly string[]; list: string[] }>();
+
+/**
+ * Чипы «Часто ищут» под поиском hero: кандидаты из `candidates` (по порядку,
+ * не больше POPULAR_QUERIES_MAX), по которым в городе есть хотя бы одно
+ * объявление в режиме подсказок — чип не обещает пустую выдачу. Индекс тот же,
+ * что у подсказок и выдачи. Любая ошибка — пустой список: чипы просто не
+ * показываются, главная из-за них не падает.
+ */
+export async function getPopularQueries(cityId: string, candidates: readonly string[]): Promise<string[]> {
+  try {
+    const index = await getSearchIndex([cityId]);
+    const memo = popularMemo.get(index);
+    if (memo?.candidates === candidates) return memo.list;
+    const list: string[] = [];
+    for (const q of candidates) {
+      if (list.length >= POPULAR_QUERIES_MAX) break;
+      if (rankListings(index.ix, q, { mode: "suggest", limit: 1 }).length > 0) list.push(q);
+    }
+    popularMemo.set(index, { candidates, list });
+    return list;
+  } catch (e) {
+    console.error("[search] popular queries failed:", (e as Error).message);
+    return [];
+  }
 }

@@ -20,12 +20,24 @@ vi.mock("@/lib/db", async () => {
 
 import {
   getActiveListingById, getActiveListingCardsByOwner, getActiveListingsByOwner,
-  getListingsForCategories, getRecentListings, publicListingColumns, searchListings,
+  getListingsForCategories, getNearbyListings, getRecentListings, publicListingColumns, searchListings,
 } from "@/server/catalog";
+import type { UserPoint } from "@/lib/geo/location";
 
 const CITY = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
 // С таблицей и без: запрос к одной таблице колонки не квалифицирует.
 const PRIVATE = /"(address|lat|lon)"/;
+const NEAR: UserPoint = { point: { lat: 45.035, lon: 38.975 }, label: null, source: "address", precision: "house" };
+
+/**
+ * Что уходит наружу — список выборки без расстояния. Чтения «рядом» считают
+ * расстояние по точке объявления и фильтруют по ней, но саму точку не выбирают:
+ * в выборку попадает только число (distanceKm).
+ */
+function projection(text: string): string {
+  const list = text.slice(0, text.indexOf(" from "));
+  return list.replace(/case when [\s\S]*? end/g, "");
+}
 
 beforeEach(() => {
   queries.length = 0;
@@ -48,12 +60,31 @@ describe("public listing reads", () => {
     ["getRecentListings", () => getRecentListings(CITY)],
     ["getListingsForCategories", () => getListingsForCategories([CITY], ["cat"])],
     ["searchListings", () => searchListings([CITY], { text: "дрель" })],
-  ])("%s selects neither the address nor the point", async (_name, run) => {
+    ["getNearbyListings", () => getNearbyListings([CITY], NEAR), projection],
+  ])("%s selects neither the address nor the point", async (_name, run, view = (t: string) => t) => {
     await run();
     expect(queries.length).toBeGreaterThan(0);
     for (const text of queries) {
       expect(text).toMatch(/"location"|count\(/);
-      expect(text).not.toMatch(PRIVATE);
+      expect(view(text)).not.toMatch(PRIVATE);
     }
+  });
+});
+
+describe("getNearbyListings", () => {
+  it("takes only listings with a point, nearest first then by id, without a count", async () => {
+    await getNearbyListings([CITY], NEAR, 8);
+    expect(queries).toHaveLength(1);
+    const [text] = queries;
+    expect(text).toMatch(/"lat" is not null/);
+    expect(text).toMatch(/"status" = \$\d+/);
+    expect(text).toMatch(/order by case when [\s\S]* end asc, "listings"\."id" asc/);
+    expect(text).not.toMatch(/count\(/);
+    expect(text).toMatch(/limit \$\d+/);
+  });
+
+  it("asks nothing for an empty set of cities", async () => {
+    expect(await getNearbyListings([], NEAR)).toEqual([]);
+    expect(queries).toHaveLength(0);
   });
 });

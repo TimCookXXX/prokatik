@@ -4,7 +4,7 @@
 import { cache } from "react";
 
 import {
-  and, asc, desc, eq, getTableColumns, gte, ilike, inArray, lte, or, sql,
+  and, asc, desc, eq, getTableColumns, gte, ilike, inArray, isNotNull, lte, or, sql,
 } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import { todayStr } from "@/lib/catalog/dates";
@@ -323,6 +323,30 @@ export async function getRecentListings(cityId: string, limit = 12): Promise<Lis
     .orderBy(desc(listings.createdAt), asc(listings.id))
     .limit(limit);
   return withDistance(rows);
+}
+
+/**
+ * Ближайшие к точке активные позиции городов (полоса «Рядом с вами» на
+ * главной): только объявления с точкой, по расстоянию, при равенстве — по id.
+ * Без счёта: полоса показывает первые `limit`, а «Все рядом» ведёт в выдачу.
+ * Точка объявления наружу не уходит — только расстояние (withDistance).
+ */
+export async function getNearbyListings(
+  cityIds: CityIds,
+  near: UserPoint,
+  limit = 8,
+): Promise<ListingWithOwner[]> {
+  if (cityIds.length === 0) return [];
+  const rows = await getDb()
+    .select(cardColumns(near))
+    .from(listings)
+    .innerJoin(users, eq(users.id, listings.ownerUserId))
+    .innerJoin(categories, eq(categories.id, listings.categoryId))
+    .innerJoin(cities, eq(cities.id, listings.cityId))
+    .where(and(inCities(cityIds), eq(listings.status, "active"), isNotNull(listings.lat)))
+    .orderBy(sql`${distanceKm(near.point)} asc`, asc(listings.id))
+    .limit(limit);
+  return withDistance(rows, near);
 }
 
 // Активные позиции городов в наборе категорий, с продавцом для карточки.

@@ -4,7 +4,6 @@ import { getAvailabilityRows, type ListingWithOwner } from "@/server/catalog";
 import { buildAvailabilityByListing } from "@/lib/catalog/availability";
 import { addDaysStr, todayStr } from "@/lib/catalog/dates";
 import { ListingCard } from "@/components/catalog/ListingCard";
-import { Button } from "@/components/ui/button";
 
 export async function RecentItems({
   items,
@@ -62,14 +61,6 @@ export async function RecentItems({
           />
         ))}
       </div>
-
-      <Button
-        asChild
-        variant="outline"
-        className="mt-7 h-[50px] border-foreground/20 bg-transparent px-[26px] text-base font-semibold"
-      >
-        <Link href={`/${citySlug}` as never}>{content.home.recentAllLong}</Link>
-      </Button>
     </section>
   );
 }
