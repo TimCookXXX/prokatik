@@ -287,7 +287,7 @@ export function BookingWidget(props: BookingWidgetProps) {
        * селектор body:has([data-booking-bar]) в globals.css. */}
       {!props.isOwn && <div
         data-booking-bar
-        className="fixed inset-x-0 bottom-[var(--tabbar-h)] z-40 px-4 md:hidden"
+        className="fixed inset-x-0 bottom-[var(--tabbar-h)] z-40 pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] md:hidden"
       >
         <div className="glass mx-auto flex max-w-[420px] items-center justify-between gap-3 rounded-t-lg border-b-0 px-4 py-2.5">
           <span className="min-w-0">

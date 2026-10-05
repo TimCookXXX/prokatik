@@ -58,7 +58,7 @@ export function MobileSuggestPanel({
     <div
       data-suggest-panel
       onMouseDown={(e) => e.preventDefault()}
-      className="fixed inset-x-0 top-[var(--header-total)] z-50 h-[calc(100dvh-var(--header-total))] overflow-y-auto overscroll-contain bg-background text-foreground"
+      className="fixed inset-x-0 top-[var(--header-total)] z-50 h-[calc(100dvh-var(--header-total))] overflow-y-auto overscroll-contain bg-background pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] text-foreground"
     >
       {/* Верхняя строка панели: чипы остальных полей и крестик. Закрыть
         * панель иначе нечем: она закрывает всё под шапкой, а Android прячет

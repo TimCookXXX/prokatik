@@ -61,7 +61,7 @@ export function Sheet({
             WEBVISOR_PRIVATE,
             right
               ? "inset-y-0 right-0 w-[min(26rem,92vw)] border-l"
-              : "inset-x-0 bottom-0 max-h-[88dvh] rounded-t-lg border-t",
+              : "inset-x-0 bottom-0 max-h-[88dvh] rounded-t-lg border-t pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]",
           )}
         >
           {/* Ручка — только у листа: она обещает жест, и здесь он есть. */}

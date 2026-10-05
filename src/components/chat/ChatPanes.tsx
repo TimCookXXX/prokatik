@@ -53,8 +53,12 @@ const PANEL = "md:h-[max(20rem,min(calc(100svh-var(--account-hero-block)-1.5rem)
 //
 // Побочный эффект fixed, который здесь нужен: контейнер схлопывается, документу
 // нечего прокручивать — и Safari не уводит страницу вверх при фокусе.
+//
+// Боковые отступы — под чёлку телефона на боку: fixed-слой отступы body не
+// наследует.
 const PANEL_MOBILE = "max-md:fixed max-md:inset-x-0 max-md:top-[var(--vvt)] "
   + "max-md:h-[var(--vvh)] "
+  + "max-md:pl-[env(safe-area-inset-left)] max-md:pr-[env(safe-area-inset-right)] "
   + "max-md:overflow-hidden max-md:rounded-none max-md:border-0";
 
 export function ChatPanes({

@@ -10,8 +10,11 @@ import { cn } from "@/lib/utils";
 import { LiveDot } from "@/components/realtime/LiveDot";
 import { useCurrentCity } from "./use-current-city";
 
-/* Мобильная навигация: парящая пилюля внизу экрана — зеркалит стеклянные
- * пилюли шапки. Пять пунктов, как в брендбуке, но на месте «Чатов» — «Заявки»:
+/* Мобильная навигация: непрозрачная панель во всю ширину, вплотную к нижней
+ * кромке, как системные таб-бары. Парящая пилюля с отступами оставляла под
+ * собой полосу страницы, и панель выглядела отклеенной от низа. Под строкой
+ * иконок — полоса «домой» (safe-area), фон панели заливает и её.
+ * Пять пунктов, как в брендбуке, но на месте «Чатов» — «Заявки»:
  * заявки остаются центральным флоу, а переписка живёт разделом кабинета
  * (/chat) и достижима оттуда и из мобильного хаба. Пятое место — продуктовое
  * решение, менять его вместе с появлением чата не стали.
@@ -41,14 +44,16 @@ export function TabBar({
   const { slug: citySlug } = useCurrentCity(cities);
   const catalogHref = citySlug ? `/${citySlug}` : "/";
 
+  // Пункты делят ряд целиком (flex-auto): цель для пальца — вся колонка на
+  // высоту строки, а не только иконка с подписью. Не равными долями: тогда
+  // «Объявления» обрезались бы уже на 390 px — ширина начинается от подписи, и
+  // длинная получает своё.
+  const itemBase = "flex h-full min-w-0 flex-auto flex-col items-center justify-center gap-1 px-0.5 text-xs leading-none";
   const itemClass = (on: boolean) =>
-    cn(
-      "flex min-h-[44px] min-w-12 flex-col items-center justify-center gap-1 text-xs leading-none",
-      on ? "text-primary" : "text-muted-foreground",
-    );
+    cn(itemBase, on ? "text-primary" : "text-muted-foreground");
 
   // На самых узких экранах подпись на ступень мельче: «Объявления» вдвое длиннее
-  // соседних, и в полном кегле пять колонок на 320 px не помещаются. Обрезка —
+  // соседних, и в полном кегле в колонку на 320 px не помещается. Обрезка —
   // страховка на случай, если и этого не хватит: вылезшая подпись наезжает на
   // соседнюю, обрезанная — нет. leading-snug при этом обязателен: с leading-none
   // overflow срезал бы хвосты у «д» и «у».
@@ -71,15 +76,18 @@ export function TabBar({
   const cabinet = (isOn("/cabinet") && !myItems) || isOn("/profile");
 
   return (
+    // Высота панели — ровно --tabbar-h из globals.css: кант border-t 1px,
+    // строка h-14 и pb под полосу «домой». Меняете одно — правьте и другое,
+    // иначе подвал и полоса брони разъедутся с панелью.
+    // Боковые инсеты — для телефона на боку: fixed-слой body не сдвигает.
     <nav
       aria-label="Основная навигация"
       data-tabbar
-      className="fixed inset-x-0 bottom-0 z-40 px-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] min-[375px]:px-4 md:hidden"
+      className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-card pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] md:hidden"
     >
-      {/* Поля и зазоры ужаты на самых узких экранах: подпись «Объявления» вдвое
-        * длиннее остальных, и на 320 px пять колонок в прежние отступы не
-        * помещались — подписи наезжали друг на друга. */}
-      <div className="glass mx-auto flex max-w-[420px] items-center justify-between gap-1 rounded-lg px-2 py-1.5 min-[375px]:gap-2 min-[375px]:px-4">
+      {/* Ряд ограничен по ширине, а фон — нет: на планшете в портрете иконки
+        * иначе разбежались бы к краям экрана. */}
+      <div className="mx-auto flex h-14 max-w-[480px] px-1">
         <Link
           href={catalogHref as never}
           className={itemClass(catalogHref !== "/" && isOn(catalogHref))}
@@ -101,7 +109,7 @@ export function TabBar({
           </>
         ))}
 
-        {tab(placeHref, "flex min-h-[44px] min-w-12 flex-col items-center justify-center gap-1 text-xs leading-none text-muted-foreground", (
+        {tab(placeHref, cn(itemBase, "text-muted-foreground"), (
           <>
             {/* Круг держим вровень со строкой иконок, иначе колонка «Сдать»
              * оказывается выше остальных и тянет за собой всю панель. */}

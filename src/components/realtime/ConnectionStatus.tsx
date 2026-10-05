@@ -57,9 +57,13 @@ export function ConnectionStatus() {
       // высота настоящая, а в кабинете и переписке --header-total обнулена, и
       // без запаса плашка накрыла бы имя собеседника.
       //
+      // Запас тоже отступает от верхнего инсета (--safe-top): в кабинете
+      // --header-total обнулена вместе с ним. Боковые поля не уже инсетов —
+      // у телефона на боку там чёлка.
+      //
       // pointer-events-none без исключений: плашка ничего не сообщает по клику,
       // а перехватывать тапы поверх интерфейса ей нельзя.
-      className="pointer-events-none fixed inset-x-0 top-[max(var(--header-total),3.5rem)] z-40 flex justify-center px-4"
+      className="pointer-events-none fixed inset-x-0 top-[max(var(--header-total),calc(3.5rem+var(--safe-top)))] z-40 flex justify-center pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))]"
     >
       <span className="surface flex items-center gap-2 px-3 py-1.5 text-sm text-muted-foreground shadow-md">
         <span

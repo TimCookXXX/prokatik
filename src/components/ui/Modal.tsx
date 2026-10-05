@@ -163,8 +163,10 @@ export const ModalContent = React.forwardRef<HTMLDivElement, ContentProps>(
           onOpenAutoFocus={autoFocus}
           // Своя строка классов, не общая база с десктопной: анимации здесь
           // рисует vaul своим инжектированным CSS, и animate-in с ним спорил бы.
+          // Боковые отступы — под чёлку телефона на боку.
           className={cn(
             "fixed inset-x-0 bottom-0 z-50 flex max-h-[90dvh] flex-col",
+            "pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]",
             "rounded-t-lg border-t border-border bg-card focus:[outline:none]",
             className,
           )}

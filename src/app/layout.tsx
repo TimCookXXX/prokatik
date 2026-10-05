@@ -47,8 +47,13 @@ export function generateMetadata(): Metadata {
 // самого частого гостя: новый посетитель со светлой ОС видит тёмную страницу.
 // Точное совпадение с выбранной темой требует правки meta на клиенте — см.
 // docs/BACKLOG.md.
+//
+// viewportFit: "cover" — без него iOS Safari отдаёт env(safe-area-inset-*)
+// нулями, и ни один отступ под чёлку и полосу «домой» не работает: таб-бар,
+// полоса брони, шторки и композер переписки стоят вплотную к системным зонам.
 export const viewport: Viewport = {
   themeColor: seo.themeColor,
+  viewportFit: "cover",
 };
 
 // Флаг из middleware, а не auth(): Header и MobileNav и так зовут auth() каждый
@@ -95,7 +100,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             * svh, а не vh: на мобиле vh считается по развёрнутому окну без
             * адресной строки, и футер выглядывал бы снизу. */}
           <div className="flex-1 min-h-[calc(100svh-4.5rem)]">{children}</div>
-          {/* Отступ под парящий таб-бар: на десктопе --tabbar-h равна нулю. */}
+          {/* Отступ под таб-бар: на десктопе --tabbar-h равна нулю. */}
           <div className="pb-[var(--tabbar-h)]">
             <Footer cities={footerCities} />
           </div>

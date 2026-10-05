@@ -97,6 +97,18 @@ describe("TabBar", () => {
     }
   });
 
+  // Панель вплотную к низу экрана: непрозрачная, во всю ширину, с кантом
+  // сверху. Парящая стеклянная пилюля с полями оставляла под собой щель.
+  it("sits flush against the bottom edge", () => {
+    pathname.current = "/";
+    renderTabBar();
+    const nav = screen.getByRole("navigation", { name: "Основная навигация" });
+    expect(nav).toHaveAttribute("data-tabbar");
+    expect(nav).toHaveClass("fixed", "inset-x-0", "bottom-0", "bg-card", "border-t");
+    expect(nav.className).not.toMatch(/\bglass\b|\brounded|\bmax-w-/);
+    expect(nav.querySelector(".glass")).toBeNull();
+  });
+
   it("lights the catalog tab inside the city and its categories", () => {
     for (const path of ["/kazan", "/kazan/instrumenty", "/kazan/instrumenty/sadovaya-tekhnika"]) {
       pathname.current = path;
