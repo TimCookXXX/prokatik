@@ -1,9 +1,7 @@
 import Link from "next/link";
-import { MapPin, Wallet, MessageCircle, CalendarDays, Plus, type LucideIcon } from "lucide-react";
+import { MapPin, Wallet, MessageCircle, CalendarDays, type LucideIcon } from "lucide-react";
 import { content } from "@theme/content";
-import type { AuthPanelProps } from "@/lib/auth/panel-props";
 import { Button } from "@/components/ui/button";
-import { LoginTrigger } from "@/components/auth/LoginTrigger";
 import { BracketsHandoff } from "@/components/brand/BracketsHandoff";
 import { SearchBar, type SearchCity } from "@/components/search/SearchBar";
 
@@ -20,21 +18,14 @@ const FACT_ICONS: Record<(typeof content.home.heroFacts)[number]["icon"], Lucide
 
 export function Hero({
   city,
-  placeHref,
-  authProps,
+  popular = [],
 }: {
   // Город витрины — тот же, что у подборок ниже. Без него нет ни поиска, ни
   // каталога города.
   city?: SearchCity;
-  placeHref: string;
-  // Задан — значит перед нами аноним: «Разместить» открывает вход модалкой
-  // вместо ухода на /login.
-  authProps?: AuthPanelProps;
+  /** Чипы «Часто ищут»: запросы, по которым в городе что-то находится. */
+  popular?: readonly string[];
 }) {
-  // Городов может не быть вовсе (пустая база, все выключены) — тогда витрины
-  // нет и «Каталог» ведёт в поиск, а не в ссылку с undefined в пути.
-  const catalogHref = city ? `/${city.slug}` : "/search";
-
   return (
     // Два слоя, роли которых меняет тема (см. .hero-panel в globals.css): в
     // тёмной панель — сама иллюстрация, а вуаль поверх её затемняет; в светлой
@@ -44,16 +35,12 @@ export function Hero({
       <div aria-hidden="true" className="hero-veil absolute inset-0" />
 
       {/* z-10 обязателен: фильтр героя нарисован псевдоэлементом ::after, а он
-        * в дереве последний и без этого лёг бы поверх текста и кнопок.
-        * Точка wide — общая для всех секций главной, см. tailwind.config.ts. */}
-      {/* На телефоне — одна колонка с порядком «заголовок → подзаголовок →
-        * поиск → плитки → кнопки», выключка по центру. С wide раскладка
-        * макетная: текст, поиск и кнопки слева тремя строками, плитки справа на
-        * все. Порядок в
-        * разметке мобильный, десктопный собирается явной раскладкой по клеткам
-        * — так DOM совпадает с тем, что читают с телефона. */}
-      <div className="relative z-10 grid items-center gap-8 p-4 sm:p-6 wide:grid-cols-[minmax(0,1fr)_minmax(280px,528px)] wide:gap-x-12 wide:gap-y-8 wide:p-11">
-        <div className="min-w-0 text-center wide:col-start-1 wide:row-start-1 wide:text-left">
+        * в дереве последний и без этого лёг бы поверх текста и поиска.
+        * Одна колонка: заголовок → подзаголовок → поиск → чипы → факты. На
+        * телефоне по центру, с wide — слева, справа остаётся иллюстрация
+        * (фильтр там прозрачнее). Точка wide — общая для секций главной. */}
+      <div className="relative z-10 mx-auto flex w-full max-w-[960px] flex-col gap-6 p-4 text-center sm:p-6 wide:gap-7 wide:p-11">
+        <div className="min-w-0">
           <h1 className="font-display text-hero font-extrabold leading-[1.02] tracking-mark text-foreground">
             {/* Слово меняется каждые пару секунд, поэтому доступное имя
               * заголовка неподвижно: скринридер не должен читать «Арендуй
@@ -84,97 +71,61 @@ export function Hero({
           {/* 18 пунктов — кегль макета, нарисованного на 1440. На телефоне это
             * абзац в четыре строки крупнее основного текста сайта, поэтому там
             * обычные 15. */}
-          <p className="mx-auto mt-6 max-w-[40ch] text-base leading-body text-foreground/[0.72] sm:text-xl wide:mx-0">
+          <p className="mx-auto mt-6 max-w-[40ch] text-base leading-body text-foreground/[0.72] sm:text-xl">
             {content.home.heroSubtitle}
           </p>
         </div>
 
-        {/* На телефоне — список в одну колонку строками: четыре высокие плитки
-          * 2×2 занимали там почти экран и отжимали кнопки за сгиб. С sm
-          * ширины хватает, и плитки возвращаются к макетному виду. */}
-        {/* Поиск сразу под подзаголовком и на телефоне, и на десктопе: на
-          * телефоне плитки ниже растянулись бы на экран и унесли его за сгиб.
-          * Списки подсказок — порталом: у секции overflow-hidden. */}
-        {city && (
-          <SearchBar
-            variant="hero"
-            cities={[city]}
-            citySlug={city.slug}
-            className="wide:col-start-1 wide:row-start-2"
-          />
+        {/* Поиск сразу под подзаголовком. Списки подсказок — порталом: у
+          * секции overflow-hidden. Без города искать негде (подсказки и выдача
+          * городские) — вместо поиска одна кнопка в общую выдачу. */}
+        {city ? (
+          <div className="flex flex-col gap-3">
+            <SearchBar variant="hero" cities={[city]} citySlug={city.slug} />
+            {popular.length > 0 && (
+              // На телефоне — одна строка с прокруткой от кромки до кромки
+              // панели: восемь чипов переносом заняли бы три строки и унесли
+              // факты за сгиб. С sm — перенос, по центру, с wide — слева.
+              <nav
+                aria-label={content.home.popularLabel}
+                className="-mx-4 flex items-center gap-2 overflow-x-auto px-4 [mask-image:linear-gradient(to_left,transparent,black_16px)] [scrollbar-width:none] sm:mx-0 sm:flex-wrap sm:justify-center sm:overflow-visible sm:px-0 sm:[mask-image:none] [&::-webkit-scrollbar]:hidden"
+              >
+                <span aria-hidden="true" className="shrink-0 text-sm text-muted-foreground">
+                  {content.home.popularLabel}:
+                </span>
+                {popular.map((q) => (
+                  <Link
+                    key={q}
+                    href={`/search?${new URLSearchParams({ city: city.slug, q })}` as never}
+                    className="hoverable shrink-0 rounded-sm border border-border bg-card px-3 py-1.5 text-sm text-foreground"
+                  >
+                    {q}
+                  </Link>
+                ))}
+              </nav>
+            )}
+          </div>
+        ) : (
+          <div className="flex justify-center">
+            <Button asChild className="h-12 px-6 text-base font-semibold">
+              <Link href="/search">{content.home.heroCatalog}</Link>
+            </Button>
+          </div>
         )}
 
-        <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-2.5 wide:col-start-2 wide:row-start-1 wide:row-span-3">
+        {/* Факты строкой: иконка и заголовок. На телефоне 2×2 без прокрутки,
+          * с sm — в один ряд. Охра — предмет и его свойства (закон цвета). */}
+        <ul className="grid grid-cols-2 gap-x-3 gap-y-2.5 text-left sm:flex sm:flex-wrap sm:justify-center sm:gap-x-6">
           {content.home.heroFacts.map((fact) => {
             const Icon = FACT_ICONS[fact.icon];
-            // Имя класса целиком, а не собранное из кусков: Tailwind вычищает
-            // из @layer components всё, чего не нашёл в исходниках дословно, и
-            // `hero-tile-${tone}` уносил за собой --tone вместе со всем видом
-            // плитки.
-            const toneClass = fact.tone === "accent" ? "hero-tile-accent" : "hero-tile-primary";
             return (
-              <li
-                key={fact.title}
-                className={`hero-tile ${toneClass} relative flex items-center gap-3 overflow-hidden rounded-lg p-3 sm:min-h-[158px] sm:flex-col sm:items-stretch sm:justify-between sm:gap-0 sm:p-5`}
-              >
-                <span
-                  aria-hidden="true"
-                  className="hero-tile-glow pointer-events-none absolute -left-[30px] -top-10 h-[130px] w-[130px] rounded-full"
-                />
-                {/* Водяной знак вылезает за угол плитки — overflow-hidden его
-                  * подрезает, поэтому иконка читается как фактура, а не как
-                  * вторая иконка. В строке списка на телефоне он не помещается:
-                  * 112px на плитке высотой в полсотни закрыли бы её целиком. */}
-                <span
-                  aria-hidden="true"
-                  className="hero-tile-mark pointer-events-none absolute -bottom-[30px] -right-[26px] hidden opacity-[0.14] sm:block"
-                >
-                  <Icon size={112} strokeWidth={1.25} />
-                </span>
-
-                <span className="hero-tile-badge relative flex h-[38px] w-[38px] shrink-0 items-center justify-center rounded-sm">
-                  <Icon className="h-5 w-5" aria-hidden="true" />
-                </span>
-
-                <span className="relative block">
-                  <span className="block text-base font-semibold text-foreground">{fact.title}</span>
-                  <span className="mt-1 block text-xs leading-snug text-muted-foreground">
-                    {fact.text}
-                  </span>
-                </span>
+              <li key={fact.title} className="flex min-w-0 items-center gap-2">
+                <Icon className="h-[18px] w-[18px] shrink-0 text-accent" aria-hidden="true" />
+                <span className="text-sm font-semibold text-foreground">{fact.title}</span>
               </li>
             );
           })}
         </ul>
-
-        {/* На телефоне кнопки разведены к краям панели, на десктопе стоят
-          * рядом слева, как в макете. */}
-        <div className="flex flex-wrap items-center justify-between gap-3 wide:col-start-1 wide:row-start-3 wide:justify-start">
-          <Button asChild className="h-12 px-6 text-base font-semibold">
-            <Link href={catalogHref as never}>{content.home.heroCatalog}</Link>
-          </Button>
-          <Button
-            asChild
-            variant="outline"
-            // text-foreground обязателен, хотя кнопка ничего не перекрашивает:
-            // цвет наследуется от body, где он уже вычислен по теме, и
-            // переопределение токена на панели героя до него не достаёт — в
-            // тёмной теме надпись выходила бы тёмной на тёмном.
-            className="h-12 border-foreground/25 bg-transparent px-[22px] text-base font-semibold text-foreground"
-          >
-            {authProps ? (
-              <LoginTrigger {...authProps} redirectTo="/cabinet/listings/new">
-                <Plus className="mr-2 h-[18px] w-[18px]" aria-hidden="true" />
-                {content.home.heroPlace}
-              </LoginTrigger>
-            ) : (
-              <Link href={placeHref as never}>
-                <Plus className="mr-2 h-[18px] w-[18px]" aria-hidden="true" />
-                {content.home.heroPlace}
-              </Link>
-            )}
-          </Button>
-        </div>
       </div>
     </section>
   );

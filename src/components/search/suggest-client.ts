@@ -9,7 +9,7 @@ import type { SuggestResult } from "@/server/search";
 import type { DateRange } from "@/lib/catalog/filters";
 import type { LocationQuery } from "@/lib/geo/location";
 
-export type { SuggestCategory, SuggestItem, SuggestResult } from "@/server/search";
+export type { SuggestCategory, SuggestQuery, SuggestResult } from "@/server/search";
 
 export const SUGGEST_DEBOUNCE_MS = 100;
 const CACHE_SIZE = 50;
@@ -20,11 +20,15 @@ const CACHE_SIZE = 50;
  */
 const CACHE_TTL_MS = 30_000;
 
-export const EMPTY_SUGGEST: SuggestResult = { items: [], categories: [] };
+export const EMPTY_SUGGEST: SuggestResult = { queries: [], categories: [] };
 
-/** Запрос как ключ: регистр и лишние пробелы на ответ сервера не влияют. */
+/**
+ * Запрос как ключ: регистр и лишние пробелы на ответ сервера не влияют, а
+ * пробел в конце — влияет: после него сервер не дописывает слово, а
+ * предлагает сам запрос.
+ */
 export function suggestQuery(q: string): string {
-  return q.trim().toLowerCase().replace(/\s+/g, " ");
+  return q.toLowerCase().replace(/\s+/g, " ").trimStart();
 }
 
 // LRU на Map: порядок вставки — порядок давности, свежий переезжает в конец.
@@ -61,9 +65,9 @@ export function cachedSuggest(
 }
 
 /**
- * Подсказки города по запросу; пустой запрос — популярные разделы. С датами в
- * подсказки идут только вещи, свободные на эти дни; с точкой «Где» — вещи
- * всего региона, как в выдаче по тому же адресу. null — ответа нет (429,
+ * Подсказки города по запросу: дополнения запроса и разделы. С датами в
+ * подсказки идут только фразы, у которых есть свободные на эти дни вещи; с
+ * точкой «Где» — по вещам всего региона, как в выдаче по тому же адресу. null — ответа нет (429,
  * сеть, 5xx): поле показывает «подсказок нет», а строка «Показать все»
  * работает и так. Неудачи не кэшируются.
  */
@@ -89,8 +93,9 @@ export function fetchSuggest(
   const request = fetch(`/api/search/suggest?${params}`)
     .then(async (res) => {
       if (!res.ok) return null;
-      const body = (await res.json()) as SuggestResult;
-      const value = { items: body.items ?? [], categories: body.categories ?? [] };
+      // Тело старой формы (из кэша браузера до смены ответа) — без запросов.
+      const body = (await res.json()) as Partial<SuggestResult>;
+      const value = { queries: body.queries ?? [], categories: body.categories ?? [] };
       remember(key, value);
       return value;
     })

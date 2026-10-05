@@ -135,6 +135,15 @@
   html:has([data-account-shell]) [data-site-header] { display: none; }
 }
 
+/* Поиск шапки на «/», пока наблюдатель ещё не ответил (HeaderSearch): сервер,
+ * первый кадр, страница без JS. Прячется, только если на странице есть поиск
+ * hero, — без города hero без поиска, и поиск шапки нужен сразу. visibility, а
+ * не прозрачность: скрытые поля выпадают из табуляции и дерева доступности без
+ * всякого JS. Место в ряду остаётся — шапка не прыгает. */
+html:has([data-hero-search]) [data-header-search][data-hero-pending]:not(:focus-within) {
+  visibility: hidden;
+}
+
 @layer components {
   /* Наведение. Накладка рисуется ПОВЕРХ собственной заливки элемента, а не
    * вместо неё: background-image кладётся над background-color.
@@ -355,47 +364,6 @@
   /* В тёмной теме лента нарисована как раз для тёмного фона — переводить её
    * в светлое нечем и незачем. */
   .dark .hero-veil { filter: none; }
-
-  /* Инфо-плитки героя. Тон приходит переменной --tone (охра или зелёный),
-   * альфы взяты из макета и переведены в проценты для color-mix.
-   *
-   * Тон идёт из токенов: панель под плиткой меняется темой, и «тёмная» охра на
-   * светлой подложке была бы не той охрой.
-   *
-   * Имена классов пишутся целиком в разметке, а не собираются из кусков:
-   * Tailwind вычищает из @layer components всё, чего не нашёл в исходниках
-   * дословно, и `hero-tile-${tone}` уносил бы --tone вместе со всем видом. */
-  .hero-tile-accent  { --tone: var(--color-accent); }
-  .hero-tile-primary { --tone: var(--color-primary); }
-
-  /* Плитка — непрозрачная карточка, а не стекло. Полупрозрачная подложка с
-   * backdrop-filter показывала сквозь себя иллюстрацию, и текст лежал на
-   * шевелящемся фоне. Здесь достаточно карточки с тональным подтоном: тон
-   * несут кант, бейдж иконки, свечение и водяной знак. */
-  .hero-tile {
-    border: 1px solid color-mix(in srgb, var(--tone) 20%, transparent);
-    background-color: var(--color-card);
-    background-image: linear-gradient(
-      160deg,
-      color-mix(in srgb, var(--tone) 12%, transparent),
-      transparent 58%
-    );
-  }
-  .hero-tile-glow {
-    background-image: radial-gradient(
-      circle,
-      color-mix(in srgb, var(--tone) 22%, transparent),
-      transparent 70%
-    );
-  }
-  .hero-tile-mark {
-    color: var(--tone);
-  }
-  .hero-tile-badge {
-    border: 1px solid color-mix(in srgb, var(--tone) 30%, transparent);
-    background: color-mix(in srgb, var(--tone) 15%, transparent);
-    color: var(--tone);
-  }
 
   /* Фиксированный слой зелёного свечения за всем контентом (см. --ambient).
    * pointer-events:none — не мешает кликам; z-index:-10 — под контентом, но

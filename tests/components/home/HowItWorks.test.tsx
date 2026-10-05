@@ -1,5 +1,5 @@
 import { render, screen } from "@testing-library/react";
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, onTestFinished } from "vitest";
 import { HowItWorks } from "@/components/home/HowItWorks";
 import { content } from "@theme/content";
 
@@ -21,5 +21,16 @@ describe("HowItWorks", () => {
     expect(screen.queryByRole("textbox")).toBeNull();
     expect(screen.queryByRole("button")).toBeNull();
     expect(screen.queryByRole("link")).toBeNull();
+  });
+
+  // На телефоне шаги — лента с прокруткой: её можно листать и с клавиатуры.
+  it("names the step row and makes it focusable for keyboard scrolling", () => {
+    // Лента переполнена — как на телефоне (jsdom ширин не считает).
+    Object.defineProperty(HTMLElement.prototype, "scrollWidth", { configurable: true, get: () => 900 });
+    onTestFinished(() => { delete (HTMLElement.prototype as { scrollWidth?: unknown }).scrollWidth; });
+    render(<HowItWorks />);
+    const row = screen.getByRole("list", { name: content.home.howStepsLabel });
+    expect(row).toHaveAttribute("tabindex", "0");
+    expect(row.querySelectorAll(":scope > li")).toHaveLength(content.home.howSteps.length);
   });
 });

@@ -1,6 +1,7 @@
 import Image from "next/image";
 import { Clock, CalendarCheck, MapPin } from "lucide-react";
 import { content } from "@theme/content";
+import { ScrollRow } from "@/components/ui/ScrollRow";
 
 /* «Как это работает» — четыре макета настоящих экранов сделки, а не абзацы
  * текста: сервис объясняется показом интерфейса.
@@ -20,10 +21,12 @@ const BUSY = new Set([12, 13]);
  * Так у всех карточек ряда общий трек под подпись: её высота считается по самой
  * длинной, и разделительная линия проходит на одном уровне. Сами по себе
  * подписи бывают в две строки и в три, и линия гуляла по вертикали на 20px. */
+/* Ниже sm сетки нет — карточки идут лентой (см. ниже), и линию держит flex:
+ * макет растягивается, подпись прижата к низу карточки одной высоты. */
 function Card({ children, caption }: { children: React.ReactNode; caption: { step: string; text: string } }) {
   return (
-    <li className="row-span-2 grid grid-rows-subgrid overflow-hidden rounded-lg border border-border bg-card">
-      <div className="flex flex-col gap-3 p-[18px]">{children}</div>
+    <li className="flex w-[80%] max-w-[300px] shrink-0 snap-start flex-col overflow-hidden rounded-lg border border-border bg-card sm:row-span-2 sm:grid sm:w-auto sm:max-w-none sm:grid-rows-subgrid">
+      <div className="flex flex-1 flex-col gap-3 p-[18px]">{children}</div>
       <div className="border-t border-border px-[18px] py-3.5">
         <div className="font-mono text-micro uppercase tracking-mono text-accent">{caption.step}</div>
         <p className="mt-1.5 text-sm leading-[1.45] text-muted-foreground">{caption.text}</p>
@@ -85,9 +88,17 @@ export function HowItWorks() {
         <p className="text-base text-muted-foreground">{content.home.howLead}</p>
       </div>
 
-      {/* На телефоне одна колонка: это макеты экранов, а не карточки выдачи —
-        * ужатые вдвое, они перестают читаться как интерфейс. */}
-      <ol className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-2 wide:grid-cols-4">
+      {/* На телефоне — лента с прокруткой и привязкой к карточке, а не две
+        * колонки: это макеты экранов, а не карточки выдачи — ужатые вдвое, они
+        * перестают читаться как интерфейс, а столбиком занимали четыре экрана.
+        * Лента от кромки до кромки панели; с именем и, пока прокручивается,
+        * фокусируемая — листается и с клавиатуры (ScrollRow). С sm — прежняя
+        * сетка, и остановки Tab на ней нет. */}
+      <ScrollRow
+        as="ol"
+        aria-label={content.home.howStepsLabel}
+        className="-mx-4 mt-6 flex snap-x snap-mandatory scroll-px-4 gap-3 overflow-x-auto px-4 pb-1 [scrollbar-width:none] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring sm:mx-0 sm:mt-8 sm:grid sm:grid-cols-2 sm:gap-4 sm:overflow-visible sm:px-0 sm:pb-0 wide:grid-cols-4 [&::-webkit-scrollbar]:hidden"
+      >
         {/* 01 — карточка вещи: цена, залог и свободные дни видны сразу. */}
         <Card caption={STEP_CAPTIONS[0]}>
           {/* Скругления по диагонали, как у ListingCard: крупные углы —
@@ -211,7 +222,7 @@ export function HowItWorks() {
             </div>
           </div>
         </Card>
-      </ol>
+      </ScrollRow>
     </section>
   );
 }

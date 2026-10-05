@@ -1,19 +1,19 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { History as RecentIcon, LocateFixed, MapPin } from "lucide-react";
 import { content } from "@theme/content";
 import { cn } from "@/lib/utils";
 import type { CityGeoContext } from "@/lib/geo/context";
-import { reverseLabel, type AddressHit } from "@/lib/geo/address";
-import { geolocationPoint, type UserPoint } from "@/lib/geo/location";
+import type { AddressHit } from "@/lib/geo/address";
+import type { UserPoint } from "@/lib/geo/location";
 import { precisionNote } from "@/lib/geo/precision";
 import { Modal, ModalContent, ModalTitle } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/button";
 import { filterChip } from "@/components/ui/filter-chip";
 import { AddressCombobox, addressValueOf, type AddressExtraRow, type AddressValue } from "./AddressCombobox";
-import { fetchReverse } from "./address-client";
-import { readStoredLocation, storeLocation } from "./stored-location";
+import { useCanGeolocate, useGeolocate } from "./geolocate";
+import { storeLocation, useStoredLocation } from "./stored-location";
 
 const t = content.search.where;
 
@@ -31,21 +31,6 @@ export function whereLabel(p: UserPoint): string {
 
 const samePoint = (a: UserPoint, b: UserPoint | null) =>
   !!b && a.point.lat.toFixed(3) === b.point.lat.toFixed(3) && a.point.lon.toFixed(3) === b.point.lon.toFixed(3);
-
-/** Геолокация браузера; отказ, таймаут или её нет — null, без сообщения об ошибке. */
-function currentCoords(): Promise<GeolocationCoordinates | null> {
-  return new Promise((resolve) => {
-    try {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => resolve(pos.coords),
-        () => resolve(null),
-        { timeout: 10_000, maximumAge: 5 * 60_000 },
-      );
-    } catch {
-      resolve(null);
-    }
-  });
-}
 
 // «Где» в панели поиска (перенос WhereField из sravniprokat без справочника
 // микрорайонов и округов): адрес из своего геокодера через AddressCombobox или
@@ -92,21 +77,16 @@ export function WhereField({
   };
 
   // localStorage и navigator — только на клиенте, после гидрации: разметка
-  // сервера и первого кадра обязана совпасть.
-  const [stored, setStored] = useState<UserPoint | null>(null);
-  useEffect(() => setStored(readStoredLocation(region)), [region]);
-  const [canLocate, setCanLocate] = useState(false);
-  useEffect(() => setCanLocate(typeof navigator !== "undefined" && "geolocation" in navigator), []);
-  const [locating, setLocating] = useState(false);
-  // Поколение выбора: геолокация ждёт разрешения и сети до десятка секунд, и
-  // её ответ не должен затереть место, выбранное за это время.
-  const generation = useRef(0);
+  // сервера и первого кадра обязана совпасть (оба стора отдают серверу пусто).
+  const stored = useStoredLocation(region);
+  const canLocate = useCanGeolocate();
+  const geo = useGeolocate({ slug: city.slug, name: city.name, region });
+  const { locating } = geo;
 
   const apply = (p: UserPoint | null) => {
-    generation.current += 1;
-    setLocating(false);
+    // Ждущая геолокация устарела: место выбрано иначе.
+    geo.cancel();
     storeLocation(region, p);
-    setStored(p);
     onChange(p);
   };
 
@@ -118,16 +98,11 @@ export function WhereField({
       : null);
   };
 
+  // Пока ждали, выбрали другое место или снова нажали «Моё местоположение» —
+  // ответ устарел (stale) и не применяется. Отказ — поле остаётся для ввода.
   const locate = async (): Promise<void> => {
-    const started = ++generation.current;
-    setLocating(true);
-    const coords = await currentCoords();
-    const hit = coords ? await fetchReverse(city.slug, { lat: coords.latitude, lon: coords.longitude }) : null;
-    // Пока ждали, выбрали другое место или снова нажали «Моё местоположение» —
-    // этот ответ устарел.
-    if (generation.current !== started) return;
-    if (coords) apply(geolocationPoint(coords, reverseLabel(hit, city.name)));
-    else setLocating(false);
+    const r = await geo.locate();
+    if (r.status === "ok") onChange(r.point);
   };
 
   const recent = stored && !samePoint(stored, value) ? stored : null;

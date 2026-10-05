@@ -6,11 +6,12 @@
 // разделы и верхняя панель живут независимо от `q`.
 //
 // Что нашлось и в каком порядке, решает индекс поиска (rankListingIds) — тот
-// же, что у подсказок в шапке. SQL получает готовый набор id и считает поверх
-// него фильтры, фасеты и страницы.
+// же, которым подсказки в шапке проверяют свои фразы. SQL получает готовый
+// набор id и считает поверх него фильтры, фасеты, число найденного и страницы.
 
 import Link from "next/link";
 import { content } from "@theme/content";
+import { ruPlural } from "@/lib/plural";
 import { EmptyState } from "@/components/ui/EmptyState";
 import {
   getAllCategories, getAvailabilityRows, getSearchFacets, rollupToRoots,
@@ -229,6 +230,11 @@ export async function SearchResults({
           )
         ) : (
           <>
+            {/* Число найденного — только здесь: подсказки «Что» чисел не
+              * показывают (docs/decisions/0023). */}
+            <p className="text-sm text-muted-foreground">
+              {total} {ruPlural(total, ...content.search.listingCount)}
+            </p>
             <div className={view === "list"
               ? "flex flex-col gap-3"
               : "grid grid-cols-2 gap-2.5 sm:gap-4 lg:grid-cols-3"}>

@@ -27,7 +27,7 @@ vi.mock("@/lib/db", async () => {
 });
 
 import {
-  getFreeListingIds, getListingCountsByCategory, getListingDistance, getListingsForCategories,
+  getFreeSearchIds, getListingCountsByCategory, getListingDistance, getListingsForCategories,
   getSearchFacets, searchListings,
 } from "@/server/catalog";
 import type { UserPoint } from "@/lib/geo/location";
@@ -100,13 +100,14 @@ describe("searchListings", () => {
   });
 });
 
-// Подсказки «Что» с датами отсеивают занятых getFreeListingIds, выдача — фильтром
-// дат. Условие обязано быть одним, иначе верх выдачи разошёлся бы с подсказками.
-describe("getFreeListingIds", () => {
-  it("uses the same free-in-range condition as the results", async () => {
-    const notExists = (text: string) => text.match(/not exists \([\s\S]*?\)/)?.[0].replace(/\$\d+/g, "$");
+// Подсказки «Что» с датами оставляют фразу, только если выдача на эти даты
+// непуста. Условия обязаны быть теми же, что у выдачи, иначе подсказка вела бы
+// в пустую выдачу.
+describe("getFreeSearchIds", () => {
+  const notExists = (text: string) => text.match(/not exists \([\s\S]*?\)/)?.[0].replace(/\$\d+/g, "$");
 
-    await getFreeListingIds(["A", "B"], "2026-10-05", "2026-10-07");
+  it("uses the city, status and free-in-range conditions of the results", async () => {
+    await getFreeSearchIds([CITY], ["A", "B"], "2026-10-05", "2026-10-07");
     const free = queries[0]!;
     queries.length = 0;
     await searchListings([CITY], { ids: ["A", "B"] }, { availableFrom: "2026-10-05", availableTo: "2026-10-07" });
@@ -114,11 +115,24 @@ describe("getFreeListingIds", () => {
 
     expect(notExists(free.text)).toBeDefined();
     expect(notExists(free.text)).toBe(notExists(results.text));
-    expect(free.params).toEqual(expect.arrayContaining(["2026-10-05", "2026-10-07"]));
+    expect(free.text).toMatch(/"listings"\."city_id" = \$\d+/);
+    expect(free.text).toMatch(/"listings"\."status" = \$\d+/);
+    expect(free.params).toEqual(expect.arrayContaining([CITY, "active", "2026-10-05", "2026-10-07"]));
+  });
+
+  // Ids всех фраз — до нескольких тысяч: одним параметром-массивом, а не
+  // плейсхолдером на каждый.
+  it("passes the ids as one array parameter", async () => {
+    await getFreeSearchIds([CITY, "C2"], ["A", "B", "C"], "2026-10-05", "2026-10-07");
+    const { text, params } = queries[0]!;
+    const m = text.match(/"listings"\."id" = any\(\$(\d+)::text\[\]\)/);
+    expect(m).not.toBeNull();
+    expect(params[Number(m![1]) - 1]).toEqual(["A", "B", "C"]);
+    expect(text).toMatch(/"listings"\."city_id" in \(\$\d+, \$\d+\)/);
   });
 
   it("answers an empty id set without going to the database", async () => {
-    expect(await getFreeListingIds([], "2026-10-05", "2026-10-07")).toEqual(new Set());
+    expect(await getFreeSearchIds([CITY], [], "2026-10-05", "2026-10-07")).toEqual(new Set());
     expect(queries).toHaveLength(0);
   });
 });

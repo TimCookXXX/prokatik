@@ -11,6 +11,7 @@ vi.mock("next/navigation", () => ({
 
 import { content } from "@theme/content";
 import { HeaderSearch } from "@/components/layout/HeaderSearch";
+import { SearchBar } from "@/components/search/SearchBar";
 import { _resetSuggestCache } from "@/components/search/suggest-client";
 
 const CITIES = [
@@ -31,7 +32,7 @@ beforeEach(() => {
   push.mockClear();
   _resetSuggestCache();
   // Подсказки здесь не проверяются (WhatField.test) — сервер молчит.
-  vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => ({ items: [], categories: [] }) })));
+  vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => ({ queries: [], categories: [] }) })));
 });
 
 afterEach(() => {
@@ -152,5 +153,166 @@ describe("HeaderSearch", () => {
 
     expect(document.activeElement).toBe(field());
     expect(document.querySelector("[data-suggest-panel]")).not.toBeNull();
+  });
+});
+
+// На главной поиск шапки не дублирует hero: скрыт, пока поиск hero виден под
+// шапкой (IntersectionObserver), и показывается фокусом.
+describe("HeaderSearch on the home page", () => {
+  type Callback = (entries: { isIntersecting: boolean }[]) => void;
+  const observers: { cb: Callback; options?: IntersectionObserverInit; target?: Element }[] = [];
+
+  class FakeObserver {
+    private rec: (typeof observers)[number];
+    constructor(cb: Callback, options?: IntersectionObserverInit) {
+      this.rec = { cb, options };
+      observers.push(this.rec);
+    }
+    observe(target: Element) { this.rec.target = target; }
+    disconnect() {}
+  }
+
+  const box = () => document.querySelector<HTMLElement>("[data-header-search]")!;
+  const heroVisible = (isIntersecting: boolean) => act(() => {
+    for (const o of observers) o.cb([{ isIntersecting }]);
+  });
+
+  beforeEach(() => {
+    observers.length = 0;
+    vi.stubGlobal("IntersectionObserver", FakeObserver);
+    url.pathname = "/";
+    url.search = "";
+  });
+
+  function renderHome() {
+    return render(
+      <>
+        <header data-site-header><HeaderSearch cities={CITIES} /></header>
+        <main>
+          <SearchBar variant="hero" cities={[CITIES[0]]} citySlug="kazan" />
+        </main>
+      </>,
+    );
+  }
+
+  it("hides itself while the hero search is on screen, keeping its place", () => {
+    renderHome();
+    // До ответа наблюдателя (сервер, первый кадр) — только метка: прячет её
+    // CSS и лишь при поиске hero на странице, так что без JS и без города
+    // поиск шапки работает.
+    expect(box()).toHaveAttribute("data-hero-pending");
+    expect(box()).not.toHaveAttribute("inert");
+    // Наблюдается именно поиск hero, верх — под липкой шапкой.
+    expect(observers[0].target).toHaveAttribute("data-hero-search");
+    expect(observers[0].options?.rootMargin).toMatch(/^-\d+(\.\d+)?px 0px 0px 0px$/);
+
+    heroVisible(true);
+    expect(box()).not.toHaveAttribute("data-hero-pending");
+    // Вне касаний, табуляции и дерева доступности, но не выкинут из вёрстки.
+    expect(box()).toHaveAttribute("inert");
+    expect(box()).toHaveClass("opacity-0", "pointer-events-none");
+
+    // Поиск hero ушёл под шапку — свой поиск виден.
+    heroVisible(false);
+    expect(box()).not.toHaveAttribute("inert");
+    expect(box()).not.toHaveClass("opacity-0");
+  });
+
+  // Пока поток был занят, прокрутили туда и обратно: в одном вызове несколько
+  // записей, и верна последняя.
+  it("follows the latest of batched observer entries", () => {
+    renderHome();
+    act(() => { for (const o of observers) o.cb([{ isIntersecting: false }, { isIntersecting: true }]); });
+    expect(box()).toHaveAttribute("inert");
+    act(() => { for (const o of observers) o.cb([{ isIntersecting: true }, { isIntersecting: false }]); });
+    expect(box()).not.toHaveAttribute("inert");
+  });
+
+  // Ушли с «/», прокрутив ниже hero, и вернулись к его верху: старый ответ
+  // «hero не виден» не должен показать поиск шапки поверх hero.
+  it("forgets the old observer answer after leaving the home page", () => {
+    const { rerender } = renderHome();
+    heroVisible(false);
+    expect(box()).not.toHaveAttribute("data-hero-pending");
+
+    url.pathname = "/kazan";
+    rerender(
+      <>
+        <header data-site-header><HeaderSearch cities={CITIES} /></header>
+        <main><SearchBar variant="hero" cities={[CITIES[0]]} citySlug="kazan" /></main>
+      </>,
+    );
+    expect(box()).not.toHaveAttribute("data-hero-pending");
+
+    url.pathname = "/";
+    rerender(
+      <>
+        <header data-site-header><HeaderSearch cities={CITIES} /></header>
+        <main><SearchBar variant="hero" cities={[CITIES[0]]} citySlug="kazan" /></main>
+      </>,
+    );
+    expect(box()).toHaveAttribute("data-hero-pending");
+  });
+
+  it("shows itself while it holds the focus", () => {
+    renderHome();
+    heroVisible(true);
+    const input = box().querySelector<HTMLInputElement>("[data-what-input]")!;
+
+    // Программно: inert снимают те, кто отдаёт фокус (поле «Что» hero).
+    box().removeAttribute("inert");
+    act(() => input.focus());
+    expect(document.activeElement).toBe(input);
+    expect(box()).not.toHaveAttribute("inert");
+    // Пока фокус внутри, ответ наблюдателя его не прячет.
+    heroVisible(true);
+    expect(box()).not.toHaveAttribute("inert");
+
+    act(() => input.blur());
+    expect(box()).toHaveAttribute("inert");
+  });
+
+  // Ниже lg поле «Что» hero отдаёт фокус полю шапки: скрытое поле обязано его
+  // принять и показаться вместе с панелью подсказок.
+  it("takes the focus redirected from the hero field on phones", () => {
+    // jsdom inert не знает: как браузер, не даём фокус элементу внутри inert.
+    const focus = HTMLElement.prototype.focus;
+    const spy = vi.spyOn(HTMLElement.prototype, "focus").mockImplementation(function (this: HTMLElement, o) {
+      if (!this.closest("[inert]")) focus.call(this, o);
+    });
+    renderHome();
+    heroVisible(true);
+    const hero = screen.getByRole("search", { name: content.search.heroLabel })
+      .querySelector<HTMLInputElement>("[data-what-input]")!;
+
+    fireEvent.pointerDown(hero);
+    act(() => hero.focus());
+    spy.mockRestore();
+
+    const header = box().querySelector("[data-what-input]");
+    expect(document.activeElement).toBe(header);
+    expect(box()).not.toHaveAttribute("inert");
+    expect(document.querySelector("[data-suggest-panel]")).not.toBeNull();
+  });
+
+  it("is visible on any other page without waiting for the observer", () => {
+    url.pathname = "/kazan";
+    renderHome();
+    expect(box()).not.toHaveAttribute("inert");
+    expect(box()).not.toHaveAttribute("data-hero-pending");
+    expect(observers).toHaveLength(0);
+  });
+
+  it("is visible when there is no hero search on the page", () => {
+    render(<HeaderSearch cities={CITIES} />);
+    expect(box()).not.toHaveAttribute("inert");
+    expect(box()).not.toHaveAttribute("data-hero-pending");
+  });
+
+  it("is visible without IntersectionObserver", () => {
+    vi.stubGlobal("IntersectionObserver", undefined);
+    renderHome();
+    expect(box()).not.toHaveAttribute("inert");
+    expect(box()).not.toHaveAttribute("data-hero-pending");
   });
 });

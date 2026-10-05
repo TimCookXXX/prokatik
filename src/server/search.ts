@@ -1,33 +1,27 @@
 // Поиск «Что»: подсказки в панели и ранжирование выдачи /search. Оба идут по
-// одному индексу (search-index.ts) и одному скорингу (lib/search), поэтому верх
-// выдачи без фасетов совпадает с подсказками.
+// одному индексу (search-index.ts) и одному скорингу (lib/search): подсказка —
+// дополненный запрос, и она показывается, только если выдача по ней непуста.
 
-import { listingPath } from "@/lib/catalog/listing-path";
 import {
   isBlankQuery, rankListings, rankResults, suggestCategories,
 } from "@/lib/search/listing-index";
+import { completeQuery, pickCompletions } from "@/lib/search/complete";
 import { hasSearchWords, MAX_QUERY_LENGTH } from "@/lib/search/match";
 import type { DateRange } from "@/lib/catalog/filters";
-import { getFreeListingIds, type City } from "@/server/catalog";
-import { getSearchIndex } from "@/server/search-index";
+import { getFreeSearchIds, type City } from "@/server/catalog";
+import { getSearchIndex, type SearchIndex } from "@/server/search-index";
 
 /** Потолок совпадений выдачи: дальше фильтры, счёт и страницы считает SQL по этим id. */
 export const RESULTS_LIMIT = 1000;
-export const SUGGEST_LISTINGS = 6;
+export const SUGGEST_QUERIES = 6;
 export const SUGGEST_CATEGORIES = 4;
-/**
- * Сколько лучших кандидатов проверять на свободу, когда выбраны даты. Занятые
- * отсеиваются, в ответ идут первые SUGGEST_LISTINGS свободных; если свободных
- * среди них меньше — подсказок меньше, а не хуже по тексту.
- */
-export const SUGGEST_DATE_CANDIDATES = 50;
 
 export interface RankedIds {
   /**
    * id совпадений по релевантности, не больше RESULTS_LIMIT. null — в запросе
    * нет слов для поиска (одна буква, одни стоп-слова вроде «прокат в Казани»):
-   * выдача без условия запроса, как /search без `q`. Подсказки такой запрос
-   * ищут буквально (queryTokens), выдаче это дало бы пустую страницу.
+   * выдача без условия запроса, как /search без `q`: искать «прокат»
+   * буквально дало бы пустую страницу. Подсказки такую фразу не предлагают.
    */
   ids: string[] | null;
   /** Запрос, по которому найдено: весь или его часть. */
@@ -51,74 +45,93 @@ export async function rankListingIds(cityIds: readonly string[], q: string): Pro
   return { ids: hits.map((h) => h.row.id), usedQuery, dropped };
 }
 
-export interface SuggestItem {
-  id: string;
-  title: string;
-  priceDay: number;
-  /** Канонический путь карточки без query: переносимые параметры дописывает клиент. */
+export interface SuggestQuery {
+  /** Дополненный запрос — его подставляют в поле. */
+  text: string;
+  /** `/search?q=…&city=…` без дат и «Где»: переносимые параметры дописывает клиент. */
   href: string;
-  categoryName: string;
-  photoUrl: string | null;
 }
 
 export interface SuggestCategory {
   name: string;
   /** Канонический путь раздела: `/{city}/{root}` или `/{city}/{root}/{sub}`. */
   href: string;
-  count: number;
 }
 
 export interface SuggestResult {
-  items: SuggestItem[];
+  queries: SuggestQuery[];
   categories: SuggestCategory[];
 }
 
 /**
- * Подсказки панели «Что» в городе. Пустой или односимвольный запрос —
- * популярные разделы без объявлений. Ссылки разделов ведут в город страницы.
+ * Подсказки панели «Что» в городе: дополнения запроса и разделы, без
+ * объявлений и без чисел. Пустой или односимвольный запрос — ничего.
  * `cityIds` — набор городов индекса, тот же, что у выдачи (getCityScope): с
- * точкой «Где» это весь регион, иначе верх выдачи разошёлся бы с подсказками;
- * по умолчанию — сам город. `dates` — уже разобранный диапазон
- * (parseDateRange): с ним в подсказки идут только свободные на все эти дни,
- * как и в выдаче с теми же датами. Счётчики разделов даты не учитывают.
+ * точкой «Где» это весь регион; по умолчанию — сам город. Ссылки и запросов,
+ * и разделов ведут в город страницы. `dates` — уже разобранный диапазон
+ * (parseDateRange): с ним фраза остаётся, только если выдача на эти даты
+ * непуста — SQL тех же условий, что у searchListings, одним запросом на все
+ * фразы.
  */
 export async function suggestForCity(
   city: Pick<City, "id" | "slug">,
   q: string,
   { cityIds, dates }: { cityIds?: readonly string[]; dates?: DateRange } = {},
 ): Promise<SuggestResult> {
-  const { ix, categories, citySlugs } = await getSearchIndex(cityIds ?? [city.id]);
+  if (isBlankQuery(q)) return { queries: [], categories: [] };
+  const scope = cityIds ?? [city.id];
+  const { ix } = await getSearchIndex(scope);
 
-  let hits = rankListings(ix, q, {
-    mode: "suggest", limit: dates ? SUGGEST_DATE_CANDIDATES : SUGGEST_LISTINGS,
-  });
-  if (dates && hits.length > 0) {
-    const free = await getFreeListingIds(hits.map((h) => h.row.id), dates.from, dates.to);
-    hits = hits.filter((h) => free.has(h.row.id)).slice(0, SUGGEST_LISTINGS);
+  const completions = completeQuery(ix, q, { resultsLimit: RESULTS_LIMIT });
+  let free: Set<string> | undefined;
+  if (dates && completions.length > 0) {
+    const ids = [...new Set(completions.flatMap((c) => c.ids))];
+    free = await getFreeSearchIds(scope, ids, dates.from, dates.to);
   }
-
-  const items: SuggestItem[] = [];
-  for (const { row } of hits) {
-    const category = categories.get(row.categoryId);
-    const rowCity = citySlugs.get(row.cityId);
-    // Строки без раздела или города не бывает (FK и join сборки); проверка —
-    // чтобы подсказка не повела на битый путь, если справочник разошёлся.
-    if (!category || !rowCity) continue;
-    items.push({
-      id: row.id,
-      title: row.title,
-      priceDay: row.priceDay,
-      href: listingPath(rowCity, category.slug, row.slug, row.id),
-      categoryName: category.name,
-      photoUrl: row.photoUrl,
-    });
-  }
-
-  const cats = suggestCategories(ix, q, SUGGEST_CATEGORIES).map((c) => ({
-    name: c.category.name,
-    href: `/${city.slug}/${c.slugs.join("/")}`,
-    count: c.count,
+  const queries = pickCompletions(completions, SUGGEST_QUERIES, free).map(({ text }) => ({
+    text,
+    href: `/search?${new URLSearchParams({ q: text, city: city.slug })}`,
   }));
 
-  return { items, categories: cats };
+  const categories = suggestCategories(ix, q, SUGGEST_CATEGORIES).map((c) => ({
+    name: c.category.name,
+    href: `/${city.slug}/${c.slugs.join("/")}`,
+  }));
+
+  return { queries, categories };
+}
+
+/** Сколько чипов популярных запросов показывает главная. */
+export const POPULAR_QUERIES_MAX = 8;
+
+// Подсчёт чипов — при индексе, на котором он сделан: пока версия набора не
+// сменилась, getSearchIndex отдаёт тот же объект, и главная берёт готовый
+// список, а не прогоняет кандидатов через скоринг на каждый рендер. Новый
+// индекс (правка, сверка версии, инвалидация) — новый ключ; старый подсчёт
+// уходит вместе со старым индексом.
+const popularMemo = new WeakMap<SearchIndex, { candidates: readonly string[]; list: string[] }>();
+
+/**
+ * Чипы «Часто ищут» под поиском hero: кандидаты из `candidates` (по порядку,
+ * не больше POPULAR_QUERIES_MAX), по которым в городе есть хотя бы одно
+ * объявление в режиме подсказок — чип не обещает пустую выдачу. Индекс тот же,
+ * что у подсказок и выдачи. Любая ошибка — пустой список: чипы просто не
+ * показываются, главная из-за них не падает.
+ */
+export async function getPopularQueries(cityId: string, candidates: readonly string[]): Promise<string[]> {
+  try {
+    const index = await getSearchIndex([cityId]);
+    const memo = popularMemo.get(index);
+    if (memo?.candidates === candidates) return memo.list;
+    const list: string[] = [];
+    for (const q of candidates) {
+      if (list.length >= POPULAR_QUERIES_MAX) break;
+      if (rankListings(index.ix, q, { mode: "suggest", limit: 1 }).length > 0) list.push(q);
+    }
+    popularMemo.set(index, { candidates, list });
+    return list;
+  } catch (e) {
+    console.error("[search] popular queries failed:", (e as Error).message);
+    return [];
+  }
 }

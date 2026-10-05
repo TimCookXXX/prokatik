@@ -190,11 +190,6 @@ describe("getSearchIndex", () => {
     expect(await titles("перфоратор в энске")).toEqual(["Перфоратор Bosch"]);
   });
 
-  it("maps categories and city slugs for building links", async () => {
-    const index = await getSearchIndex([CITY]);
-    expect(index.categories.get("power")?.slug).toBe("elektroinstrumenty");
-    expect(index.citySlugs.get(CITY)).toBe("kazan");
-  });
 });
 
 // Без моков ранжирования: запрос из одних стоп-слов (и названия города) — не

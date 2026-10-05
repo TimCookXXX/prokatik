@@ -11,8 +11,8 @@ export type WhereParams = Partial<Record<(typeof WHERE_PARAMS)[number], string>>
 
 /** Что выбрано в поле «Что». */
 export type WhatValue =
-  /** Подсказка-объявление или раздел: канонический путь без query. */
-  | { kind: "listing" | "category"; href: string }
+  /** Подсказка-запрос (`/search?q=…&city=…`) или раздел (канонический путь без query). */
+  | { kind: "query" | "category"; href: string }
   /** Набранный текст или строка «Показать все по «q»». */
   | { kind: "text"; q: string };
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  extraWordScore, hasSearchWords, highlight, matchToken, MAX_QUERY_WORDS, queryTokens, stopWordSet, subsets, tokenForms, wordScore,
+  CATEGORY_RULES, extraWordScore, hasSearchWords, highlight, matchToken, MAX_QUERY_WORDS, queryTokens, stopWordSet,
+  subsets, SUGGEST_RULES, tokenForms, wordScore,
 } from "@/lib/search/match";
 
 describe("wordScore", () => {
@@ -17,6 +18,30 @@ describe("wordScore", () => {
     expect(wordScore("makita", "maikaolin")).toBe(0);
     // Раскладка и транслит — опечатка только против слова целиком.
     expect(wordScore("макс", "макита", true)).toBe(0);
+  });
+
+  // Панель подсказок строже выдачи (docs/decisions/0023): опечатка — только
+  // в слове, набранном целиком, и с теми же двумя первыми буквами.
+  it("in the suggest panel a typo counts only in a whole word with the same first two letters", () => {
+    expect(wordScore("перфаратор", "перфоратор", false, SUGGEST_RULES)).toBe(0.8);
+    // Начало длинного слова — человек ещё печатает: «палат» ≈ «плат(ье)».
+    expect(wordScore("палат", "платье", false, SUGGEST_RULES)).toBe(0);
+    // Слово целиком, но первые буквы другие: «перф» ≈ «серф».
+    expect(wordScore("перф", "серф", false, SUGGEST_RULES)).toBe(0);
+    expect(wordScore("перф", "серфинг", false, SUGGEST_RULES)).toBe(0);
+    // Ясные совпадения — как в выдаче.
+    expect(wordScore("перфо", "перфоратор", false, SUGGEST_RULES)).toBe(2.25);
+    expect(wordScore("ратор", "перфоратор", false, SUGGEST_RULES)).toBe(1);
+    // Выдача прежняя.
+    expect(wordScore("палат", "платье")).toBe(0.8);
+    expect(wordScore("перф", "серфинг")).toBe(0.8);
+  });
+
+  it("sections in the panel match without typos and substrings", () => {
+    expect(wordScore("перфаратор", "перфоратор", false, CATEGORY_RULES)).toBe(0);
+    expect(wordScore("ратор", "перфоратор", false, CATEGORY_RULES)).toBe(0);
+    expect(wordScore("перфо", "перфоратор", false, CATEGORY_RULES)).toBe(2.25);
+    expect(wordScore("перфоратора", "перфоратор", false, CATEGORY_RULES)).toBe(1.9);
   });
 
   it("description words match only exactly, by start or by stem", () => {

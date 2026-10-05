@@ -7,13 +7,13 @@ const where = { loc: "p:45.035,38.975", la: "ул. Красная", lp: "s" };
 
 // По строке на каждую строку таблицы «Куда ведёт отправка» в плане поиска.
 describe("searchSubmitHref", () => {
-  it("listing suggestion — its canonical path with dates and «Где»", () => {
+  it("query suggestion — its /search link with dates and «Где»; the page's filters are not carried", () => {
     const href = searchSubmitHref(
-      { what: { kind: "listing", href: "/krasnodar/elektroinstrumenty/drel-01J0000000000000000000000" }, ...dates, loc: where },
-      { pathname: "/cabinet", searchParams: "", citySlug: "krasnodar" },
+      { what: { kind: "query", href: "/search?q=%D0%B4%D1%80%D0%B5%D0%BB%D1%8C&city=krasnodar" }, ...dates, loc: where },
+      { pathname: "/search", searchParams: "q=др&price_max=500&page=3&sort=price_asc", citySlug: "krasnodar" },
     );
     expect(href).toBe(
-      "/krasnodar/elektroinstrumenty/drel-01J0000000000000000000000?from=2026-10-10&to=2026-10-12&loc=p%3A45.035%2C38.975&la=%D1%83%D0%BB.+%D0%9A%D1%80%D0%B0%D1%81%D0%BD%D0%B0%D1%8F&lp=s",
+      "/search?q=%D0%B4%D1%80%D0%B5%D0%BB%D1%8C&city=krasnodar&from=2026-10-10&to=2026-10-12&loc=p%3A45.035%2C38.975&la=%D1%83%D0%BB.+%D0%9A%D1%80%D0%B0%D1%81%D0%BD%D0%B0%D1%8F&lp=s",
     );
   });
 

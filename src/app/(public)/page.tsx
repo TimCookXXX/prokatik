@@ -6,6 +6,8 @@ import {
   getAllCategories, getListingCountsByCategory, getRecentListings, rollupToRoots,
 } from "@/server/catalog";
 import { getCitiesGeo, resolveViewerCity } from "@/server/city";
+import { getPopularQueries } from "@/server/search";
+import { content } from "@theme/content";
 import { Hero } from "@/components/home/Hero";
 import { CategoryTiles } from "@/components/home/CategoryTiles";
 import { RecentItems } from "@/components/home/RecentItems";
@@ -30,12 +32,17 @@ export default async function HomePage() {
   ]);
 
   const roots = cats.filter((c) => c.parentId === null);
-  const counts = defaultCity
-    ? rollupToRoots(cats, await getListingCountsByCategory([defaultCity.id]))
-    : null;
-
-  // Восемь последних — ровно два ряда по четыре на десктопе.
-  const recent = defaultCity ? await getRecentListings(defaultCity.id, 8) : [];
+  // Восемь последних — ровно два ряда по четыре на десктопе. Чипы «Часто
+  // ищут» — кандидаты, по которым в городе что-то находится; ошибка индекса
+  // даёт пустой список, а не падение главной.
+  const [direct, recent, popular] = defaultCity
+    ? await Promise.all([
+      getListingCountsByCategory([defaultCity.id]),
+      getRecentListings(defaultCity.id, 8),
+      getPopularQueries(defaultCity.id, content.home.popularQueries),
+    ])
+    : [null, [], []];
+  const counts = direct ? rollupToRoots(cats, direct) : null;
 
   // Только непустые категории: чип, за которым в городе ничего нет, обещает
   // то, чего человек не найдёт. Числа в чипах не показываем.
@@ -53,14 +60,15 @@ export default async function HomePage() {
   const user = session?.user;
   const placeHref = user ? "/cabinet/listings/new" : "/login";
 
-  // Анониму «Разместить» открывает вход модалкой, а не уводит на /login.
+  // Анониму «Разместить» в полосе внизу открывает вход модалкой, а не уводит
+  // на /login.
   const authProps = user ? undefined : authPanelProps();
 
   return (
     // Стопка панелей одной ширины. Контейнер совпадает с шапкой и подвалом,
     // иначе края главной разъезжаются с плавающей панелью над ней.
     <main className="mx-auto flex w-full max-w-[1200px] flex-col gap-6 px-4 pb-4 pt-5">
-      <Hero city={heroCity} placeHref={placeHref} authProps={authProps} />
+      <Hero city={heroCity} popular={popular} />
 
       {defaultCity && <CategoryTiles citySlug={defaultCity.slug} categories={chips} />}
 
