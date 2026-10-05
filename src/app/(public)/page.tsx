@@ -10,7 +10,6 @@ import { getPopularQueries } from "@/server/search";
 import { content } from "@theme/content";
 import { Hero } from "@/components/home/Hero";
 import { CategoryTiles } from "@/components/home/CategoryTiles";
-import { NearbyItems } from "@/components/home/NearbyItems";
 import { RecentItems } from "@/components/home/RecentItems";
 import { HowItWorks } from "@/components/home/HowItWorks";
 import { ListYourItemBand } from "@/components/home/ListYourItemBand";
@@ -54,9 +53,8 @@ export default async function HomePage() {
     : [];
 
   // Город поиска в hero — та же запись, что у шапки, с тем же гео-контекстом.
-  const heroGeo = defaultCity ? citiesGeo.get(defaultCity.slug) ?? null : null;
   const heroCity = defaultCity
-    ? { slug: defaultCity.slug, name: defaultCity.name, geo: heroGeo }
+    ? { slug: defaultCity.slug, name: defaultCity.name, geo: citiesGeo.get(defaultCity.slug) ?? null }
     : undefined;
 
   const user = session?.user;
@@ -73,11 +71,6 @@ export default async function HomePage() {
       <Hero city={heroCity} popular={popular} />
 
       {defaultCity && <CategoryTiles citySlug={defaultCity.slug} categories={chips} />}
-
-      {/* «Рядом с вами» — только там, где у объявлений есть точки. */}
-      {defaultCity && heroGeo && (
-        <NearbyItems city={{ slug: defaultCity.slug, name: defaultCity.name, geo: heroGeo }} />
-      )}
 
       {defaultCity && <RecentItems items={recent} citySlug={defaultCity.slug} />}
 

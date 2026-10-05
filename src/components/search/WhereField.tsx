@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { History as RecentIcon, LocateFixed, MapPin } from "lucide-react";
 import { content } from "@theme/content";
 import { cn } from "@/lib/utils";
@@ -13,9 +13,7 @@ import { Button } from "@/components/ui/button";
 import { filterChip } from "@/components/ui/filter-chip";
 import { AddressCombobox, addressValueOf, type AddressExtraRow, type AddressValue } from "./AddressCombobox";
 import { useCanGeolocate, useGeolocate } from "./geolocate";
-import { usePopoverLayout } from "./MobileSuggestPanel";
 import { storeLocation, useStoredLocation } from "./stored-location";
-import { onWhereOpen, type ReturnFocus } from "./where-open";
 
 const t = content.search.where;
 
@@ -78,32 +76,8 @@ export function WhereField({
     onSheetOpenChange?.(open);
   };
 
-  // «Открыть „Где“» снаружи (полоса «Рядом с вами», where-open.ts) — только
-  // у hero: ниже lg шторка, с lg фокус в поле, и список раскрывается сам.
-  const popover = usePopoverLayout();
-  const openRef = useRef<(returnFocus?: ReturnFocus) => void>(() => {});
-  // Куда вернуть фокус после шторки, открытой сигналом; своя кнопка — по умолчанию.
-  const signalReturn = useRef<ReturnFocus | null>(null);
-  openRef.current = (returnFocus) => {
-    if (!popover) {
-      signalReturn.current = returnFocus ?? null;
-      setSheet(true);
-      return;
-    }
-    const input = document.getElementById("where-hero-input");
-    if (!input) return;
-    // Без прокрутки фокусом: она прижала бы поле к краю, под липкую шапку.
-    input.focus({ preventScroll: true });
-    input.scrollIntoView({ block: "center" });
-  };
-  useEffect(() => {
-    if (variant !== "hero") return;
-    return onWhereOpen((returnFocus) => openRef.current(returnFocus));
-  }, [variant]);
-
   // localStorage и navigator — только на клиенте, после гидрации: разметка
   // сервера и первого кадра обязана совпасть (оба стора отдают серверу пусто).
-  // Последнее место — общий стор: полоса «Рядом с вами» пишет в него же.
   const stored = useStoredLocation(region);
   const canLocate = useCanGeolocate();
   const geo = useGeolocate({ slug: city.slug, name: city.name, region });
@@ -179,9 +153,7 @@ export function WhereField({
         aria-describedby={undefined}
         className="md:max-w-[26rem]"
         onCloseAutoFocus={(e) => {
-          const fromSignal = signalReturn.current;
-          signalReturn.current = null;
-          const target = returnFocus?.() ?? fromSignal?.();
+          const target = returnFocus?.();
           if (!target) return;
           e.preventDefault();
           target.focus();

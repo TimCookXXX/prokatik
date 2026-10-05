@@ -1,6 +1,5 @@
-// Последнее место «Где» — маленький внешний стор над localStorage: поле «Где»
-// и полоса «Рядом с вами» видят запись и очистку сразу, соседняя вкладка —
-// через событие storage.
+// Последнее место «Где» — маленький внешний стор над localStorage: поля «Где»
+// видят запись и очистку сразу, соседняя вкладка — через событие storage.
 import { act, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {

@@ -2,15 +2,13 @@
 
 // «Моё местоположение»: геолокация браузера → подпись обратным геокодером без
 // номера дома → точка «Где» (lib/geo/location.ts, точность хуже 150 м — `lp=s`)
-// → запомнить как последнее место региона. Общий шаг поля «Где» и полосы
-// «Рядом с вами» на главной.
+// → запомнить как последнее место региона.
 //
 // Поколение: геолокация ждёт разрешения и сети до десятка секунд, и её ответ
 // не должен затереть место, выбранное за это время, — `cancel()` (или новый
 // `locate()`) делает ожидаемый ответ устаревшим. Счётчик один на страницу, а
-// не на блок: запрос из полосы «Рядом с вами» отменяет и выбор в «Где», и
-// наоборот — иначе поздний ответ одного блока затёр бы место, выбранное в
-// другом.
+// не на поле: на главной «Где» есть и в шапке, и в hero, и поздний ответ
+// одного поля иначе затёр бы место, выбранное в другом.
 
 import { useCallback, useState, useSyncExternalStore } from "react";
 import { reverseLabel } from "@/lib/geo/address";
@@ -33,7 +31,7 @@ export type LocateResult =
   | { status: "stale" };
 
 /** Геолокация браузера; отказ, таймаут или её нет — null, без сообщения об ошибке. */
-export function currentCoords(): Promise<GeolocationCoordinates | null> {
+function currentCoords(): Promise<GeolocationCoordinates | null> {
   return new Promise((resolve) => {
     try {
       navigator.geolocation.getCurrentPosition(
@@ -61,7 +59,7 @@ export function useCanGeolocate(): boolean {
 let generation = 0;
 const genListeners = new Set<() => void>();
 
-/** Новое поколение: ожидаемые ответы всех блоков страницы устарели. */
+/** Новое поколение: ожидаемые ответы всех полей страницы устарели. */
 function bump(): number {
   generation += 1;
   for (const cb of genListeners) cb();
@@ -77,11 +75,11 @@ const readGeneration = () => generation;
 const serverGeneration = () => 0;
 
 /**
- * Определение места с общим поколением. `locating` — этот блок ждёт браузер и
- * геокодер, и его запрос не отменён: отмена из другого блока гасит его сразу.
+ * Определение места с общим поколением. `locating` — это поле ждёт браузер и
+ * геокодер, и его запрос не отменён: отмена из другого поля гасит его сразу.
  */
 export function useGeolocate(city: LocateCity) {
-  // Поколение запроса, которого ждёт этот блок; 0 — не ждёт.
+  // Поколение запроса, которого ждёт это поле; 0 — не ждёт.
   const [waiting, setWaiting] = useState(0);
   const current = useSyncExternalStore(subscribeGeneration, readGeneration, serverGeneration);
   const locating = waiting !== 0 && waiting === current;
