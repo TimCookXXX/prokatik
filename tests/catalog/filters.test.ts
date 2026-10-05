@@ -25,6 +25,13 @@ describe("parseFilters()", () => {
     expect(f.priceMax).toBe(700);
   });
 
+  // Слайдер отправляет только сдвинутую ручку: вторая граница просто
+  // отсутствует в адресе и остаётся незаданной.
+  it("одна граница без другой — вторая не задана", () => {
+    expect(parseFilters({ price_min: "300" })).toMatchObject({ priceMin: 300, priceMax: undefined });
+    expect(parseFilters({ price_max: "800" })).toMatchObject({ priceMin: undefined, priceMax: 800 });
+  });
+
   it("мусор и отрицательные — игнорируются", () => {
     const f = parseFilters({ price_min: "abc", price_max: "-5", page: "xx" });
     expect(f.priceMin).toBeUndefined();

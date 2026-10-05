@@ -32,4 +32,23 @@ describe("activeFilterCount", () => {
   it("сортировку не считает", () => {
     expect(activeFilterCount({ sort: "price_asc" } as Parameters<typeof activeFilterCount>[0])).toBe(0);
   });
+
+  // Граница на краю раздела ничего не отсекает: такой адрес оставляют старые
+  // ссылки и форма без JS, и чип не должен считать её фильтром.
+  describe("с границами раздела", () => {
+    const bounds = { min: 100, max: 900 };
+
+    it("цена на краях или шире — не фильтр", () => {
+      expect(activeFilterCount({ priceMin: 100, priceMax: 900, deposit: "none" }, bounds)).toBe(1);
+      expect(activeFilterCount({ priceMin: 50, priceMax: 1000 }, bounds)).toBe(0);
+      expect(activeFilterCount({ priceMin: 0 }, bounds)).toBe(0);
+    });
+
+    it("цена, сужающая раздел, — одно условие", () => {
+      expect(activeFilterCount({ priceMin: 101 }, bounds)).toBe(1);
+      expect(activeFilterCount({ priceMax: 899 }, bounds)).toBe(1);
+      expect(activeFilterCount({ priceMin: 200, priceMax: 800 }, bounds)).toBe(1);
+      expect(activeFilterCount({ priceMin: 100, priceMax: 800 }, bounds)).toBe(1);
+    });
+  });
 });

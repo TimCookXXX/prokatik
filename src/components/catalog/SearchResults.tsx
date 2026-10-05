@@ -198,7 +198,7 @@ export async function SearchResults({
           filterForm={
             <FilterForm basePath="/search" state={filterState} hidden={filterHidden} priceBounds={priceBounds} />
           }
-          filterCount={activeFilterCount(filterState)}
+          filterCount={activeFilterCount(filterState, priceBounds)}
           dates={{ from: filters.availableFrom, to: filters.availableTo, resetHref: datesResetHref, today }}
           sortOptions={sortOptions}
           sort={filters.sort}

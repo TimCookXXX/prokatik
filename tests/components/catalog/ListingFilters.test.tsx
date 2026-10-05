@@ -1,6 +1,7 @@
-import { render } from "@testing-library/react";
+import { fireEvent, render } from "@testing-library/react";
+import { renderToString } from "react-dom/server";
 import { describe, it, expect } from "vitest";
-import { ListingFilters } from "@/components/catalog/ListingFilters";
+import { FilterForm, ListingFilters } from "@/components/catalog/ListingFilters";
 import { carryParams } from "@/lib/catalog/filters";
 
 const radio = (value: string) =>
@@ -116,5 +117,51 @@ describe("ListingFilters", () => {
     expect(radio("none").checked).toBe(true);
     expect(radio("money").checked).toBe(false);
     expect(verified().checked).toBe(true);
+  });
+
+  // Регрессия: слайдер всегда отправлял обе границы, по умолчанию — края
+  // раздела. «Без залога» + «Показать» давали ?price_min=..&price_max=..,
+  // и чип «Фильтры» показывал 2 вместо 1.
+  describe("цена в отправке формы", () => {
+    const bounds = { min: 100, max: 900 };
+    const sent = () => {
+      const form = document.querySelector("form")!;
+      return [...new FormData(form).keys()];
+    };
+
+    it("ручки на краях раздела — цены в адресе нет", () => {
+      render(<FilterForm basePath="/kazan/tools" state={{}} priceBounds={bounds} />);
+      fireEvent.click(radio("none"));
+      expect(sent()).toContain("deposit");
+      expect(sent()).not.toContain("price_min");
+      expect(sent()).not.toContain("price_max");
+    });
+
+    it("отправляет только сдвинутую границу", () => {
+      render(<FilterForm basePath="/kazan/tools" state={{}} priceBounds={bounds} />);
+      fireEvent.change(document.querySelector('input[type="number"][id$="-min"]')!, {
+        target: { value: "300" },
+      });
+      const data = new FormData(document.querySelector("form")!);
+      expect(data.get("price_min")).toBe("300");
+      expect(data.has("price_max")).toBe(false);
+    });
+
+    it("ручка, вернувшаяся на край, снимает границу из адреса", () => {
+      render(<FilterForm basePath="/kazan/tools" state={{ priceMax: 500 }} priceBounds={bounds} />);
+      expect(sent()).toContain("price_max");
+      fireEvent.change(document.querySelector('input[type="number"][id$="-max"]')!, {
+        target: { value: "900" },
+      });
+      expect(sent()).not.toContain("price_max");
+    });
+
+    // Без JS гидрации не будет: серверная разметка — единственный ввод цены,
+    // и поля обязаны оставаться именованными, иначе цену не отправить вовсе.
+    it("в серверной разметке поля цены именованные", () => {
+      const html = renderToString(<FilterForm basePath="/kazan/tools" state={{}} priceBounds={bounds} />);
+      expect(html).toContain('name="price_min"');
+      expect(html).toContain('name="price_max"');
+    });
   });
 });

@@ -11,10 +11,24 @@ export interface PanelFilters {
   verifiedOnly?: boolean;
 }
 
-/** Цена — одно условие, даже если заданы обе границы: в панели это один слайдер. */
-export function activeFilterCount(f: PanelFilters): number {
+/**
+ * Цена — одно условие, даже если заданы обе границы: в панели это один слайдер.
+ *
+ * С границами раздела (`priceBounds`) цена считается, только если сужает их:
+ * граница из адреса, равная краю раздела или шире него, ничего не отсекает —
+ * такой адрес оставляют старые ссылки и форма без JS. Без границ слайдера
+ * нет, и считается любая заданная граница.
+ */
+export function activeFilterCount(
+  f: PanelFilters,
+  priceBounds?: { min: number; max: number },
+): number {
+  const price = priceBounds
+    ? (f.priceMin !== undefined && f.priceMin > priceBounds.min)
+      || (f.priceMax !== undefined && f.priceMax < priceBounds.max)
+    : f.priceMin !== undefined || f.priceMax !== undefined;
   return [
-    f.priceMin !== undefined || f.priceMax !== undefined,
+    price,
     Boolean(f.deposit),
     Boolean(f.handover),
     Boolean(f.verifiedOnly),

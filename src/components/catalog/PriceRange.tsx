@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useId, useState, useSyncExternalStore } from "react";
 import { fieldWithin } from "@/components/ui/field";
 
 // Двуручный слайдер цены. Единственный кусок фильтров, которому нужен
@@ -10,6 +10,13 @@ import { fieldWithin } from "@/components/ui/field";
 // Значения уходят на сервер обычными полями формы (price_min/price_max), а не
 // фетчем: форма остаётся GET-формой, и фильтры переживают отключённый JS —
 // без него слайдер просто не отрисуется, а поля ввода останутся рабочими.
+//
+// Граница, на которой стоит ручка, в адрес не уходит: у поля нет `name`. Иначе
+// любой сабмит формы — хоть ради одного «Без залога» — писал бы в адрес обе
+// границы раздела, и чип «Фильтры» считал бы цену применённой. Снимается имя
+// только после гидрации: без JS поле остаётся единственным вводом цены, и
+// безымянное оно ничего бы не отправило.
+const noopSubscribe = () => () => {};
 export function PriceRange({
   min, max, valueMin, valueMax,
 }: {
@@ -26,6 +33,10 @@ export function PriceRange({
   // Ручки не проходят сквозь друг друга: каждая упирается в соседнюю.
   const setLoSafe = (v: number) => setLo(Math.min(v, hi));
   const setHiSafe = (v: number) => setHi(Math.max(v, lo));
+
+  const hydrated = useSyncExternalStore(noopSubscribe, () => true, () => false);
+  const minName = hydrated && lo <= min ? undefined : "price_min";
+  const maxName = hydrated && hi >= max ? undefined : "price_max";
 
   const span = Math.max(1, max - min);
   const leftPct = ((lo - min) / span) * 100;
@@ -63,7 +74,7 @@ export function PriceRange({
         <div className={`${fieldWithin} flex h-9 min-w-0 flex-1 items-center gap-1 px-3`}>
           <span className="shrink-0 text-xs text-muted-foreground">от</span>
           <input
-            id={`${id}-min`} name="price_min" type="number" min={min} inputMode="numeric"
+            id={`${id}-min`} name={minName} type="number" min={min} inputMode="numeric"
             value={lo} onChange={(e) => setLoSafe(Number(e.target.value))}
             className="w-full min-w-0 bg-transparent text-sm outline-none"
           />
@@ -73,7 +84,7 @@ export function PriceRange({
         <div className={`${fieldWithin} flex h-9 min-w-0 flex-1 items-center gap-1 px-3`}>
           <span className="shrink-0 text-xs text-muted-foreground">до</span>
           <input
-            id={`${id}-max`} name="price_max" type="number" min={min} inputMode="numeric"
+            id={`${id}-max`} name={maxName} type="number" min={min} inputMode="numeric"
             value={hi} onChange={(e) => setHiSafe(Number(e.target.value))}
             className="w-full min-w-0 bg-transparent text-sm outline-none"
           />
