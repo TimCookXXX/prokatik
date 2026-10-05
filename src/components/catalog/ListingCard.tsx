@@ -186,16 +186,19 @@ export function ListingCard({
       </div>
 
       <div className="flex min-w-0 flex-1 flex-col p-3 sm:p-4">
-        {/* Одна строка с многоточием: карточки в ряду обязаны быть одной
-          * высоты, иначе вторая строка у одного названия сдвигает вниз цену
-          * только в этой колонке.
+        {/* Две строки с многоточием и место под две строки всегда: в узкой
+          * колонке телефона одна строка оставляла от названия «Перфоратор
+          * Ма…», а карточки в ряду обязаны быть одной высоты — короткое
+          * название в одну строку сдвинуло бы цену вверх только в своей
+          * колонке. min-h — две строки leading-snug (1.375) в em, поэтому
+          * верна на обоих кеглях.
           *
           * after:inset-0 растягивает эту ссылку на всю карточку. Подсветка
           * названия висит на group от <article>, а не на hover самой ссылки:
           * ховер от псевдоэлемента до h3 не доходит — тот потомок, а не
           * предок. */}
         <Link href={href as never} className="block min-w-0 after:absolute after:inset-0">
-          <h3 className="truncate text-sm font-semibold leading-snug text-foreground transition-colors group-hover:text-accent sm:text-base">
+          <h3 className="line-clamp-2 min-h-[2.75em] break-words text-sm font-semibold leading-snug text-foreground transition-colors group-hover:text-accent sm:text-base">
             {listing.title}
           </h3>
         </Link>

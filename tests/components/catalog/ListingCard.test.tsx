@@ -46,6 +46,16 @@ function card(over: Record<string, unknown> = {}, props: Record<string, unknown>
 }
 
 describe("ListingCard", () => {
+  // В узкой колонке телефона одна строка оставляла от названия «Перфоратор
+  // Ма…». Две строки — и место под две всегда, чтобы цены в ряду стояли
+  // на одной высоте при названиях разной длины.
+  it("название — до двух строк, место под две строки всегда", () => {
+    render(card());
+    const title = screen.getByRole("heading", { name: "Перфоратор Bosch GBH 2-26" });
+    expect(title).toHaveClass("line-clamp-2", "min-h-[2.75em]", "leading-snug");
+    expect(title).not.toHaveClass("truncate");
+  });
+
   // Сумма с единицей — первой строкой, залог — второй. Разведены намеренно: в
   // одну строку они не влезают на реальных числах, а перенос делал карточки в
   // ряду разной высоты.
