@@ -8,11 +8,14 @@ import { z } from "zod";
 import { and, eq, gte, isNull, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { getDb } from "@/lib/db";
-import { bookingRequests, categories, cities, events, listings, users } from "@db/schema";
+import { bookingRequests, categories, cities, events, geoImports, listings, users } from "@db/schema";
 import { auth } from "@/lib/auth";
 import { newId } from "@/lib/id";
 import { writeDealNote } from "@/server/deal-note";
 import { slugify } from "@/lib/slugify";
+import { RESERVED_SLUGS } from "@/lib/owner/validation";
+import { invalidateSearchIndex } from "@/server/search-index";
+import { invalidateCitiesGeo } from "@/server/city";
 import { notify } from "@/server/notifications";
 import { publish } from "@/server/realtime";
 import { requestNotify } from "@/lib/realtime/events";
@@ -71,6 +74,7 @@ export async function adminSetListingStatus(
       ? { ok: false, error: "Владелец забанен — сначала снимите бан" }
       : { ok: false, error: "not_found" };
   }
+  invalidateSearchIndex();
   revalidatePath("/admin/listings");
   return { ok: true, data: undefined };
 }
@@ -91,13 +95,53 @@ export async function adminSetUserVerified(
 
 // ============================== Города ==============================
 
+// Пустое поле формы — «не задано»: Number("") и Number(" ") дают ноль, а точка
+// (0, 0) лежит в Гвинейском заливе.
+const coordinate = (min: number, max: number, label: string) => z.preprocess(
+  (v) => {
+    if (v === undefined) return null;
+    if (typeof v !== "string") return v;
+    const t = v.trim();
+    return t === "" ? null : Number(t.replace(",", "."));
+  },
+  z.number({ invalid_type_error: `${label} — число` }).min(min, `${label}: от ${min} до ${max}`)
+    .max(max, `${label}: от ${min} до ${max}`).nullable(),
+);
+
 const citySchema = z.object({
   name: z.string().trim().min(2).max(100),
   region: z.string().trim().max(100).optional().default(""),
   // Предложный падеж без предлога: «Казани». Пусто — допустимо: заголовок тогда
   // соберётся без предлога, но неверный падеж не покажет.
   nameLocative: z.string().trim().max(100).optional().default(""),
+  // Центр города: от него ранжируются подсказки адресов.
+  lat: coordinate(-90, 90, "Широта"),
+  lon: coordinate(-180, 180, "Долгота"),
+  // Регион геоданных из загруженных (geo_imports). Пусто — у города геоданных
+  // нет; это же аварийный выключатель геокодера для города.
+  geoRegion: z.string().trim().max(40).optional().default(""),
+}).superRefine((v, ctx) => {
+  if ((v.lat === null) !== (v.lon === null)) {
+    ctx.addIssue({ code: "custom", message: "Центр города — широта и долгота вместе" });
+  }
+  if (v.geoRegion && v.lat === null) {
+    ctx.addIssue({ code: "custom", message: "С геоданными нужен центр города — от него ищутся адреса" });
+  }
 });
+
+type CityInput = z.infer<typeof citySchema>;
+
+/** Регион геоданных выбирается только из загруженных: иначе город остался бы без адресов молча. */
+async function checkGeoRegion(geoRegion: string): Promise<string | null> {
+  if (!geoRegion) return null;
+  const found = await getDb().select({ id: geoImports.id }).from(geoImports)
+    .where(eq(geoImports.region, geoRegion)).limit(1);
+  return found.length > 0 ? null : `Геоданных региона «${geoRegion}» нет — сначала pnpm geo:import`;
+}
+
+function cityGeoValues(v: CityInput) {
+  return { lat: v.lat, lon: v.lon, geoRegion: v.geoRegion || null };
+}
 
 export async function adminCreateCity(input: unknown): Promise<ActionResult> {
   if (!(await requireAdmin())) return { ok: false, error: "forbidden" };
@@ -107,8 +151,13 @@ export async function adminCreateCity(input: unknown): Promise<ActionResult> {
   const db = getDb();
   const slug = slugify(parsed.data.name);
   if (!slug) return { ok: false, error: "bad_name" };
+  // Слаг города — первый сегмент адреса: «search» или «admin» перекрыли бы
+  // маршрут приложения, и город остался бы без страниц.
+  if (RESERVED_SLUGS.has(slug)) return { ok: false, error: `Адрес «/${slug}» занят сервисом — назовите город иначе` };
   const dup = await db.select({ id: cities.id }).from(cities).where(eq(cities.slug, slug)).limit(1);
   if (dup.length > 0) return { ok: false, error: "Город с таким слагом уже есть" };
+  const geoError = await checkGeoRegion(parsed.data.geoRegion);
+  if (geoError) return { ok: false, error: geoError };
 
   await db.insert(cities).values({
     id: newId(),
@@ -116,29 +165,38 @@ export async function adminCreateCity(input: unknown): Promise<ActionResult> {
     slug,
     region: parsed.data.region || null,
     nameLocative: parsed.data.nameLocative || null,
+    ...cityGeoValues(parsed.data),
   });
+  // Названия городов — стоп-слова поиска, они снимаются при сборке индекса.
+  invalidateSearchIndex();
+  invalidateCitiesGeo();
   revalidatePath("/admin/cities");
   return { ok: true, data: undefined };
 }
 
 /* Правка заведённого города. Слаг не трогаем: он в адресах всех страниц города
  * и в чужих ссылках — переименование ломало бы их молча. Менять можно то, что
- * видно текстом: название, регион и падеж. */
+ * видно текстом: название, регион и падеж, — и геоданные: центр и регион. */
 export async function adminUpdateCity(cityId: string, input: unknown): Promise<ActionResult> {
   if (!(await requireAdmin())) return { ok: false, error: "forbidden" };
   const parsed = citySchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "invalid_input" };
+  const geoError = await checkGeoRegion(parsed.data.geoRegion);
+  if (geoError) return { ok: false, error: geoError };
 
   const res = await getDb().update(cities)
     .set({
       name: parsed.data.name,
       region: parsed.data.region || null,
       nameLocative: parsed.data.nameLocative || null,
+      ...cityGeoValues(parsed.data),
     })
     .where(eq(cities.id, cityId))
     .returning({ id: cities.id });
   if (res.length === 0) return { ok: false, error: "not_found" };
 
+  invalidateSearchIndex();
+  invalidateCitiesGeo();
   revalidatePath("/admin/cities");
   return { ok: true, data: undefined };
 }
@@ -150,6 +208,8 @@ export async function adminSetCityActive(cityId: string, isActive: boolean): Pro
     .where(eq(cities.id, cityId))
     .returning({ id: cities.id });
   if (res.length === 0) return { ok: false, error: "not_found" };
+  invalidateSearchIndex();
+  invalidateCitiesGeo();
   revalidatePath("/admin/cities");
   return { ok: true, data: undefined };
 }
@@ -190,6 +250,7 @@ export async function adminCreateCategory(input: unknown): Promise<ActionResult>
     slug,
     vertical: form.vertical || null,
   });
+  invalidateSearchIndex();
   revalidatePath("/admin/categories");
   return { ok: true, data: undefined };
 }
@@ -206,6 +267,7 @@ export async function adminDeleteCategory(categoryId: string): Promise<ActionRes
   if (used.length > 0) return { ok: false, error: "В категории есть позиции — удалить нельзя" };
 
   await db.delete(categories).where(eq(categories.id, categoryId));
+  invalidateSearchIndex();
   revalidatePath("/admin/categories");
   return { ok: true, data: undefined };
 }
@@ -359,6 +421,8 @@ export async function adminBanUser(userId: string, reason: unknown): Promise<Act
     throw e;
   }
 
+  // Вещи забаненного уходят из подсказок и /search сразу.
+  invalidateSearchIndex();
   // Бан закрывает живые заявки по обе стороны, а лента у них теперь общая.
   revalidatePath("/admin/users");
   revalidatePath("/cabinet/requests");
@@ -389,6 +453,7 @@ export async function adminUnbanUser(userId: string): Promise<ActionResult> {
     throw e;
   }
 
+  invalidateSearchIndex();
   revalidatePath("/admin/users");
   return { ok: true, data: undefined };
 }

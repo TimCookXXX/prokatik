@@ -4,16 +4,24 @@
 // Запрос здесь — обычный сужающий фильтр, а не условие существования страницы:
 // без него показывается весь город, с ним — то, что нашлось. Поэтому фильтры,
 // разделы и верхняя панель живут независимо от `q`.
+//
+// Что нашлось и в каком порядке, решает индекс поиска (rankListingIds) — тот
+// же, что у подсказок в шапке. SQL получает готовый набор id и считает поверх
+// него фильтры, фасеты и страницы.
 
 import Link from "next/link";
+import { content } from "@theme/content";
 import { EmptyState } from "@/components/ui/EmptyState";
 import {
   getAllCategories, getAvailabilityRows, getSearchFacets, rollupToRoots,
-  searchListings, DEFAULT_PAGE_SIZE, type City,
+  searchListings, DEFAULT_PAGE_SIZE, type City, type SearchMatch,
 } from "@/server/catalog";
+import { rankListingIds, type RankedIds } from "@/server/search";
 import {
-  filterParams, parseFilters, SORT_OPTIONS, type CategorySearchParams,
+  carryParams, defaultSort, filterParams, parseFilters, sortContextOf, sortOptionsFor,
+  type CategorySearchParams,
 } from "@/lib/catalog/filters";
+import { singleCityScope, type CityScope } from "@/lib/catalog/city-scope";
 import { todayStr, addDaysStr } from "@/lib/catalog/dates";
 import { buildAvailabilityByListing } from "@/lib/catalog/availability";
 import { ListingCard } from "@/components/catalog/ListingCard";
@@ -24,17 +32,31 @@ import { DateRangeFilter } from "@/components/catalog/DateRangeFilter";
 import { ViewToggle, parseView } from "@/components/catalog/ViewToggle";
 
 export async function SearchResults({
-  city, q, searchParams,
+  city, q, searchParams, scope = singleCityScope(city.id),
 }: {
   city: City;
   q: string;
   searchParams: CategorySearchParams;
+  /**
+   * Города выдачи и точка «Где» (getCityScope): с точкой — весь регион, и
+   * индекс поиска, выдача и фасеты считаются по нему. Без — сам город.
+   */
+  scope?: CityScope;
 }) {
-  const filters = parseFilters(searchParams);
-  // Категории идут отдельной волной, а не в общем Promise.all ниже: от них
-  // зависит narrowIds, то есть сам запрос выдачи. На витрине города такой
-  // зависимости нет — там набор разделов задаёт страница.
-  const cats = await getAllCategories();
+  // Категории и ранжирование идут отдельной волной, а не в общем Promise.all
+  // ниже: от них зависят narrowIds и набор id, то есть сам запрос выдачи. На
+  // витрине города такой зависимости нет — там набор разделов задаёт страница.
+  const [cats, ranked] = await Promise.all([getAllCategories(), rankQuery(scope.cityIds, q)]);
+  // Условие запроса: id из индекса; индекс упал — ILIKE по тексту; запроса нет
+  // или в нём нет слов для поиска (одни стоп-слова) — весь город.
+  const match: SearchMatch = ranked?.ids ? { ids: ranked.ids }
+    : ranked === undefined ? { text: q } : { text: "" };
+  // Без набора id сортировать по релевантности нечем — тогда и умолчание, и
+  // меню как без запроса.
+  const rankedQ = "ids" in match ? q : undefined;
+  const today = todayStr();
+  const filters = parseFilters(searchParams, { q: rankedQ, region: scope.region, today });
+  const sortCtx = sortContextOf(filters, rankedQ);
 
   // Сужение по разделу: слаг из адреса → корень и все его подкатегории. Раздела
   // нет или слаг чужой — сужения нет, ищем по всему городу.
@@ -46,14 +68,21 @@ export async function SearchResults({
     : undefined;
 
   const [{ items, total }, facets] = await Promise.all([
-    searchListings(city.id, q, filters, narrowIds),
-    getSearchFacets(city.id, q, filters),
+    searchListings(scope.cityIds, match, filters, narrowIds),
+    getSearchFacets(scope.cityIds, match, filters),
   ]);
 
-  const from = todayStr();
-  const to = addDaysStr(from, 6);
+  // Занятость всех карточек страницы одним запросом: на выбранные даты, а без
+  // них — неделя от сегодня. Диапазон уже нормализован parseFilters (from не
+  // раньше сегодня), так что карточка показывает свободу на те же дни, по
+  // которым отфильтрована выдача, а не «Занято» из-за сегодняшнего дня.
+  const from = filters.availableFrom ?? today;
+  const to = filters.availableTo ?? addDaysStr(today, 6);
   const availRows = await getAvailabilityRows(items.map((i) => i.listing.id), from, to);
   const availByListing = buildAvailabilityByListing(availRows);
+  // Переносимые параметры (даты и «Где») — в ссылки карточек и скрытые поля фильтров.
+  const carry = carryParams(searchParams, { today });
+  const carryQuery = carry.toString();
 
   // Границы слайдера — по результатам запроса, а не по всему городу: иначе
   // ручки стояли бы на ценах, которых в выдаче нет. Исключение — сам ценовой
@@ -76,18 +105,18 @@ export async function SearchResults({
   const categoryFacets = cats
     .filter((c) => c.parentId === null && (rootCounts.get(c.id) ?? 0) > 0)
     .map((c) => {
-      const params = filterParams(searchParams);
+      const params = filterParams(searchParams, { today });
       params.set("category", c.slug);
       return { slug: c.slug, name: c.name, count: rootCounts.get(c.id) ?? 0, href: searchHref(params) };
     });
   const allCategoriesHref = (() => {
-    const params = filterParams(searchParams);
+    const params = filterParams(searchParams, { today });
     params.delete("category");
     return searchHref(params);
   })();
 
   const withParams = (mutate: (q: URLSearchParams) => void) => {
-    const q = filterParams(searchParams);
+    const q = filterParams(searchParams, { today });
     mutate(q);
     return searchHref(q);
   };
@@ -113,16 +142,18 @@ export async function SearchResults({
 
   const page = filters.page ?? 1;
   const totalPages = Math.max(1, Math.ceil(total / DEFAULT_PAGE_SIZE));
-  const sortOptions = SORT_OPTIONS.map((o) => {
-    const params = filterParams(searchParams);
+  // Умолчание в адрес не пишется: при запросе это «подходящие», и тогда
+  // «новые» — явное `sort=new`.
+  const sortOptions = sortOptionsFor(sortCtx).map((o) => {
+    const params = filterParams(searchParams, { today });
     if (q) params.set("q", q);
     params.set("city", city.slug);
-    if (o.value === "new") params.delete("sort"); else params.set("sort", o.value);
+    if (o.value === defaultSort(sortCtx)) params.delete("sort"); else params.set("sort", o.value);
     return { ...o, href: `/search?${params.toString()}` };
   });
 
   const pageHref = (p: number) => {
-    const params = filterParams(searchParams);
+    const params = filterParams(searchParams, { today });
     if (q) params.set("q", q);
     params.set("city", city.slug);
     if (p > 1) params.set("page", String(p));
@@ -137,12 +168,11 @@ export async function SearchResults({
           state={filterState}
           priceBounds={priceBounds}
           hidden={{
+            ...Object.fromEntries(carry),
             q,
             city: city.slug,
             category: searchParams.category ?? "",
             view: searchParams.view ?? "",
-            from: searchParams.from ?? "",
-            to: searchParams.to ?? "",
             sort: searchParams.sort ?? "",
           }}
           categoryLabel={activeRoot?.name ?? "Все разделы"}
@@ -156,23 +186,28 @@ export async function SearchResults({
         />
       </aside>
 
-      <div className="flex flex-1 flex-col gap-4">
+      <div className="flex min-w-0 flex-1 flex-col gap-4">
         {/* Панель видна всегда, в том числе на пустой выдаче: единственный
           * способ снять фильтр дат — этот календарь, а «Сбросить» в фильтрах
           * даты не трогает. Спрячь панель на нуле результатов — и выбранные
           * даты стало бы нечем убрать, кроме правки адреса. */}
         <div className="surface flex items-center justify-between gap-2 p-1.5">
           <DateRangeFilter
-            from={searchParams.from}
-            to={searchParams.to}
+            from={filters.availableFrom}
+            to={filters.availableTo}
             resetHref={datesResetHref}
-            today={from}
+            today={today}
           />
           <div className="flex items-center gap-2">
-            <SortMenu options={sortOptions} current={searchParams.sort} />
+            <SortMenu options={sortOptions} current={filters.sort} />
             <ViewToggle view={view} gridHref={gridHref} listHref={listHref} />
           </div>
         </div>
+        {ranked?.ids && ranked.dropped.length > 0 && (
+          <p role="status" className="rounded-lg border border-border px-3 py-2 text-sm text-muted-foreground">
+            {content.search.subsetNotice(q, ranked.usedQuery)}
+          </p>
+        )}
         {items.length === 0 ? (
           // Пусто по разным причинам, и валить их в одну фразу нельзя: «в
           // городе ничего нет» — прямая ложь, когда выдачу обнулил фильтр или
@@ -201,9 +236,12 @@ export async function SearchResults({
                 <ListingCard
                   key={item.listing.id}
                   item={item}
-                  citySlug={city.slug}
+                  // Свой город у каждой: с «Где» в выдаче и соседние города региона.
+                  citySlug={item.citySlug}
                   availabilityMap={availByListing.get(item.listing.id) ?? new Map()}
                   from={from}
+                  to={filters.availableTo}
+                  hrefQuery={carryQuery}
                   view={view}
                 />
               ))}
@@ -229,4 +267,18 @@ export async function SearchResults({
       </div>
     </div>
   );
+}
+
+/**
+ * Ранжирование запроса по индексу. null — запроса нет; undefined — индекс
+ * недоступен, и выдача уходит на аварийный ILIKE (ошибка в лог, страница жива).
+ */
+async function rankQuery(cityIds: string[], q: string): Promise<RankedIds | null | undefined> {
+  if (!q) return null;
+  try {
+    return await rankListingIds(cityIds, q);
+  } catch (e) {
+    console.error("[search] индекс поиска недоступен, выдача по ILIKE:", e);
+    return undefined;
+  }
 }

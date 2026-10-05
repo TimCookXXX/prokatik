@@ -69,7 +69,6 @@ function widgetWith(pickup: boolean, delivery: boolean) {
     handoverDelivery={delivery}
     sellerName="Артём"
     sellerHref="/u/01ARZ3NDEKTSV4RRFFQ69G5FAV"
-    sellerLocation={null}
     isAuthed
     isOwn={false}
     authProps={{ nextAuthProviders: ["yandex"], vkEnabled: false, canRegisterByEmail: true }}

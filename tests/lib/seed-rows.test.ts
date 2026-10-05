@@ -4,7 +4,7 @@ import { parseHandover, parsePhotos, parseSeedData } from "@/lib/seed/rows";
 
 const city = (over: Partial<CsvRow> = {}): CsvRow => ({
   slug: "krasnodar", name: "Краснодар", name_locative: "Краснодаре",
-  region: "Краснодарский край", lat: "", lon: "", ...over,
+  region: "Краснодарский край", lat: "", lon: "", geo_region: "", ...over,
 });
 
 const user = (over: Partial<CsvRow> = {}): CsvRow => ({
@@ -17,6 +17,7 @@ const listing = (over: Partial<CsvRow> = {}): CsvRow => ({
   owner: "sergey", city: "krasnodar",
   category: "Инструменты / Электроинструменты",
   title: "Перфоратор Bosch", description: "Рабочая лошадка", location: "ул. Гагарина",
+  address: "", lat: "", lon: "", precision: "",
   price_day: "550", deposit_type: "money", deposit_amount: "3000",
   quantity: "3", handover: "pickup", status: "active", photos: "drill-1.webp",
   ...over,
@@ -214,6 +215,195 @@ describe("parseSeedData", () => {
       .toEqual([expect.stringContaining("без пути")]);
     expect(messages(parse({ listings: [listing({ photos: "Фото/a.webp" })] })))
       .toEqual([expect.stringContaining("без пути")]);
+  });
+});
+
+describe("parseSeedData: геоданные городов", () => {
+  it("центр и регион геоданных разбираются в числа и ключ", () => {
+    const res = parse({
+      cities: [city({ lat: "45.0351532", lon: "38,9772396", geo_region: "krasnodar" })],
+      listings: [listing(POINT)],
+    });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.data.cities[0]).toMatchObject({ lat: 45.0351532, lon: 38.9772396, geoRegion: "krasnodar" });
+  });
+
+  it("пустой geo_region — NULL: у города геоданных нет", () => {
+    const res = parse();
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.data.cities[0]).toMatchObject({ lat: null, lon: null, geoRegion: null });
+  });
+
+  it("регион без центра — ошибка: подсказки адресов ранжируются от него", () => {
+    expect(messages(parse({ cities: [city({ geo_region: "krasnodar" })] })))
+      .toEqual([expect.stringMatching(/^cities\.csv:2 geo_region без lat\/lon/)]);
+  });
+
+  it("lat без lon — ошибка", () => {
+    expect(messages(parse({ cities: [city({ lat: "45.03" })] })))
+      .toEqual([expect.stringMatching(/парой/)]);
+  });
+
+  it("координаты вне диапазона — ошибка", () => {
+    expect(messages(parse({ cities: [city({ lat: "95", lon: "38.97" })] })))
+      .toEqual([expect.stringMatching(/lat вне диапазона/)]);
+    expect(messages(parse({ cities: [city({ lat: "45", lon: "190" })] })))
+      .toEqual([expect.stringMatching(/lon вне диапазона/)]);
+  });
+
+  it("регион — ключ импорта латиницей", () => {
+    expect(messages(parse({ cities: [city({ lat: "45", lon: "39", geo_region: "Краснодар" })] })))
+      .toEqual([expect.stringMatching(/geo_region/)]);
+  });
+
+  it("нет колонки geo_region — ошибка про шапку", () => {
+    const { geo_region: _drop, ...noRegion } = city();
+    expect(messages(parse({ cities: [noRegion] })))
+      .toEqual([expect.stringMatching(/^cities\.csv:1 .*geo_region/)]);
+  });
+
+  // Реальный файл: оба города — один регион геоданных с центрами из индекса.
+  it("seed_real/cities.csv разбирается и несёт регион и центр обоих городов", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { parseCsv } = await import("@/lib/csv");
+    const rows = parseCsv(readFileSync("seed_real/cities.csv", "utf8"));
+    const res = parse({ cities: rows, users: [user({ city_slug: "" })], listings: [listing(POINT)] });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    for (const c of res.data.cities) {
+      expect(c.geoRegion).toBe("krasnodar");
+      expect(c.lat).not.toBeNull();
+      expect(c.lon).not.toBeNull();
+    }
+  });
+});
+
+const POINT = {
+  address: "улица Гагарина, 12, Яблоновский", location: "улица Гагарина, Яблоновский",
+  lat: "44.9871", lon: "38.9402", precision: "house",
+};
+
+describe("parseSeedData: адрес объявления", () => {
+  const geoCity = city({ lat: "45.0351532", lon: "38.9772396", geo_region: "krasnodar" });
+
+  it("точка, точность и адрес переходят в строку", () => {
+    const res = parse({ cities: [geoCity], listings: [listing(POINT)] });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.data.listings[0]).toMatchObject({
+      address: "улица Гагарина, 12, Яблоновский", location: "улица Гагарина, Яблоновский",
+      lat: 44.9871, lon: 38.9402, precision: "house",
+    });
+  });
+
+  it("без точки в городе без геоданных — city, адрес может быть пуст", () => {
+    const res = parse();
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.data.listings[0]).toMatchObject({ address: null, lat: null, lon: null, precision: "city" });
+  });
+
+  it("русские подписи точности принимаются", () => {
+    const res = parse({ cities: [geoCity], listings: [listing({ ...POINT, precision: "улица" })] });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.data.listings[0].precision).toBe("street");
+  });
+
+  // Иначе сид записал бы строки без точек, а повторный прогон с этой таблицей
+  // стёр бы точки, найденные с тех пор.
+  it("у города есть геоданные, а lat пуст — ошибка с подсказкой про backfill", () => {
+    expect(messages(parse({ cities: [geoCity] })))
+      .toEqual([expect.stringMatching(/^listings\.csv:2 .*lat пуст — запустите pnpm geo:backfill --csv/)]);
+  });
+
+  it("lat без lon и вне диапазона — ошибка", () => {
+    expect(messages(parse({ listings: [listing({ ...POINT, lon: "" })] })))
+      .toEqual([expect.stringMatching(/lat и lon заполняются парой/)]);
+    expect(messages(parse({ listings: [listing({ ...POINT, lat: "91" })] })))
+      .toEqual([expect.stringMatching(/lat вне диапазона/)]);
+    expect(messages(parse({ listings: [listing({ ...POINT, lat: "север" })] })))
+      .toEqual([expect.stringMatching(/lat не число/)]);
+  });
+
+  it("точность из enum и согласована с точкой", () => {
+    expect(messages(parse({ listings: [listing({ ...POINT, precision: "квартира" })] })))
+      .toEqual([expect.stringMatching(/precision «квартира»/)]);
+    expect(messages(parse({ listings: [listing({ ...POINT, precision: "" })] })))
+      .toEqual([expect.stringMatching(/нужна precision/)]);
+    expect(messages(parse({ listings: [listing({ ...POINT, precision: "city" })] })))
+      .toEqual([expect.stringMatching(/нужна precision/)]);
+    expect(messages(parse({ listings: [listing({ precision: "street" })] })))
+      .toEqual([expect.stringMatching(/точности без точки не бывает/)]);
+  });
+
+  it("точка без адреса — ошибка", () => {
+    expect(messages(parse({ listings: [listing({ ...POINT, address: "" })] })))
+      .toEqual([expect.stringMatching(/address пуст/)]);
+  });
+
+  it("длины — как у колонок: location ≤ 120, address ≤ 200", () => {
+    expect(messages(parse({ listings: [listing({ location: "а".repeat(121) })] })))
+      .toEqual([expect.stringMatching(/location длиннее 120/)]);
+    expect(messages(parse({ listings: [listing({ ...POINT, address: "а".repeat(201) })] })))
+      .toEqual([expect.stringMatching(/address длиннее 200/)]);
+  });
+
+  // Таблица сида прошла geo:backfill: у каждого объявления в городе с
+  // геоданными есть точка, и повторный сид их не сотрёт.
+  it("реальные таблицы seed_real/ разбираются, у всех объявлений есть точка", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { parseCsv } = await import("@/lib/csv");
+    const read = (f: string) => parseCsv(readFileSync(`seed_real/${f}`, "utf8"));
+    const res = parseSeedData({ cities: read("cities.csv"), users: read("users.csv"), listings: read("listings.csv") });
+    expect(messages(res)).toEqual([]);
+    if (!res.ok) return;
+    for (const l of res.data.listings) {
+      expect(l.lat).not.toBeNull();
+      expect(l.precision).not.toBe("city");
+      expect(l.address).not.toBeNull();
+    }
+  });
+
+  // Город определяет адрес: точка, которая по геокодеру в другом городе, —
+  // ошибка (ЖК Радуга — Краснодар, а не Яблоновский). Сверку считает
+  // scripts/seed-real.ts движком; здесь — заглушка.
+  it("точка в другом городе, чем city, — ошибка с подсказкой", () => {
+    const yab = city({ slug: "yablonovskiy", name: "Яблоновский", name_locative: "Яблоновском", geo_region: "krasnodar", lat: "44.98", lon: "38.94" });
+    const seen: string[] = [];
+    const cityOfPoint = (l: { city: string; address: string | null }, cities: readonly { slug: string }[]) => {
+      seen.push(`${l.city}:${cities.map((c) => c.slug).join(",")}`);
+      return l.address === "ЖК Радуга" ? "krasnodar" : l.city;
+    };
+    const res = parseSeedData({
+      cities: [geoCity, yab],
+      users: [user()],
+      listings: [
+        listing({ ...POINT, city: "yablonovskiy", address: "ЖК Радуга", location: "ЖК Радуга", precision: "place" }),
+        listing({ ...POINT, title: "Лобзик", city: "yablonovskiy" }),
+      ],
+    }, { cityOfPoint });
+    expect(messages(res)).toEqual([
+      "listings.csv:2 адрес «ЖК Радуга» относится к городу «krasnodar», а city = «yablonovskiy» — город определяет адрес: "
+      + "поставьте city krasnodar или исправьте address, очистите lat и запустите pnpm geo:backfill --csv seed_real/listings.csv",
+    ]);
+    expect(seen).toEqual(["yablonovskiy:krasnodar,yablonovskiy", "yablonovskiy:krasnodar,yablonovskiy"]);
+  });
+
+  it("сверка молчит без точки и когда сказать нечем", () => {
+    const cityOfPoint = () => null;
+    expect(parse({ listings: [listing()] }).ok).toBe(true);
+    expect(parseSeedData({ cities: [geoCity], users: [user()], listings: [listing(POINT)] }, { cityOfPoint }).ok).toBe(true);
+    const never = () => { throw new Error("no point — no check"); };
+    expect(parseSeedData({ cities: [city()], users: [user()], listings: [listing()] }, { cityOfPoint: never }).ok).toBe(true);
+  });
+
+  it("нет новых колонок в шапке — ошибка про шапку", () => {
+    const { address: _a, lat: _lat, lon: _lon, precision: _p, ...old } = listing();
+    expect(messages(parse({ listings: [old] })))
+      .toEqual([expect.stringMatching(/^listings\.csv:1 в шапке нет колонок: address, lat, lon, precision/)]);
   });
 });
 

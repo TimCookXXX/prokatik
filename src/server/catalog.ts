@@ -4,10 +4,13 @@
 import { cache } from "react";
 
 import {
-  and, asc, desc, eq, gte, ilike, inArray, lte, or, sql,
+  and, asc, desc, eq, getTableColumns, gte, ilike, inArray, lte, or, sql,
 } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import { todayStr } from "@/lib/catalog/dates";
+import type { GeoPoint } from "@/lib/geo/point";
+import type { UserPoint } from "@/lib/geo/location";
+import { isApprox } from "@/lib/geo/precision";
 import {
   availability, bookingRequests, categories, cities, listings, users,
 } from "@db/schema";
@@ -16,9 +19,19 @@ export type City = typeof cities.$inferSelect;
 export type Category = typeof categories.$inferSelect;
 export type Listing = typeof listings.$inferSelect;
 
+// Публичная строка объявления — без полного адреса и точки. address может
+// содержать номер дома, а по lat/lon дом находится и без номера; публично
+// видна только подпись location (docs/decisions/0021). Колонки отрезаются в
+// самом select, а не при рендере: что не выбрано, то не уедет ни в HTML, ни в
+// RSC-payload клиентских компонентов. Полные колонки читают только кабинет
+// владельца и actions.
+const { address: _address, lat: _lat, lon: _lon, ...publicColumns } = getTableColumns(listings);
+export const publicListingColumns = publicColumns;
+export type PublicListing = Omit<Listing, "address" | "lat" | "lon">;
+
 export interface ListingPhoto { url: string; width: number; height: number }
 
-export function listingPhotos(listing: Listing): ListingPhoto[] {
+export function listingPhotos(listing: Pick<Listing, "photosJson">): ListingPhoto[] {
   return Array.isArray(listing.photosJson) ? (listing.photosJson as ListingPhoto[]) : [];
 }
 
@@ -52,12 +65,25 @@ export async function getAllCategories(): Promise<Category[]> {
   return getDb().select().from(categories).orderBy(asc(categories.name));
 }
 
-// Активные позиции города, сгруппированные по category_id (прямому, без роллапа).
-export async function getListingCountsByCategory(cityId: string): Promise<Map<string, number>> {
+/**
+ * Города выдачи. Обычно один — город страницы; с точкой «Где» — все активные
+ * города его региона (src/server/city.ts, getCityScope), и выдача, счётчики
+ * дерева и фасеты считаются по всему набору сразу. Один город — `=`, как
+ * раньше, а не `in` из одного элемента.
+ */
+export type CityIds = readonly string[];
+
+function inCities(cityIds: CityIds) {
+  return cityIds.length === 1 ? eq(listings.cityId, cityIds[0]) : inArray(listings.cityId, [...cityIds]);
+}
+
+// Активные позиции городов, сгруппированные по category_id (прямому, без роллапа).
+export async function getListingCountsByCategory(cityIds: CityIds): Promise<Map<string, number>> {
+  if (cityIds.length === 0) return new Map();
   const rows = await getDb()
     .select({ categoryId: listings.categoryId, cnt: sql<number>`count(*)::int` })
     .from(listings)
-    .where(and(eq(listings.cityId, cityId), eq(listings.status, "active")))
+    .where(and(inCities(cityIds), eq(listings.status, "active")))
     .groupBy(listings.categoryId);
   return new Map(rows.map((r) => [r.categoryId, r.cnt]));
 }
@@ -71,6 +97,10 @@ export async function getListingCountsByCategory(cityId: string): Promise<Map<st
 //
 // Дерево ровно два уровня: внуков не строим, потому что маршрут категории
 // (/{city}/{seg}/{sub}) третьего сегмента под них не имеет.
+//
+// С точкой «Где» счётчики региональные, а страница подкатегории живёт по
+// позициям самого города (`own`): ветка, где всё — у соседа, в дерево не
+// попадает, иначе ссылка вела бы на страницу, которая без точки — 404.
 export interface CategoryNode extends Category {
   count: number;
   children: Array<Category & { count: number }>;
@@ -79,6 +109,7 @@ export interface CategoryNode extends Category {
 export function buildCategoryTree(
   cats: Category[],
   direct: Map<string, number>,
+  own: Map<string, number> = direct,
 ): CategoryNode[] {
   const rolled = rollupToRoots(cats, direct);
   return cats
@@ -88,8 +119,8 @@ export function buildCategoryTree(
       count: rolled.get(root.id) ?? 0,
       children: cats
         .filter((c) => c.parentId === root.id)
-        .map((c) => ({ ...c, count: direct.get(c.id) ?? 0 }))
-        .filter((c) => c.count > 0),
+        .filter((c) => (own.get(c.id) ?? 0) > 0)
+        .map((c) => ({ ...c, count: direct.get(c.id) ?? 0 })),
     }))
     .filter((root) => root.count > 0);
 }
@@ -126,7 +157,13 @@ export interface ListingFilters {
   /** Диапазон дат: позиция должна быть свободна во ВСЕ дни включительно. */
   availableFrom?: string;
   availableTo?: string;
-  sort?: "price_asc" | "price_desc" | "new" | "free";
+  /**
+   * Точка «Где» (parseFilters кладёт её только в городе с геоданными):
+   * карточки получают расстояние, а с ней доступна сортировка `near`.
+   */
+  near?: UserPoint;
+  /** Действующая сортировка (parseFilters). `relevance` работает только с ids из индекса поиска. */
+  sort?: "relevance" | "near" | "price_asc" | "price_desc" | "new" | "free";
   page?: number;
   pageSize?: number;
 }
@@ -158,9 +195,39 @@ function filterConditions(f: ListingFilters) {
   return conds;
 }
 
+/**
+ * Расстояние по прямой от точки до объявления, км: тот же гаверсинус, что
+ * haversineKm (lib/geo/point.ts). `least(1, …)` страхует asin от 1.0000000002
+ * из-за округления. Строка без точки (город без геоданных, legacy) — NULL.
+ *
+ * Индекса нет и не нужно: радиуса нет, а выражение считается по строкам,
+ * уже отобранным по городу и статусу. Наружу уходит только число — сама
+ * точка объявления в выборку не попадает (publicListingColumns).
+ */
+export function distanceKm(p: GeoPoint) {
+  return sql<number | null>`case when ${listings.lat} is null then null else
+    2 * 6371 * asin(least(1, sqrt(
+      power(sin(radians(${listings.lat} - ${p.lat}) / 2), 2)
+      + cos(radians(${p.lat})) * cos(radians(${listings.lat})) * power(sin(radians(${listings.lon} - ${p.lon}) / 2), 2)
+    ))) end`;
+}
+
 // Порядок выдачи. «Сначала свободные» считает свободу по выбранному диапазону,
 // а если его нет — по сегодняшнему дню: иначе сортировка спорила бы с фильтром.
-function orderBy(f: ListingFilters, today: string) {
+//
+// «Ближе» — по расстоянию до точки «Где»; объявления без точки идут последними
+// и между собой — по id (его дописывает вызывающий). Без точки сортировки нет:
+// parseFilters её и не выберет, а здесь порядок как у новых.
+//
+// «Подходящие» — порядок id из индекса поиска. Массив уходит ОДНИМ параметром
+// (`sql.param`): драйвер pg передаёт JS-массив как массив Postgres, а голый
+// `${ids}` в шаблоне drizzle развернул бы его в `($1, $2, …)`. Без ids (поиск
+// упал на ILIKE) релевантности нет — порядок как у новых.
+function orderBy(f: ListingFilters, today: string, ids?: readonly string[]) {
+  if (f.sort === "relevance" && ids) {
+    return sql`array_position(${sql.param([...ids])}::text[], ${listings.id})`;
+  }
+  if (f.sort === "near" && f.near) return sql`${distanceKm(f.near.point)} asc nulls last`;
   if (f.sort === "price_asc") return asc(listings.priceDay);
   if (f.sort === "price_desc") return desc(listings.priceDay);
   if (f.sort === "free") {
@@ -171,36 +238,83 @@ function orderBy(f: ListingFilters, today: string) {
   return desc(listings.createdAt);
 }
 
+/**
+ * Расстояние до вещи для подписи (lib/geo/distance.ts). `approx` — хоть одна
+ * из точек не дом: точка «Где» до улицы или места (lp=s|t) или адрес
+ * объявления не до дома (geo_precision ≠ 'house').
+ */
+export interface ListingDistance {
+  km: number;
+  approx: boolean;
+}
+
 // Всё, что карточке в выдаче нужно показать, кроме занятости: её страница
 // грузит отдельно, одним запросом на все карточки сразу.
 export interface ListingWithOwner {
-  listing: Listing;
+  listing: PublicListing;
   ownerName: string | null;
   ownerImage: string | null;
   /** Галочка «проверенный продавец» на плашке владельца. */
   ownerIsVerified: boolean;
   categorySlug: string;
+  /**
+   * Город объявления — для href карточки: с точкой «Где» выдача берёт весь
+   * регион, и вещь из соседнего города живёт по своему адресу, а не по адресу
+   * страницы.
+   */
+  citySlug: string;
   cityName: string;
+  /** null — точки «Где» нет или у объявления нет точки. */
+  distance: ListingDistance | null;
 }
 
 // Поля продавца, города и категории одинаковы во всех выборках карточек —
 // держим их одним объектом, чтобы новая колонка не появилась в трёх запросах
 // из четырёх.
 const CARD_COLUMNS = {
-  listing: listings,
+  listing: publicListingColumns,
   ownerName: users.name,
   ownerImage: users.image,
   ownerIsVerified: users.isVerified,
   categorySlug: categories.slug,
+  citySlug: cities.slug,
   cityName: cities.name,
 } as const;
+
+// Колонки карточки плюс расстояние до точки «Где»; без точки — NULL, чтобы
+// форма строки не зависела от того, есть ли точка.
+function cardColumns(near?: UserPoint) {
+  return {
+    ...CARD_COLUMNS,
+    distanceKm: near ? distanceKm(near.point) : sql<number | null>`null`,
+  };
+}
+
+function listingDistance(
+  km: number | string | null,
+  geoPrecision: PublicListing["geoPrecision"],
+  near: UserPoint | undefined,
+): ListingDistance | null {
+  if (km === null || !near) return null;
+  return { km: Number(km), approx: isApprox(near.precision) || isApprox(geoPrecision) };
+}
+
+function withDistance<T extends { listing: Pick<PublicListing, "geoPrecision">; distanceKm: number | null }>(
+  rows: T[],
+  near?: UserPoint,
+): Array<Omit<T, "distanceKm"> & { distance: ListingDistance | null }> {
+  return rows.map(({ distanceKm: km, ...row }) => ({
+    ...row,
+    distance: listingDistance(km, row.listing.geoPrecision, near),
+  }));
+}
 
 export const DEFAULT_PAGE_SIZE = 24;
 
 // Недавно добавленные активные позиции по городу (для секции на главной).
 export async function getRecentListings(cityId: string, limit = 12): Promise<ListingWithOwner[]> {
-  return getDb()
-    .select(CARD_COLUMNS)
+  const rows = await getDb()
+    .select(cardColumns())
     .from(listings)
     .innerJoin(users, eq(users.id, listings.ownerUserId))
     .innerJoin(categories, eq(categories.id, listings.categoryId))
@@ -208,21 +322,22 @@ export async function getRecentListings(cityId: string, limit = 12): Promise<Lis
     .where(and(eq(listings.cityId, cityId), eq(listings.status, "active")))
     .orderBy(desc(listings.createdAt), asc(listings.id))
     .limit(limit);
+  return withDistance(rows);
 }
 
-// Активные позиции города в наборе категорий, с продавцом для карточки.
+// Активные позиции городов в наборе категорий, с продавцом для карточки.
 export async function getListingsForCategories(
-  cityId: string,
+  cityIds: CityIds,
   categoryIds: string[],
   filters: ListingFilters = {},
 ): Promise<{ items: ListingWithOwner[]; total: number }> {
-  if (categoryIds.length === 0) return { items: [], total: 0 };
+  if (categoryIds.length === 0 || cityIds.length === 0) return { items: [], total: 0 };
   const db = getDb();
   const pageSize = filters.pageSize ?? DEFAULT_PAGE_SIZE;
   const page = Math.max(1, filters.page ?? 1);
 
   const where = and(
-    eq(listings.cityId, cityId),
+    inCities(cityIds),
     eq(listings.status, "active"),
     inArray(listings.categoryId, categoryIds),
     ...filterConditions(filters),
@@ -230,8 +345,8 @@ export async function getListingsForCategories(
 
   const order = orderBy(filters, todayStr());
 
-  const [items, totalRows] = await Promise.all([
-    db.select(CARD_COLUMNS)
+  const [rows, totalRows] = await Promise.all([
+    db.select(cardColumns(filters.near))
       .from(listings)
       .innerJoin(users, eq(users.id, listings.ownerUserId))
       .innerJoin(categories, eq(categories.id, listings.categoryId))
@@ -246,7 +361,7 @@ export async function getListingsForCategories(
       .where(where),
   ]);
 
-  return { items, total: totalRows[0]?.cnt ?? 0 };
+  return { items: withDistance(rows, filters.near), total: totalRows[0]?.cnt ?? 0 };
 }
 
 // Разбивка результатов поиска по категориям и границы цены — для панели
@@ -259,8 +374,18 @@ export interface SearchFacets {
   maxPriceDay: number | null;
 }
 
-// Условие текстового поиска. Пустой запрос условия не даёт вовсе: /search без
-// него работает витриной города, а не пустой страницей.
+/**
+ * Чем запрос сужает выдачу /search.
+ * - `ids` — совпадения из индекса поиска (src/server/search.ts) в порядке
+ *   релевантности. Фильтры, даты, фасеты, счёт и страницы — по-прежнему в SQL,
+ *   поверх этого набора.
+ * - `text` — аварийный путь, когда индекс собрать не удалось: ILIKE по тексту.
+ *   Пустой текст — без условия, весь город: /search без запроса — витрина.
+ */
+export type SearchMatch = { ids: readonly string[] } | { text: string };
+
+// Условие текстового поиска — только для аварийного пути (SearchMatch.text):
+// обычный поиск идёт по индексу. Пустой запрос условия не даёт вовсе.
 //
 // Спецсимволы ILIKE экранируются: без этого `%` в запросе означал «что угодно»,
 // и `/search?q=%` отдавал весь город, выдавая это за результат поиска.
@@ -270,15 +395,25 @@ function textConditions(query: string) {
   return [or(ilike(listings.title, like), ilike(listings.description, like))];
 }
 
+// `inArray`, а не `= ANY(${ids})`: шаблон drizzle развернул бы массив в список.
+function matchConditions(match: SearchMatch) {
+  return "ids" in match ? [inArray(listings.id, [...match.ids])] : textConditions(match.text.trim());
+}
+
+const noMatches = (match: SearchMatch) => "ids" in match && match.ids.length === 0;
+
 export async function getSearchFacets(
-  cityId: string,
-  q: string,
+  cityIds: CityIds,
+  match: SearchMatch,
   filters: ListingFilters = {},
 ): Promise<SearchFacets> {
+  if (noMatches(match) || cityIds.length === 0) {
+    return { countsByCategory: new Map(), minPriceDay: null, maxPriceDay: null };
+  }
   const base = [
-    eq(listings.cityId, cityId),
+    inCities(cityIds),
     eq(listings.status, "active"),
-    ...textConditions(q.trim()),
+    ...matchConditions(match),
   ];
 
   const db = getDb();
@@ -327,33 +462,34 @@ export async function getSearchFacets(
   };
 }
 
-// Выдача города с текстовым поиском: ILIKE по названию и описанию. Пустой
-// запрос — не пустой ответ, а весь город: /search без `q` работает витриной,
-// а запрос лишь сужает её. Отличие от getListingsForCategories ровно в двух
-// вещах: здесь есть текстовое условие, а раздел необязателен.
+// Выдача городов с поиском. Пустой запрос — не пустой ответ, а весь город:
+// /search без `q` работает витриной, а запрос лишь сужает её. Отличие от
+// getListingsForCategories ровно в двух вещах: здесь есть условие запроса
+// (SearchMatch), а раздел необязателен.
 export async function searchListings(
-  cityId: string,
-  q: string,
+  cityIds: CityIds,
+  match: SearchMatch,
   filters: ListingFilters = {},
   /** Сужение по разделу. В каталоге раздел задаёт страница, здесь — фильтр. */
   categoryIds?: string[],
 ): Promise<{ items: ListingWithOwner[]; total: number }> {
+  if (noMatches(match) || cityIds.length === 0) return { items: [], total: 0 };
   const db = getDb();
   const pageSize = filters.pageSize ?? DEFAULT_PAGE_SIZE;
   const page = Math.max(1, filters.page ?? 1);
 
   const where = and(
-    eq(listings.cityId, cityId),
+    inCities(cityIds),
     eq(listings.status, "active"),
-    ...textConditions(q.trim()),
+    ...matchConditions(match),
     ...(categoryIds && categoryIds.length > 0 ? [inArray(listings.categoryId, categoryIds)] : []),
     ...filterConditions(filters),
   );
 
-  const order = orderBy(filters, todayStr());
+  const order = orderBy(filters, todayStr(), "ids" in match ? match.ids : undefined);
 
-  const [items, totalRows] = await Promise.all([
-    db.select(CARD_COLUMNS)
+  const [rows, totalRows] = await Promise.all([
+    db.select(cardColumns(filters.near))
       .from(listings)
       .innerJoin(users, eq(users.id, listings.ownerUserId))
       .innerJoin(categories, eq(categories.id, listings.categoryId))
@@ -368,7 +504,7 @@ export async function searchListings(
       .where(where),
   ]);
 
-  return { items, total: totalRows[0]?.cnt ?? 0 };
+  return { items: withDistance(rows, filters.near), total: totalRows[0]?.cnt ?? 0 };
 }
 
 export interface CategoryStats {
@@ -380,8 +516,9 @@ export interface CategoryStats {
 }
 
 // Статистика для вводного SEO-блока категории — только из данных, без шаблонных простыней.
-export async function getCategoryStats(cityId: string, categoryIds: string[]): Promise<CategoryStats> {
-  if (categoryIds.length === 0) {
+// По тому же набору городов, что и выдача: из неё же границы слайдера цены.
+export async function getCategoryStats(cityIds: CityIds, categoryIds: string[]): Promise<CategoryStats> {
+  if (categoryIds.length === 0 || cityIds.length === 0) {
     return { listingCount: 0, ownerCount: 0, minPriceDay: null, maxPriceDay: null, avgDeposit: null };
   }
   const rows = await getDb()
@@ -394,7 +531,7 @@ export async function getCategoryStats(cityId: string, categoryIds: string[]): P
     })
     .from(listings)
     .where(and(
-      eq(listings.cityId, cityId),
+      inCities(cityIds),
       eq(listings.status, "active"),
       inArray(listings.categoryId, categoryIds),
     ));
@@ -402,15 +539,15 @@ export async function getCategoryStats(cityId: string, categoryIds: string[]): P
 }
 
 // Активные товары продавца — для профиля /u/{id}.
-export async function getActiveListingsByOwner(userId: string): Promise<Listing[]> {
-  return getDb().select().from(listings)
+export async function getActiveListingsByOwner(userId: string): Promise<PublicListing[]> {
+  return getDb().select(publicListingColumns).from(listings)
     .where(and(eq(listings.ownerUserId, userId), eq(listings.status, "active")))
     .orderBy(desc(listings.createdAt));
 }
 
 // Карточка товара резолвится по id (из хвоста URL /{city}/{cat}/{slug}-{id}).
-export async function getActiveListingById(id: string): Promise<Listing | null> {
-  const rows = await getDb().select().from(listings)
+export async function getActiveListingById(id: string): Promise<PublicListing | null> {
+  const rows = await getDb().select(publicListingColumns).from(listings)
     .where(and(eq(listings.id, id), eq(listings.status, "active")))
     .limit(1);
   return rows[0] ?? null;
@@ -487,22 +624,36 @@ export async function getSellerStats(userId: string): Promise<SellerStats> {
   };
 }
 
-// Карточка товара с городом — товары продавца могут быть в разных городах,
-// поэтому citySlug нужен на каждую карточку (для её href).
-export interface OwnerCardListing extends ListingWithOwner {
-  citySlug: string;
-}
+// Карточка товара продавца: его товары бывают в разных городах, и href
+// каждой строится от своего citySlug (он есть у любой карточки).
+export type OwnerCardListing = ListingWithOwner;
 
 // Активные товары продавца в форме карточки — для профиля /u/{id}.
 export async function getActiveListingCardsByOwner(userId: string): Promise<OwnerCardListing[]> {
-  return getDb()
-    .select({ ...CARD_COLUMNS, citySlug: cities.slug })
+  const rows = await getDb()
+    .select(cardColumns())
     .from(listings)
     .innerJoin(users, eq(users.id, listings.ownerUserId))
     .innerJoin(categories, eq(categories.id, listings.categoryId))
     .innerJoin(cities, eq(cities.id, listings.cityId))
     .where(and(eq(listings.ownerUserId, userId), eq(listings.status, "active")))
     .orderBy(desc(listings.createdAt));
+  return withDistance(rows);
+}
+
+/**
+ * Расстояние от точки «Где» до объявления — для OwnerCard на странице
+ * объявления. Считается в SQL, как в выдаче: точка объявления в приложение
+ * не попадает. null — у объявления нет точки.
+ */
+export async function getListingDistance(listingId: string, near: UserPoint): Promise<ListingDistance | null> {
+  const rows = await getDb()
+    .select({ km: distanceKm(near.point), geoPrecision: listings.geoPrecision })
+    .from(listings)
+    .where(eq(listings.id, listingId))
+    .limit(1);
+  const row = rows[0];
+  return row ? listingDistance(row.km, row.geoPrecision, near) : null;
 }
 
 export async function getCategoryById(id: string): Promise<Category | null> {
@@ -534,6 +685,24 @@ export interface AvailabilityRow {
   date: string;
   bookedQty: number;
   blockedQty: number;
+}
+
+/**
+ * Какие из позиций свободны во все дни диапазона — тем же условием, что фильтр
+ * дат в выдаче (freeInRange), одним запросом. Для подсказок «Что» при выбранных
+ * датах: они не должны вести на карточку, где виджет сразу скажет «Занято».
+ */
+export async function getFreeListingIds(
+  listingIds: readonly string[],
+  dateFrom: string,
+  dateTo: string,
+): Promise<Set<string>> {
+  if (listingIds.length === 0) return new Set();
+  const rows = await getDb()
+    .select({ id: listings.id })
+    .from(listings)
+    .where(and(inArray(listings.id, [...listingIds]), freeInRange(dateFrom, dateTo)));
+  return new Set(rows.map((r) => r.id));
 }
 
 // Занятость набора позиций на диапазон дат (для мини-календарей листинга — одним запросом).

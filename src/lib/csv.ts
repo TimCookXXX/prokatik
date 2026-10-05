@@ -95,3 +95,22 @@ export function parseCsv(input: string): CsvRow[] {
     return row;
   });
 }
+
+// Ячейку, где есть разделитель, кавычка или перевод строки, — в кавычки, а
+// кавычку удвоить. Остальные — как есть: таблицу правит человек, и лишние
+// кавычки вокруг каждого слага только мешали бы ему в диффе.
+function quoteCell(value: string): string {
+  return /[",\r\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
+}
+
+/**
+ * Запись CSV по RFC 4180 — обратная parseCsv: `parseCsv(stringifyCsv(rows,
+ * columns))` даёт те же строки. Колонки — в порядке `columns`; ячейка, которой
+ * у строки нет, пишется пустой. Перевод строки — `\n`, в конце файла тоже, как у
+ * таблиц в seed_real/. Пишет её `pnpm geo:backfill --csv`.
+ */
+export function stringifyCsv(rows: CsvRow[], columns: readonly string[]): string {
+  const lines = [columns.map(quoteCell).join(",")];
+  for (const row of rows) lines.push(columns.map((c) => quoteCell(row[c] ?? "")).join(","));
+  return lines.join("\n") + "\n";
+}

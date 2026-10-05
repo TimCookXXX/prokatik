@@ -5,7 +5,7 @@ import { authPanelProps } from "@/lib/auth/panel-props";
 import {
   getAllCategories, getListingCountsByCategory, getRecentListings, rollupToRoots,
 } from "@/server/catalog";
-import { resolveViewerCity } from "@/server/city";
+import { getCitiesGeo, resolveViewerCity } from "@/server/city";
 import { Hero } from "@/components/home/Hero";
 import { CategoryTiles } from "@/components/home/CategoryTiles";
 import { RecentItems } from "@/components/home/RecentItems";
@@ -22,15 +22,16 @@ export const metadata: Metadata = {
 };
 
 export default async function HomePage() {
-  const [session, defaultCity, cats] = await Promise.all([
+  const [session, defaultCity, cats, citiesGeo] = await Promise.all([
     auth(),
     resolveViewerCity(),
     getAllCategories(),
+    getCitiesGeo(),
   ]);
 
   const roots = cats.filter((c) => c.parentId === null);
   const counts = defaultCity
-    ? rollupToRoots(cats, await getListingCountsByCategory(defaultCity.id))
+    ? rollupToRoots(cats, await getListingCountsByCategory([defaultCity.id]))
     : null;
 
   // Восемь последних — ровно два ряда по четыре на десктопе.
@@ -44,6 +45,11 @@ export default async function HomePage() {
         .map((c) => ({ slug: c.slug, name: c.name, vertical: c.vertical }))
     : [];
 
+  // Город поиска в hero — та же запись, что у шапки, с тем же гео-контекстом.
+  const heroCity = defaultCity
+    ? { slug: defaultCity.slug, name: defaultCity.name, geo: citiesGeo.get(defaultCity.slug) ?? null }
+    : undefined;
+
   const user = session?.user;
   const placeHref = user ? "/cabinet/listings/new" : "/login";
 
@@ -54,7 +60,7 @@ export default async function HomePage() {
     // Стопка панелей одной ширины. Контейнер совпадает с шапкой и подвалом,
     // иначе края главной разъезжаются с плавающей панелью над ней.
     <main className="mx-auto flex w-full max-w-[1200px] flex-col gap-6 px-4 pb-4 pt-5">
-      <Hero citySlug={defaultCity?.slug} placeHref={placeHref} authProps={authProps} />
+      <Hero city={heroCity} placeHref={placeHref} authProps={authProps} />
 
       {defaultCity && <CategoryTiles citySlug={defaultCity.slug} categories={chips} />}
 

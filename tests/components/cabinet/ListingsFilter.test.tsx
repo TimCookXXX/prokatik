@@ -31,6 +31,7 @@ const row = (over: Partial<Row> = {}): Row => ({
   quantity: 1,
   pendingRequests: 0,
   publicHref: null,
+  needsAddress: false,
   ...over,
 });
 

@@ -2,23 +2,13 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { DayPicker, type DateRange } from "react-day-picker";
-import { ru } from "react-day-picker/locale";
-import "react-day-picker/style.css";
 import { CalendarDays, X } from "lucide-react";
+import { content } from "@theme/content";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/Popover";
 import { Button } from "@/components/ui/button";
-import { formatDayMonthShort } from "@/lib/catalog/dates";
-
-function fmt(d: Date): string {
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${d.getFullYear()}-${m}-${day}`;
-}
-function parse(s: string): Date {
-  const [y, m, d] = s.split("-").map(Number);
-  return new Date(y!, m! - 1, d!);
-}
+import { shortRangeLabel } from "@/lib/catalog/dates";
+import type { RangePick } from "@/lib/booking/range-pick";
+import { DateRangeCalendar } from "./DateRangeCalendar";
 
 // Фильтр «свободно в эти даты» в шапке выдачи. Календарь без занятости: здесь
 // выбирают период, а свободу в нём считает сервер по всем позициям сразу.
@@ -31,6 +21,7 @@ function parse(s: string): Date {
 export function DateRangeFilter({
   from, to, resetHref, today,
 }: {
+  /** Уже нормализованный диапазон (parseFilters) — тот, что применён к выдаче. */
   from?: string;
   to?: string;
   /** Адрес без дат — готовой строкой: функцию клиенту через границу не передать. */
@@ -50,18 +41,16 @@ export function DateRangeFilter({
     window.addEventListener("scroll", close, { passive: true });
     return () => window.removeEventListener("scroll", close);
   }, [open]);
-  const [range, setRange] = useState<DateRange | undefined>(
-    from && to ? { from: parse(from), to: parse(to) } : undefined,
-  );
+  const [range, setRange] = useState<RangePick | null>(from && to ? { from, to } : null);
 
   const active = Boolean(from && to);
-  const label = active ? `${formatDayMonthShort(from!)} — ${formatDayMonthShort(to!)}` : "Любые даты";
+  const label = active ? shortRangeLabel(from!, to!) : content.search.when.any;
 
   const apply = () => {
-    if (!range?.from || !range?.to) return;
+    if (!range?.to) return;
     const url = new URL(window.location.href);
-    url.searchParams.set("from", fmt(range.from));
-    url.searchParams.set("to", fmt(range.to));
+    url.searchParams.set("from", range.from);
+    url.searchParams.set("to", range.to);
     url.searchParams.delete("page");
     setOpen(false);
     router.push(`${url.pathname}${url.search}` as never);
@@ -72,7 +61,7 @@ export function DateRangeFilter({
       <PopoverTrigger asChild>
         <button
           type="button"
-          className={`inline-flex h-8 items-center gap-2 rounded-sm border px-3 text-sm transition-colors ${
+          className={`inline-flex h-8 items-center gap-2 whitespace-nowrap rounded-sm border px-3 text-sm transition-colors ${
             active
               ? "border-selected bg-selected text-selected-foreground"
               : "border-border bg-background text-muted-foreground hover:text-foreground"
@@ -87,29 +76,23 @@ export function DateRangeFilter({
           * (он писался под карточку брони с известной шириной). У поповера
           * своей ширины нет, и без этого календарь растягивается во всю
           * доступную и рассыпается. */}
-        <div className="rdp-theme w-[19rem]">
-          {/* today явно — см. BookingCalendar: своё «сегодня» DayPicker берёт
-            * из времени браузера, а не с сервера. */}
-          <DayPicker
-            mode="range"
-            locale={ru}
-            selected={range}
-            onSelect={setRange}
-            disabled={{ before: parse(today) }}
-            defaultMonth={range?.from ?? parse(today)}
-            today={parse(today)}
-          />
-        </div>
+        <DateRangeCalendar
+          months={1}
+          autoClose={false}
+          today={today}
+          selected={range}
+          onSelect={setRange}
+          className="w-[19rem]"
+        />
         <div className="mt-3 flex items-center gap-2">
-          <Button type="button" size="sm" className="flex-1" onClick={apply}
-            disabled={!range?.from || !range?.to}>
-            Показать
+          <Button type="button" size="sm" className="flex-1" onClick={apply} disabled={!range?.to}>
+            {content.search.when.show}
           </Button>
           {active && (
             <Button asChild variant="ghost" size="sm">
               <a href={resetHref}>
                 <X className="mr-1 h-4 w-4" aria-hidden="true" />
-                Сбросить
+                {content.search.when.reset}
               </a>
             </Button>
           )}

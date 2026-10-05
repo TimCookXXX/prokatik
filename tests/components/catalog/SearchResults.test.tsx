@@ -13,10 +13,16 @@ vi.mock("@/server/catalog", async (orig) => ({
   getSearchFacets: vi.fn(),
 }));
 
+// Ранжирование идёт по индексу в памяти — здесь он не нужен, важно, что
+// выдача берёт его набор id и порядок.
+vi.mock("@/server/search", () => ({ rankListingIds: vi.fn() }));
+
 import {
   searchListings, getAvailabilityRows, getAllCategories, getSearchFacets,
 } from "@/server/catalog";
+import { rankListingIds } from "@/server/search";
 import { SearchResults } from "@/components/catalog/SearchResults";
+import { addDaysStr, shortRangeLabel, todayStr } from "@/lib/catalog/dates";
 
 const city = { id: "c1", slug: "kazan", name: "Казань" } as never;
 
@@ -47,6 +53,8 @@ beforeEach(() => {
   vi.mocked(getSearchFacets).mockResolvedValue({
     countsByCategory: new Map(), minPriceDay: null, maxPriceDay: null,
   });
+  vi.mocked(rankListingIds).mockReset();
+  vi.mocked(rankListingIds).mockResolvedValue({ ids: [], usedQuery: "", dropped: [] });
 });
 
 describe("SearchResults", () => {
@@ -64,17 +72,33 @@ describe("SearchResults", () => {
   it("asks the database for the whole city when there is no query", async () => {
     await SearchResults({ city, q: "", searchParams: {} });
 
-    expect(searchListings).toHaveBeenCalledWith("c1", "", expect.anything(), undefined);
+    expect(searchListings).toHaveBeenCalledWith(["c1"], { text: "" }, expect.anything(), undefined);
+    expect(rankListingIds).not.toHaveBeenCalled();
   });
 
   // Панель — единственный способ снять фильтр дат, поэтому она обязана быть на
   // месте и тогда, когда выдача пуста.
   it("keeps dates, sorting and view controls on an empty result", async () => {
-    render(await SearchResults({
-      city, q: "", searchParams: { from: "2026-09-10", to: "2026-09-12" },
-    }));
+    // Даты от сегодняшнего дня: прошедший диапазон фильтром больше не считается.
+    const from = addDaysStr(todayStr(), 7);
+    const to = addDaysStr(todayStr(), 9);
+    render(await SearchResults({ city, q: "", searchParams: { from, to } }));
 
-    expect(screen.getByText("10 сен — 12 сен")).toBeInTheDocument();
+    expect(screen.getByText(shortRangeLabel(from, to))).toBeInTheDocument();
+  });
+
+  // Карточки показывают свободу на выбранные дни, а не на сегодня: выдача уже
+  // отфильтрована по ним, и «Занято» из-за сегодняшнего дня было бы ложью.
+  it("loads availability for the selected range", async () => {
+    vi.mocked(searchListings).mockResolvedValue({ items: [item("L1", "Дрель")], total: 1 } as never);
+    const from = addDaysStr(todayStr(), 7);
+    const to = addDaysStr(todayStr(), 20);
+    await SearchResults({ city, q: "", searchParams: { from, to } });
+    expect(getAvailabilityRows).toHaveBeenCalledWith(["L1"], from, to);
+
+    vi.mocked(getAvailabilityRows).mockClear();
+    await SearchResults({ city, q: "", searchParams: {} });
+    expect(getAvailabilityRows).toHaveBeenCalledWith(["L1"], todayStr(), addDaysStr(todayStr(), 6));
   });
 
   it("shows section facets in the sidebar without a query", async () => {
@@ -106,5 +130,131 @@ describe("SearchResults", () => {
     render(await SearchResults({ city, q: "", searchParams: {} }));
 
     expect(screen.getByText(/пока нечего арендовать/)).toBeInTheDocument();
+  });
+
+  it("searches by the ids the index ranked, in its order", async () => {
+    vi.mocked(rankListingIds).mockResolvedValue({ ids: ["2", "1"], usedQuery: "дрель", dropped: [] });
+
+    await SearchResults({ city, q: "дрель", searchParams: { q: "дрель" } });
+
+    expect(rankListingIds).toHaveBeenCalledWith(["c1"], "дрель");
+    expect(searchListings).toHaveBeenCalledWith(
+      ["c1"], { ids: ["2", "1"] }, expect.objectContaining({ sort: "relevance" }), undefined,
+    );
+    expect(getSearchFacets).toHaveBeenCalledWith(["c1"], { ids: ["2", "1"] }, expect.anything());
+  });
+
+  // Меню показывает действующую сортировку, а не сырой параметр: без него
+  // раньше подсвечивался первый пункт («свободные»), хотя порядок был другим.
+  it("shows the effective sort in the menu", async () => {
+    const { unmount } = render(await SearchResults({ city, q: "", searchParams: {} }));
+    expect(screen.getByText("новые")).toBeInTheDocument();
+    unmount();
+
+    vi.mocked(rankListingIds).mockResolvedValue({ ids: ["1"], usedQuery: "дрель", dropped: [] });
+    render(await SearchResults({ city, q: "дрель", searchParams: { q: "дрель" } }));
+    expect(screen.getByText("подходящие")).toBeInTheDocument();
+  });
+
+  it("keeps an explicit sort=new under a query", async () => {
+    vi.mocked(rankListingIds).mockResolvedValue({ ids: ["1"], usedQuery: "дрель", dropped: [] });
+    render(await SearchResults({ city, q: "дрель", searchParams: { q: "дрель", sort: "new" } }));
+
+    expect(screen.getByText("новые")).toBeInTheDocument();
+    expect(searchListings).toHaveBeenCalledWith(
+      ["c1"], { ids: ["1"] }, expect.objectContaining({ sort: "new" }), undefined,
+    );
+  });
+
+  it("tells which part of the query the results are for", async () => {
+    vi.mocked(rankListingIds).mockResolvedValue({
+      ids: ["1"], usedQuery: "перфоратор", dropped: ["зелёный"],
+    });
+    vi.mocked(searchListings).mockResolvedValue({ items: [item("1", "Перфоратор Bosch")], total: 1 });
+
+    render(await SearchResults({
+      city, q: "зелёный перфоратор", searchParams: { q: "зелёный перфоратор" },
+    }));
+
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "По «зелёный перфоратор» ничего — показываем по «перфоратор»",
+    );
+  });
+
+  it("shows no notice when the whole query matched", async () => {
+    vi.mocked(rankListingIds).mockResolvedValue({ ids: ["1"], usedQuery: "дрель", dropped: [] });
+    render(await SearchResults({ city, q: "дрель", searchParams: { q: "дрель" } }));
+
+    expect(screen.queryByText(/показываем по/)).not.toBeInTheDocument();
+  });
+
+  // В запросе одни стоп-слова: искать нечего — показываем город, как без запроса.
+  it("shows the city feed when the query has no searchable words", async () => {
+    vi.mocked(rankListingIds).mockResolvedValue({ ids: null, usedQuery: "прокат", dropped: [] });
+
+    await SearchResults({ city, q: "прокат", searchParams: { q: "прокат" } });
+
+    expect(searchListings).toHaveBeenCalledWith(
+      ["c1"], { text: "" }, expect.objectContaining({ sort: "new" }), undefined,
+    );
+  });
+
+  // Аварийный путь: индекс не собрался — страница жива, поиск идёт ILIKE, а
+  // ошибка уходит в лог.
+  it("falls back to a text search when the index is unavailable", async () => {
+    vi.mocked(rankListingIds).mockRejectedValue(new Error("db down"));
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      render(await SearchResults({ city, q: "дрель", searchParams: { q: "дрель" } }));
+
+      expect(searchListings).toHaveBeenCalledWith(
+        ["c1"], { text: "дрель" }, expect.objectContaining({ sort: "new" }), undefined,
+      );
+      expect(err).toHaveBeenCalled();
+      expect(screen.getByText("новые")).toBeInTheDocument();
+    } finally {
+      err.mockRestore();
+    }
+  });
+
+  // «Где» едет за человеком: «Показать» в фильтрах, страницы и меню сортировки
+  // не теряют ни точку, ни «Ближе».
+  describe("«Где»", () => {
+    const sp = { loc: "p:44.988,38.948", la: "Яблоновский", lp: "t", sort: "near" };
+    const scope = {
+      region: true, near: { point: { lat: 44.988, lon: 38.948 }, label: "Яблоновский", source: "address" as const, precision: "place" as const },
+      cityIds: ["c1", "c2"], nearby: true,
+    };
+    const hiddenField = (name: string) =>
+      document.querySelector<HTMLInputElement>(`input[type="hidden"][name="${name}"]`);
+
+    it("survives the filters form: the point and «Ближе» go as hidden fields", async () => {
+      render(await SearchResults({ city, q: "", searchParams: sp, scope }));
+      expect(hiddenField("loc")).toHaveValue("p:44.988,38.948");
+      expect(hiddenField("la")).toHaveValue("Яблоновский");
+      expect(hiddenField("lp")).toHaveValue("t");
+      expect(hiddenField("sort")).toHaveValue("near");
+    });
+
+    it("searches the whole region, nearest first, and pages keep the point", async () => {
+      vi.mocked(searchListings).mockResolvedValue({ items: [item("1", "Дрель")], total: 60 } as never);
+      render(await SearchResults({ city, q: "", searchParams: sp, scope }));
+      expect(searchListings).toHaveBeenCalledWith(
+        ["c1", "c2"], { text: "" }, expect.objectContaining({ sort: "near", near: expect.anything() }), undefined,
+      );
+      expect(screen.getByText("Ближе")).toBeInTheDocument();
+      const next = new URL(screen.getByRole("link", { name: /Вперёд/ }).getAttribute("href")!, "http://x");
+      expect(Object.fromEntries(next.searchParams)).toMatchObject({ ...sp, page: "2", city: "kazan" });
+    });
+
+    it("without geodata the point does not act and «Ближе» is not offered", async () => {
+      render(await SearchResults({ city, q: "", searchParams: sp }));
+      expect(searchListings).toHaveBeenCalledWith(
+        ["c1"], { text: "" }, expect.objectContaining({ sort: "new", near: undefined }), undefined,
+      );
+      expect(screen.queryByText("Ближе")).toBeNull();
+      // Но и не теряется: в городе с геоданными она снова заработает.
+      expect(hiddenField("loc")).toHaveValue("p:44.988,38.948");
+    });
   });
 });

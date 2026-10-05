@@ -20,6 +20,8 @@
     "db:seed": "tsx --env-file=.env scripts/seed.ts",
     "db:seed:real": "tsx --env-file=.env scripts/seed-real.ts",
     "seed:photos": "tsx --env-file=.env scripts/seed-photos.ts",
+    "geo:import": "tsx --env-file=.env scripts/geo-import.ts",
+    "geo:backfill": "tsx --env-file=.env scripts/geo-backfill.ts",
     "db:studio": "drizzle-kit studio"
   },
   "dependencies": {

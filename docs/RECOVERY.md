@@ -53,15 +53,29 @@ docker compose exec db psql -U app -d restore_test -c "
 
 Ожидание: числа близки к боевым с поправкой на окно до суток с момента дампа.
 
-Полный список таблиц — в `drizzle/schema.ts`. На момент написания их двенадцать:
-`users`, `accounts`, `sessions`, `verification_tokens`, `email_tokens`,
-`uploads`, `cities`, `categories`, `listings`, `availability`,
-`booking_requests`, `events`.
-
-Проверить, что дамп не обрезан и схема цела:
+Геоданные адресов (таблицы `geo_*`) лежат в том же дампе, отдельно их
+восстанавливать не нужно. Какой импорт в них лежит и сколько строк:
 
 ```bash
-# Таблиц должно быть 12 (плюс своя схема drizzle с журналом миграций)
+docker compose exec db psql -U app -d restore_test -c "
+  SELECT region, version, built_at, counts FROM geo_imports;
+  SELECT region, count(*) AS houses FROM geo_houses GROUP BY region;
+"
+```
+
+Ожидание: строка на регион, `houses` совпадает с `counts`. Если таблицы пусты
+(дамп старше первого импорта), адреса возвращаются повторным импортом —
+[DEPLOY.md](DEPLOY.md#геоданные-адреса).
+
+Проверить, что дамп не обрезан и схема цела. Таблиц в `public` должно быть
+столько же, сколько объявлено в схеме, — для дампа той же версии кода (плюс
+своя схема drizzle с журналом миграций):
+
+```bash
+# Сколько таблиц объявлено в схеме (в репозитории)
+grep -c 'pgTable("' drizzle/schema.ts
+
+# Сколько их в восстановленной базе
 docker compose exec db psql -U app -d restore_test -c "
   SELECT count(*) AS tables FROM information_schema.tables
   WHERE table_schema = 'public';

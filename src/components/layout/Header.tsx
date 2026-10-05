@@ -7,12 +7,14 @@ import { auth } from "@/lib/auth";
 import { authPanelProps } from "@/lib/auth/panel-props";
 import { LoginTrigger } from "@/components/auth/LoginTrigger";
 import { getActiveCities } from "@/server/catalog";
+import { getCitiesGeo } from "@/server/city";
 import { UserMenu } from "@/components/auth/UserMenu";
 import { CitySelector } from "./CitySelector";
+import type { SearchCity } from "@/components/search/SearchBar";
 import { HeaderSearch } from "./HeaderSearch";
 
 export async function Header() {
-  const [session, cities] = await Promise.all([auth(), getActiveCities()]);
+  const [session, cities, citiesGeo] = await Promise.all([auth(), getActiveCities(), getCitiesGeo()]);
   const user = session?.user;
   // Аноним входит модалкой, остальные идут прямиком в создание объявления:
   // гейта на ник больше нет.
@@ -25,8 +27,12 @@ export async function Header() {
   // клиентской навигации не перерисовывается — прочитанный здесь адрес протух
   // бы на первом же переходе. Город определяют сами клиентские компоненты: из
   // адреса, а где его там нет — из предпочтения, которое layout положил в
-  // CityPreferenceProvider. Шапке нужен только список активных.
-  const citySlugs = cities.map((c) => c.slug);
+  // CityPreferenceProvider. Шапке нужен только список активных — с гео-контекстом
+  // каждого, потому что поле «Где» тоже узнаёт свой город лишь на клиенте.
+  // Гео-контекст движок геокодера не грузит — это метка из geo_imports.
+  const searchCities: SearchCity[] = cities.map((c) => ({
+    slug: c.slug, name: c.name, geo: citiesGeo.get(c.slug) ?? null,
+  }));
 
   return (
     // Плавающая карточка: сам <header> — прозрачный sticky-контейнер, панель
@@ -61,7 +67,7 @@ export async function Header() {
           </div>
 
           {/* Поиск занимает всё оставшееся место в ряду. */}
-          <HeaderSearch className="min-w-0 flex-1" cities={citySlugs} />
+          <HeaderSearch className="min-w-0 flex-1" cities={searchCities} />
 
           {/* Действия: на мобайле их роль берёт таб-бар — «Сдать», «Профиль»,
            * а переключатель темы живёт в подвале. */}

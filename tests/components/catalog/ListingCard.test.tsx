@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import { describe, it, expect } from "vitest";
 import { ListingCard } from "@/components/catalog/ListingCard";
 import type { AvailabilityMap } from "@/lib/catalog/availability";
+import { content } from "@theme/content";
 
 // Карточка до переделки тестами не покрывалась вовсе. Здесь закреплено то, что
 // решили в дизайн-пакете: три служебные строки и кнопка ушли, вместо них цена
@@ -35,7 +36,9 @@ function card(over: Record<string, unknown> = {}, props: Record<string, unknown>
     ownerImage: null,
     ownerIsVerified: true,
     categorySlug: "elektroinstrumenty",
+    citySlug: "kazan",
     cityName: "Казань",
+    distance: null,
   } as never;
 
   return <ListingCard item={item} citySlug="kazan" availabilityMap={availability}
@@ -97,5 +100,104 @@ describe("ListingCard", () => {
     render(card());
     expect(screen.getByRole("link", { name: /Артём/ }))
       .toHaveAttribute("href", "/u/01ARZ3NDEKTSV4RRFFQ69G5FAV");
+  });
+
+  // Даты выдачи едут в карточку: виджет брони откроется на них.
+  it("ведёт на позицию с переносимыми параметрами выдачи", () => {
+    render(card({}, { hrefQuery: "from=2026-09-10&to=2026-09-12" }));
+    expect(screen.getByRole("link", { name: "Перфоратор Bosch GBH 2-26" })).toHaveAttribute(
+      "href",
+      "/kazan/elektroinstrumenty/perforator-bosch-01ARZ3NDEKTSV4RRFFQ69G5FAW?from=2026-09-10&to=2026-09-12",
+    );
+  });
+
+  it("без параметров ведёт на канонический адрес", () => {
+    render(card());
+    expect(screen.getByRole("link", { name: "Перфоратор Bosch GBH 2-26" })).toHaveAttribute(
+      "href",
+      "/kazan/elektroinstrumenty/perforator-bosch-01ARZ3NDEKTSV4RRFFQ69G5FAW",
+    );
+  });
+
+  // Расстояние до точки «Где» — по прямой, адреса на карточке нет.
+  describe("расстояние", () => {
+    const withDistance = (km: number, approx: boolean, props: Record<string, unknown> = {}) => {
+      const el = card({}, props);
+      return { ...el, props: { ...el.props, item: { ...el.props.item, distance: { km, approx } } } };
+    };
+    const tag = (text: string) => screen.getByText(text);
+
+    it("точное — метрами и км с запятой, с подписью «по прямой»", () => {
+      const { unmount } = render(withDistance(0.34, false));
+      expect(tag("300 м")).toHaveAttribute("title", "по прямой");
+      unmount();
+      render(withDistance(1.23, false));
+      expect(tag("1,2 км")).toHaveAttribute("title", "по прямой");
+    });
+
+    it("приблизительное — с «≈» и целыми км", () => {
+      render(withDistance(2.6, true));
+      expect(tag("≈ 3 км")).toHaveAttribute("title", "по прямой");
+    });
+
+    // На 360 в две колонки контента ≈ 135 px: расстояние заменяет город, а
+    // режется способ получения. С sm — «1,2 км · Город», но город только
+    // целиком: не влез — уходит второй строкой под срез ряда в одну строку.
+    it("ниже sm заменяет город в подвале, с sm стоит рядом с ним", () => {
+      render(withDistance(1.23, false));
+      const distance = screen.getByText("1,2 км");
+      expect(distance).toHaveClass("shrink-0");
+      const city = screen.getByText(/Казань/);
+      expect(city).toHaveClass("hidden", "sm:inline", "whitespace-nowrap");
+      expect(city.parentElement).toBe(distance.parentElement);
+      expect(city.parentElement).toHaveClass("flex-wrap", "h-[1lh]", "overflow-clip", "flex-1");
+      expect(screen.getByText("Самовывоз")).toHaveClass("min-w-0", "truncate");
+    });
+
+    it("в строке списка — так же", () => {
+      render(withDistance(1.23, false, { view: "list" }));
+      expect(screen.getByText("1,2 км")).toHaveClass("shrink-0");
+      const city = screen.getByText(/Казань/);
+      expect(city).toHaveClass("hidden", "sm:inline");
+      expect(city.parentElement).toHaveClass("flex-wrap", "h-[1lh]", "overflow-clip");
+    });
+
+    it("без точки — город на месте, расстояния нет", () => {
+      render(card());
+      expect(screen.getByText("Казань")).not.toHaveClass("hidden");
+      expect(screen.queryByTitle(content.search.distanceTitle)).toBeNull();
+    });
+  });
+
+  // Свобода считается на весь выбранный период — минимум по дням: аренде
+  // нужна одна и та же вещь с первого дня по последний.
+  describe("свобода на выбранные даты", () => {
+    const range = { from: "2026-09-10", to: "2026-09-12" };
+    const badge = () => screen.getByText(/^(Свободно|Занято)$/);
+    const busyOn = (date: string, bookedQty: number): AvailabilityMap =>
+      new Map([[date, { bookedQty, blockedQty: 0 }]]);
+
+    it("зелёная, когда свободно всё во все дни", () => {
+      render(card({}, { ...range, availabilityMap: busyOn("2026-09-20", 3) }));
+      expect(badge()).toHaveTextContent("Свободно");
+      expect(badge()).toHaveClass("text-primary");
+    });
+
+    it("охряная, когда в какой-то из дней занята часть", () => {
+      render(card({}, { ...range, availabilityMap: busyOn("2026-09-12", 1) }));
+      expect(badge()).toHaveTextContent("Свободно");
+      expect(badge()).toHaveClass("text-accent");
+    });
+
+    // Свободно в первый день — ещё не свободно на период.
+    it("«Занято», когда в какой-то из дней не осталось ни одной", () => {
+      render(card({}, { ...range, availabilityMap: busyOn("2026-09-11", 3) }));
+      expect(badge()).toHaveTextContent("Занято");
+    });
+
+    it("без периода смотрит только на день from", () => {
+      render(card({}, { from: "2026-09-10", availabilityMap: busyOn("2026-09-11", 3) }));
+      expect(badge()).toHaveTextContent("Свободно");
+    });
   });
 });

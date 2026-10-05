@@ -8,6 +8,10 @@
 //
 // Уровня ровно два (корень → подкатегория): третьего сегмента у маршрута
 // /{city}/{seg}/{sub} нет, см. buildCategoryTree().
+//
+// К каждой ссылке дописываются переносимые параметры выдачи (carryQuery —
+// даты): переход по разделам их не теряет. Фильтры цены и залога остаются на
+// месте — у другого раздела свои цены.
 
 import Link from "next/link";
 import { ChevronDown, ChevronLeft } from "lucide-react";
@@ -46,22 +50,25 @@ function Row({
 }
 
 export function CategoryTree({
-  tree, citySlug, activeRootSlug, activeSubSlug,
+  tree, citySlug, activeRootSlug, activeSubSlug, carryQuery,
 }: {
   tree: CategoryNode[];
   citySlug: string;
   /** Корень текущей страницы. Без него это витрина города — список разделов. */
   activeRootSlug?: string;
   activeSubSlug?: string;
+  /** Query без «?» (carryParams) — дописывается к каждой ссылке. */
+  carryQuery?: string;
 }) {
   const root = activeRootSlug ? tree.find((r) => r.slug === activeRootSlug) : undefined;
+  const link = (path: string) => (carryQuery ? `${path}?${carryQuery}` : path);
 
   // Витрина города: разделы верхнего уровня, возвращаться некуда.
   if (!root) {
     return (
       <nav aria-label="Категории" className="flex flex-col gap-0.5">
         {tree.map((r) => (
-          <Row key={r.id} href={`/${citySlug}/${r.slug}`} name={r.name} count={r.count} bold />
+          <Row key={r.id} href={link(`/${citySlug}/${r.slug}`)} name={r.name} count={r.count} bold />
         ))}
       </nav>
     );
@@ -74,7 +81,7 @@ export function CategoryTree({
   return (
     <nav aria-label="Категории" className="flex flex-col gap-0.5">
       <Link
-        href={`/${citySlug}` as never}
+        href={link(`/${citySlug}`) as never}
         className="mb-1 inline-flex items-center gap-1 px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
       >
         <ChevronLeft className="h-4 w-4 shrink-0" aria-hidden="true" />
@@ -82,7 +89,7 @@ export function CategoryTree({
       </Link>
 
       <Row
-        href={rootHref}
+        href={link(rootHref)}
         name={root.name}
         count={root.count}
         bold
@@ -94,7 +101,7 @@ export function CategoryTree({
           {visible.map((c) => (
             <Row
               key={c.id}
-              href={`${rootHref}/${c.slug}`}
+              href={link(`${rootHref}/${c.slug}`)}
               name={c.name}
               count={c.count}
               active={c.slug === activeSubSlug}
@@ -114,7 +121,7 @@ export function CategoryTree({
                 {hidden.map((c) => (
                   <Row
                     key={c.id}
-                    href={`${rootHref}/${c.slug}`}
+                    href={link(`${rootHref}/${c.slug}`)}
                     name={c.name}
                     count={c.count}
                     active={c.slug === activeSubSlug}

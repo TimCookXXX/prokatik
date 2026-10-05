@@ -41,6 +41,8 @@ pnpm db:migrate          # применить миграции
 pnpm db:seed             # демо-данные (идемпотентно)
 pnpm db:seed:real        # реальные данные из seed_real/ (идемпотентно)
 pnpm seed:photos         # фотографии сида: обработать и залить в бакет
+pnpm geo:import <file>   # геоданные региона из JSON в таблицы geo_* (--region krasnodar)
+pnpm geo:backfill --csv seed_real/listings.csv | --db   # точки адресов объявлениям без них
 pnpm db:studio           # drizzle studio
 ```
 
@@ -50,6 +52,9 @@ pnpm db:studio           # drizzle studio
 
 Поднять окружение: `docker compose up -d db` → `pnpm db:migrate && pnpm db:seed`
 → `pnpm dev`. Быстрый вход в dev: `GET /api/dev/login` (или `?role=admin`).
+Адреса в dev — `pnpm db:seed:real` (регион и центр городов) и
+`pnpm geo:import sravniprokat/data/geocoder/build/index.krasnodar.json`
+(выгрузка исходного проекта, в git её нет).
 
 ## Архитектурные принципы
 
@@ -123,6 +128,20 @@ pnpm db:studio           # drizzle studio
   экземплярах.
 - **Rate limiter в памяти процесса** — обнуляется рестартом, не переживёт
   масштабирование.
+- **Индекс поиска «Что» в памяти `app`** — один на процесс, не переживёт
+  масштабирование; см. [0022](docs/decisions/0022-search-index-in-app-memory.md).
+- **Геокодер живёт в памяти `app`** — движок региона строится лениво первым
+  запросом к `/api/geo/*` или выбором адреса объявления, страницы его не грузят; после импорта геоданных `app`
+  перезапускают. См. [0021](docs/decisions/0021-own-geocoder-and-listing-coordinates.md).
+- **Импорт и backfill геоданных — только с машины разработчика.**
+  `pnpm geo:import` поднимает Node до гигабайта и больше, `pnpm geo:backfill`
+  строит движок региона в своём процессе; на прод — через SSH-туннель к
+  Postgres ([docs/DEPLOY.md](docs/DEPLOY.md)), не на сервере.
+- **Без геоданных региона адрес — текстом, без расстояния.** В городе с
+  геоданными адрес объявления выбирается только из подсказок, получает точку и
+  сам задаёт город объявления; без них — свободный текст, точки нет. Публично — подпись без номера дома;
+  `address`, `lat`, `lon` публичные чтения не выбирают
+  ([docs/domain.md](docs/domain.md#адрес-получения)).
 - **Даты держит только подтверждённая заявка.** Создание заявки календарь не
   трогает.
 - **Диапазон брони включает обе границы.**

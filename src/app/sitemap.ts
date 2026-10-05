@@ -21,7 +21,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   for (const city of citiesList) {
     out.push({ url: `${base}/${city.slug}`, changeFrequency: "daily", priority: 0.9 });
 
-    const direct = await getListingCountsByCategory(city.id);
+    const direct = await getListingCountsByCategory([city.id]);
     const rootCounts = rollupToRoots(cats, direct);
 
     // Корневые категории — главные SEO-страницы; пустые в sitemap не попадают.

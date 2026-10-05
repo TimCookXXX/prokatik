@@ -1,5 +1,7 @@
-import { describe, it, expect, beforeEach } from "vitest";
-import { checkLimit, MAIL_DAILY_CAP, MAIL_DAILY_KEY, _resetForTests } from "@/lib/rate-limit";
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import {
+  checkLimit, MAIL_DAILY_CAP, MAIL_DAILY_KEY, _resetForTests, _storeSizesForTests,
+} from "@/lib/rate-limit";
 
 beforeEach(() => { _resetForTests(); });
 
@@ -100,5 +102,80 @@ describe("rate limit: существующие виды", () => {
     expect(checkLimit("user-1", "booking")).toEqual({ ok: true });
     const second = checkLimit("user-1", "booking");
     expect(second.ok).toBe(false);
+  });
+});
+
+describe("rate limit: публичные ручки", () => {
+  it("allows 300 suggestion requests a minute per ip and refuses the next", () => {
+    for (let i = 0; i < 300; i++) expect(checkLimit("1.2.3.4", "search")).toEqual({ ok: true });
+    const over = checkLimit("1.2.3.4", "search");
+    expect(over.ok).toBe(false);
+    if (!over.ok) {
+      expect(over.reason).toBe("window");
+      expect(over.retryAfterSec).toBeLessThanOrEqual(60);
+    }
+    expect(checkLimit("5.6.7.8", "search")).toEqual({ ok: true });
+  });
+
+  // Публичный ключ заводится на каждый анонимный IP. В общем хранилище такой
+  // поток вытеснил бы счётчик входа и молча обнулил его — поэтому у публичных
+  // видов своё хранилище.
+  it("a flood of search keys does not evict a login counter", () => {
+    const login = "a@ya.ru|9.9.9.9";
+    for (let i = 0; i < 10; i++) checkLimit(login, "login");
+    expect(checkLimit(login, "login").ok).toBe(false);
+
+    for (let i = 0; i < 30_000; i++) checkLimit(`10.0.${i >> 8}.${i & 255}`, "search");
+
+    expect(checkLimit(login, "login").ok).toBe(false);
+  });
+
+  // Само публичное хранилище ограничено: выжатый ключ, вытесненный потоком
+  // новых, забывается. Память держит потолок, а не число IP за сутки.
+  it("keeps the public store bounded", () => {
+    for (let i = 0; i < 300; i++) checkLimit("1.2.3.4", "search");
+    expect(checkLimit("1.2.3.4", "search").ok).toBe(false);
+
+    for (let i = 0; i < 30_000; i++) checkLimit(`10.0.${i >> 8}.${i & 255}`, "search");
+
+    expect(checkLimit("1.2.3.4", "search")).toEqual({ ok: true });
+  });
+
+  // Просроченные ключи при заполнении чистятся разом, а не по одному на
+  // каждый новый: память освобождается сразу после волны.
+  it("sweeps expired keys once the public store is full", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-10-03T12:00:00Z"));
+      for (let i = 0; i < 20_000; i++) checkLimit(`10.1.${i >> 8}.${i & 255}`, "search");
+      expect(_storeSizesForTests().public).toBe(20_000);
+
+      vi.setSystemTime(new Date("2026-10-03T12:01:30Z"));
+      checkLimit("1.2.3.4", "search");
+
+      expect(_storeSizesForTests().public).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("limits address suggestions as geo: 300 a minute per ip, apart from search", () => {
+    for (let i = 0; i < 300; i++) expect(checkLimit("1.2.3.4", "geo")).toEqual({ ok: true });
+    expect(checkLimit("1.2.3.4", "geo").ok).toBe(false);
+    // Свой счётчик: выжатый geo не трогает подсказки «Что» того же адреса.
+    expect(checkLimit("1.2.3.4", "search")).toEqual({ ok: true });
+    expect(checkLimit("5.6.7.8", "geo")).toEqual({ ok: true });
+  });
+
+  it("geo keys live in the public store: a flood does not evict a login counter", () => {
+    const login = "a@ya.ru|9.9.9.9";
+    for (let i = 0; i < 10; i++) checkLimit(login, "login");
+    const before = _storeSizesForTests().private;
+
+    for (let i = 0; i < 30_000; i++) checkLimit(`10.2.${i >> 8}.${i & 255}`, "geo");
+
+    expect(_storeSizesForTests().private).toBe(before);
+    expect(_storeSizesForTests().public).toBeLessThanOrEqual(20_000);
+    expect(checkLimit(login, "login").ok).toBe(false);
   });
 });

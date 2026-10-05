@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  buildBookingQuery, isSelectionShifted, parseBookingParams, rentalDaysCount,
+  buildBookingQuery, isSelectionShifted, mergeBookingQuery, parseBookingParams, rentalDaysCount,
 } from "@/lib/booking/params";
 
 const TODAY = "2026-07-16";
@@ -37,6 +37,11 @@ describe("parseBookingParams()", () => {
     expect(parseBookingParams({ qty: "99" }, OPTS).qty).toBe(3);
     expect(parseBookingParams({ qty: "0" }, OPTS).qty).toBe(1);
     expect(parseBookingParams({ qty: "-2" }, OPTS).qty).toBe(1);
+  });
+
+  it("несуществующий день — как мусор", () => {
+    const sel = parseBookingParams({ from: "2027-02-30", to: "2027-03-02" }, OPTS);
+    expect(sel.from).toBe(TODAY);
   });
 
   it("мусор в датах и qty — дефолты", () => {
@@ -94,5 +99,34 @@ describe("rentalDaysCount()", () => {
   it("границы включительно", () => {
     expect(rentalDaysCount({ from: "2026-07-20", to: "2026-07-22", qty: 1 })).toBe(3);
     expect(rentalDaysCount({ from: "2026-07-20", to: "2026-07-20", qty: 1 })).toBe(1);
+  });
+});
+
+// Виджет брони пишет адрес через replaceState. Сборка query с нуля стирала бы
+// чужие параметры («Где», метки перехода) из перезагрузки и callbackUrl входа.
+describe("mergeBookingQuery()", () => {
+  const sel = { from: "2026-07-20", to: "2026-07-22", qty: 2 };
+
+  it("заменяет только from/to/qty и оставляет остальное", () => {
+    const qs = mergeBookingQuery("?loc=p:45.035,38.975&from=2026-07-18&to=2026-07-19&utm=x", sel, TODAY);
+    const p = new URLSearchParams(qs);
+    expect(p.get("loc")).toBe("p:45.035,38.975");
+    expect(p.get("utm")).toBe("x");
+    expect(p.get("from")).toBe("2026-07-20");
+    expect(p.get("to")).toBe("2026-07-22");
+    expect(p.get("qty")).toBe("2");
+  });
+
+  it("дефолты убираются из адреса, чужое остаётся", () => {
+    const qs = mergeBookingQuery("from=2026-07-20&to=2026-07-22&qty=2&la=x", { from: TODAY, to: TODAY, qty: 1 }, TODAY);
+    expect(qs).toBe("la=x");
+  });
+
+  it("незаконченный выбор (null) снимает даты и количество", () => {
+    expect(mergeBookingQuery("from=2026-07-20&to=2026-07-22&qty=2&src=geo", null, TODAY)).toBe("src=geo");
+  });
+
+  it("пустой адрес — то же, что buildBookingQuery", () => {
+    expect(mergeBookingQuery("", sel, TODAY)).toBe(buildBookingQuery(sel, TODAY));
   });
 });

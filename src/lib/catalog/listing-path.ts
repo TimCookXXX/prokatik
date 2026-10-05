@@ -17,3 +17,28 @@ export function listingPath(
 ): string {
   return `/${citySlug}/${categorySlug}/${listingSlug}-${listingId}`;
 }
+
+/** Параметры, которые канонический редирект переносит: даты, количество, «Где». */
+export const CANONICAL_CARRY_KEYS = ["from", "to", "qty", "loc", "la", "src", "lp"] as const;
+
+/**
+ * Канонический путь с переносимой частью query — для permanentRedirect со
+ * старого слага карточки или подраздела по неверному пути. Без query редирект
+ * терял бы выбранные даты и «Где». Переносится только белый список: фильтры и
+ * прочий мусор каноническому адресу не нужны. Значения не проверяются — их
+ * разбирает целевая страница (мусор там сводится к «нет фильтра»).
+ * Метаданные canonical по-прежнему строятся без query.
+ */
+export function canonicalHref(
+  path: string,
+  sp: Record<string, string | string[] | undefined>,
+): string {
+  const out = new URLSearchParams();
+  for (const key of CANONICAL_CARRY_KEYS) {
+    const raw = sp[key];
+    const value = Array.isArray(raw) ? raw[0] : raw;
+    if (value) out.set(key, value);
+  }
+  const qs = out.toString();
+  return qs ? `${path}?${qs}` : path;
+}

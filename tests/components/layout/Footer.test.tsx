@@ -10,4 +10,15 @@ describe("<Footer>", () => {
     const link = getByText(content.footer.privacyLink) as HTMLAnchorElement;
     expect(link.getAttribute("href")).toBe("/privacy");
   });
+
+  it("атрибутирует OSM и ГАР и ведёт на /sources", () => {
+    const { container, getByText } = render(<Footer />);
+    const credits = content.footer.dataCredits;
+    const osm = getByText(credits.osm) as HTMLAnchorElement;
+    expect(osm.getAttribute("href")).toBe("https://www.openstreetmap.org/copyright");
+    expect(container.textContent).toContain(credits.gar);
+    expect(container.textContent).toContain("ГАР ФНС России");
+    const sources = getByText(credits.sources) as HTMLAnchorElement;
+    expect(sources.getAttribute("href")).toBe("/sources");
+  });
 });

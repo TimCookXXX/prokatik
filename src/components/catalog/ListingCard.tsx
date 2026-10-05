@@ -4,7 +4,8 @@ import { BadgeCheck, ImageOff } from "lucide-react";
 import { listingPhotos, type Listing, type ListingWithOwner } from "@/server/catalog";
 import { formatDeposit, formatHandoverShort, formatPrice } from "@/lib/catalog/format";
 import { listingPath } from "@/lib/catalog/listing-path";
-import { freeQty, type AvailabilityMap } from "@/lib/catalog/availability";
+import { eachDate, freeQty, type AvailabilityMap } from "@/lib/catalog/availability";
+import { DISTANCE_TITLE, distanceLabel } from "@/lib/geo/distance";
 import { Avatar } from "@/components/ui/Avatar";
 import { cardFrame } from "@/components/ui/card-frame";
 import { HandoverIcon } from "@/components/catalog/HandoverIcon";
@@ -13,7 +14,8 @@ const HANDOVER_ICON = "h-[15px] w-[15px] shrink-0 text-accent";
 
 // Карточка товара на публичных страницах: главная, каталог, поиск, профиль
 // продавца. Фото с плашками занятости и продавца, название, цена с залогом и
-// подвал со способом получения.
+// подвал со способом получения, городом и — при точке «Где» — расстоянием.
+// Адреса на карточке нет: только расстояние по прямой (docs/decisions/0021).
 //
 // У кабинета карточек больше нет: там ListingsList — таблица со статусом,
 // занятостью и счётчиком заявок. Общего кода с ним не осталось, и cardFrame
@@ -32,25 +34,33 @@ export function ListingCard({
   citySlug,
   availabilityMap,
   from,
+  to = from,
+  hrefQuery,
   view = "grid",
 }: {
   item: ListingWithOwner;
   citySlug: string;
   availabilityMap: AvailabilityMap;
+  /** Дни, на которые показывается свобода: выбранный «Когда» или один сегодняшний. */
   from: string;
+  to?: string;
+  /** Переносимые параметры выдачи (даты, «Где»): карточка открывается с ними, и виджет брони — тоже. */
+  hrefQuery?: string;
   /** Списком фото уезжает влево, остальное — в колонку рядом. */
   view?: "grid" | "list";
 }) {
   const list = view === "list";
   const { listing, ownerName, ownerImage, ownerIsVerified, categorySlug, cityName } = item;
   const photo = listingPhotos(listing)[0];
-  const href = listingPath(citySlug, categorySlug, listing.slug, listing.id);
+  const path = listingPath(citySlug, categorySlug, listing.slug, listing.id);
+  const href = hrefQuery ? `${path}?${hrefQuery}` : path;
   const price = formatPrice(listing.priceDay);
-  // Карточке нужен только сегодняшний день: дату «свободно с» она больше не
-  // показывает, а календарь на самой позиции скажет точнее.
-  const free = freeQty(listing.quantity, availabilityMap.get(from));
+  // Сколько единиц свободно на ВСЕ дни периода — минимум по дням: аренде
+  // нужна одна и та же вещь с первого дня по последний. Дату «свободно с»
+  // карточка не показывает, календарь на самой позиции скажет точнее.
+  const free = Math.min(...eachDate(from, to).map((d) => freeQty(listing.quantity, availabilityMap.get(d))));
 
-  // Зелёный — свободно всё, охра — часть занята, серый — сегодня мест нет.
+  // Зелёный — свободно всё, охра — часть занята, серый — мест нет.
   // Красный не берём: занятость это состояние предмета, а не отмена и спор.
   const busy = free <= 0;
   const partial = free > 0 && free < listing.quantity;
@@ -62,6 +72,30 @@ export function ListingCard({
   // --color-muted-fg уже #5F6165 и подобран ровно под контраст 4.5 — шаг ниже
   // увёл бы город под норму.
   const placeTone = "dark:text-muted-foreground/70";
+
+  // Расстояние до точки «Где»: «≈ 3 км», «1,2 км», «350 м». На узкой карточке
+  // (две колонки на 360 — ≈ 135 px контента) оно заменяет город: город виден
+  // на странице объявления и в подписи над выдачей. С sm — «1,2 км · Город»,
+  // если город влезает целиком.
+  const distance = item.distance ? distanceLabel(item.distance.km, item.distance.approx) : null;
+  const distanceTag = distance && (
+    <span title={DISTANCE_TITLE} className="shrink-0 whitespace-nowrap font-medium text-foreground">
+      {distance}
+    </span>
+  );
+  // Расстояние с городом — один ряд, где город виден только целиком. Не влез —
+  // переносится второй строкой, а её срезает высота в одну строку: «Самов…
+  // ≈ 1 км · Яблонов…» с двумя многоточиями читалось хуже, чем без города.
+  // Ряд получает только остаток после способа получения (flex-1 от нуля), так
+  // что тот режется последним. Само расстояние не срезается: overflow-clip, а
+  // не hidden, оставляет ряду минимум по содержимому — ниже sm это ровно
+  // расстояние; с sm в минимум вошёл бы город, поэтому там минимум задан явно.
+  const distancePlace = (lead: React.ReactNode, className: string) => (
+    <span className={`flex h-[1lh] flex-1 flex-wrap gap-x-1 overflow-clip sm:min-w-[4.5rem] ${className}`}>
+      {lead}
+      <span className={`hidden whitespace-nowrap sm:inline ${placeTone}`}>· {cityName}</span>
+    </span>
+  );
 
   return (
     // relative — контейнер для растянутой ссылки названия; group — чтобы фото
@@ -197,7 +231,9 @@ export function ListingCard({
               className={HANDOVER_ICON}
             />
             <span className="min-w-0 truncate">{handover}</span>
-            <span className={`shrink-0 ${placeTone}`}>· {cityName}</span>
+            {distanceTag
+              ? distancePlace(<span className="flex shrink-0 gap-1">·{distanceTag}</span>, "")
+              : <span className={`shrink-0 ${placeTone}`}>· {cityName}</span>}
           </p>
         )}
       </div>
@@ -214,7 +250,12 @@ export function ListingCard({
             className={HANDOVER_ICON}
           />
           <span className="min-w-0 truncate">{handover}</span>
-          <span className={`ml-auto shrink-0 pl-2 ${placeTone}`}>{cityName}</span>
+          {distanceTag ? (
+            // Прижат вправо: расстояние у края, город перед ним.
+            distancePlace(distanceTag, "justify-end")
+          ) : (
+            <span className={`ml-auto shrink-0 pl-2 ${placeTone}`}>{cityName}</span>
+          )}
         </div>
       )}
     </article>

@@ -9,10 +9,13 @@ import { CityForm, type EditableCity } from "@/components/admin/CityForm";
  * отдельная страница ради трёх полей была бы дороже, чем сама правка. */
 export function CityRow({
   city,
+  geoRegions,
   meta,
   toggle,
 }: {
   city: EditableCity & { slug: string; isActive: boolean };
+  /** Загруженные регионы геоданных — для формы правки. */
+  geoRegions: readonly string[];
   /** Готовая подпись под названием: слаг, регион, число объявлений. */
   meta: string;
   /** Забинженный adminSetCityActive — server action приходит сверху. */
@@ -23,7 +26,7 @@ export function CityRow({
   return (
     <li className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-card px-4 py-3">
       {editing ? (
-        <CityForm city={city} onDone={() => setEditing(false)} />
+        <CityForm city={city} geoRegions={geoRegions} onDone={() => setEditing(false)} />
       ) : (
         <>
           <div>

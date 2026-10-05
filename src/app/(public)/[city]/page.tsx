@@ -7,8 +7,10 @@ import {
 } from "@/server/catalog";
 import { Breadcrumbs } from "@/components/catalog/Breadcrumbs";
 import { CategoryListing, type CategorySearchParams } from "@/components/catalog/CategoryListing";
+import { content } from "@theme/content";
 import { siteConfig } from "@/lib/site-config";
 import { headingCity, proseCity } from "@/lib/catalog/city-locative";
+import { getCityScope } from "@/server/city";
 
 export const dynamic = "force-dynamic";
 
@@ -36,17 +38,24 @@ export default async function CityPage({ params, searchParams }: Props) {
   // Счётчики категорий грузит само дерево внутри CategoryListing — здесь нужен
   // только полный список id для выдачи «всё в городе».
   const allCategoryIds = (await getAllCategories()).map((c) => c.id);
+  const sp = await searchParams;
+  // С точкой «Где» выдача — по всем городам региона (getCityScope).
+  const scope = await getCityScope(city, sp);
 
   return (
     <main className="mx-auto w-full max-w-[1200px] px-4 py-6">
       <Breadcrumbs items={[{ label: "Главная", href: "/" }, { label: city.name }]} />
       <h1 className="mb-4 mt-3 font-display text-2xl font-bold">Всё для аренды {headingCity(city)}</h1>
+      {scope.nearby && (
+        <p className="-mt-2 mb-4 text-sm text-muted-foreground">{content.search.nearby(city.name)}</p>
+      )}
       <CategoryListing
         city={city}
         categoryIds={allCategoryIds}
         basePath={`/${city.slug}`}
         activeLabel="Все категории"
-        searchParams={await searchParams}
+        searchParams={sp}
+        scope={scope}
       />
     </main>
   );

@@ -158,6 +158,15 @@
     .hoverable[data-selected]:hover { background-image: none; }
   }
 
+  /* Активная строка списка подсказок. Комбобокс ведёт курсор через
+   * aria-activedescendant: у опций нет ни настоящего фокуса, ни (со стрелок)
+   * наведения, поэтому .hoverable их не красит. Цвет — та же накладка, что у
+   * наведения: курсор по смыслу ближе к «под пальцем», чем к охряному
+   * «выбрано». Мышь двигает тот же курсор, так что вид у неё один. */
+  [role="option"][data-active="true"] {
+    background-image: linear-gradient(var(--color-hover), var(--color-hover));
+  }
+
   /* Парящая стеклянная пилюля хедера: полупрозрачный фон размывает контент под
    * собой (backdrop-filter), хайлайт-бордер и мягкая тень дают эффект «парения».
    * Все значения — из токенов (--glass-*), тема переключается автоматически. */
@@ -705,6 +714,10 @@
 .rdp-theme .rdp-month_grid { width: 100%; table-layout: fixed; }
 .rdp-theme .rdp-day { width: auto; }
 .rdp-theme .rdp-day_button { width: 100%; }
+/* Два месяца рядом (поле «Когда» в шапке): месяцы делят ширину поровну, а не
+ * переносятся друг под друга, как вышло бы с width: 100% у каждого. */
+.rdp-theme.rdp-pair .rdp-months { flex-wrap: nowrap; gap: 1.5rem; }
+.rdp-theme.rdp-pair .rdp-month { flex: 1 1 0; min-width: 0; width: auto; }
 /* Шапка: месяц по центру, стрелки по краям (nav на всю ширину, space-between). */
 .rdp-theme .rdp-nav {
   inset-inline-start: 0;

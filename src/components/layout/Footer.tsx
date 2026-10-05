@@ -3,7 +3,11 @@ import { content } from "@theme/content";
 import { Logo } from "@/components/brand/Logo";
 import { ThemeSegmented } from "@/components/providers/ThemeSegmented";
 
+const creditLink =
+  "underline decoration-dotted underline-offset-2 transition-colors hover:text-accent";
+
 export function Footer() {
+  const credits = content.footer.dataCredits;
   return (
     <footer data-site-footer className="mx-auto mt-10 w-full max-w-[1200px] px-4 pb-6">
       <div className="surface p-6 sm:p-8">
@@ -40,9 +44,29 @@ export function Footer() {
         {/* Переключатель темы — в правом нижнем углу. Тот же, что в меню
          * пользователя; здесь он для анонима, у которого меню нет. */}
         <div className="mt-9 flex items-end justify-between gap-4">
-          <p className="text-xs text-muted-foreground">
-            {content.copyright} · {content.footer.disclaimer}
-          </p>
+          <div className="flex min-w-0 flex-col gap-1.5 text-xs text-muted-foreground">
+            <p>
+              {content.copyright} · {content.footer.disclaimer}
+            </p>
+            {/* Атрибуция данных геокодера: ODbL требует видимую ссылку на
+             * условия OSM, подробности и предложение базы — на /sources. */}
+            <p>
+              <a
+                href={credits.osmHref}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={creditLink}
+              >
+                {credits.osm}
+              </a>
+              {" · "}
+              {credits.gar}
+              {" · "}
+              <Link href="/sources" className={creditLink}>
+                {credits.sources}
+              </Link>
+            </p>
+          </div>
           <span className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
             {content.footer.themeLabel}
             <ThemeSegmented />

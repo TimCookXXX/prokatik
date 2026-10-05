@@ -1,6 +1,7 @@
 import { render } from "@testing-library/react";
 import { describe, it, expect } from "vitest";
 import { ListingFilters } from "@/components/catalog/ListingFilters";
+import { carryParams } from "@/lib/catalog/filters";
 
 const radio = (value: string) =>
   document.querySelector<HTMLInputElement>(`input[name="deposit"][value="${value}"]`)!;
@@ -35,12 +36,16 @@ describe("ListingFilters", () => {
   // Вид, даты и сортировка живут в верхней панели, полей у формы не имеют, и
   // без скрытых копий сабмит «Показать» возвращал список в сетку и терял
   // выбранный диапазон дат.
+  //
+  // Даты приходят из carryParams, как их собирают выдачи: нормализованными —
+  // форма отправляет те же даты, что применены, а не сырой query.
   it("переносит состояние верхней панели скрытыми полями", () => {
+    const carry = carryParams({ from: "2026-08-25", to: "2026-09-04" }, { today: "2026-08-29" });
     render(
       <ListingFilters
         basePath="/kazan/tools"
         state={{ deposit: "money" }}
-        hidden={{ view: "list", from: "2026-08-29", to: "2026-09-04", sort: "price_asc" }}
+        hidden={{ ...Object.fromEntries(carry), view: "list", sort: "price_asc" }}
       />,
     );
     const hiddenField = (name: string) =>
@@ -52,9 +57,33 @@ describe("ListingFilters", () => {
     expect(hiddenField("sort")).toHaveValue("price_asc");
   });
 
+  // «Где» — тоже состояние верхней панели: без скрытых копий «Показать» в
+  // фильтрах цены терял бы точку, а с ней расстояния и «Ближе».
+  it("переносит точку «Где» и «Ближе»", () => {
+    const carry = carryParams({ loc: "p:44.98812,38.94811", la: "Яблоновский", lp: "t", src: "x" });
+    render(
+      <ListingFilters
+        basePath="/krasnodar/tools"
+        state={{}}
+        hidden={{ ...Object.fromEntries(carry), sort: "near" }}
+      />,
+    );
+    const hiddenField = (name: string) =>
+      document.querySelector<HTMLInputElement>(`input[type="hidden"][name="${name}"]`);
+
+    // Точка — кодеком: три знака, мусор в src отброшен.
+    expect(hiddenField("loc")).toHaveValue("p:44.988,38.948");
+    expect(hiddenField("la")).toHaveValue("Яблоновский");
+    expect(hiddenField("lp")).toHaveValue("t");
+    expect(hiddenField("src")).toBeNull();
+    expect(hiddenField("sort")).toHaveValue("near");
+  });
+
   // Пустые значения полями не становятся: иначе адрес обрастал бы `view=&from=`.
+  // Половинчатые даты carryParams не переносит вовсе.
   it("не создаёт полей для незаданных параметров", () => {
-    render(<ListingFilters basePath="/kazan/tools" state={{}} hidden={{ view: "", from: "" }} />);
+    const carry = carryParams({ from: "2026-09-01" }, { today: "2026-08-29" });
+    render(<ListingFilters basePath="/kazan/tools" state={{}} hidden={{ ...Object.fromEntries(carry), view: "" }} />);
     expect(document.querySelectorAll('input[type="hidden"]')).toHaveLength(0);
   });
 

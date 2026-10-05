@@ -4,21 +4,23 @@
 // Выбор синхронизируется в URL query (history.replaceState, без перезагрузки),
 // поэтому переживает OAuth-redirect: LoginDialog отправляет провайдеру
 // callbackUrl = текущий path+query, и после входа пользователь возвращается
-// на тот же шаг с теми же датами.
+// на тот же шаг с теми же датами. В query меняются только from/to/qty: чужие
+// параметры («Где», метки перехода) остаются и в адресе, и в callbackUrl.
 //
 // Кнопка ведёт в форму заявки (анонима — сперва в окно входа), а у владельца её
 // нет вовсе: свою вещь бронировать нельзя, createBookingRequest отвечает
 // own_listing.
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { LoginDialog } from "@/components/auth/LoginDialog";
 import type { AuthPanelProps } from "@/lib/auth/panel-props";
 import { BookingFormDialog } from "@/components/booking/BookingFormDialog";
 import { BookingCalendar } from "@/components/booking/BookingCalendar";
 import {
-  buildBookingQuery, rentalDaysCount, type BookingSelection,
+  buildBookingQuery, mergeBookingQuery, rentalDaysCount, type BookingSelection,
 } from "@/lib/booking/params";
+import { pickRange } from "@/lib/booking/range-pick";
 import { unavailableDates, type DayLoad } from "@/lib/catalog/availability";
 import { field } from "@/components/ui/field";
 import { formatDayMonth } from "@/lib/catalog/dates";
@@ -50,7 +52,6 @@ export interface BookingWidgetProps {
   handoverDelivery: boolean;
   sellerName: string;
   sellerHref: string;
-  sellerLocation: string | null;
   isAuthed: boolean;
   /** Своё объявление — бронировать нечего. */
   isOwn: boolean;
@@ -69,29 +70,42 @@ export function BookingWidget(props: BookingWidgetProps) {
   const hasComplete = Boolean(sel.from && sel.to);
 
   // Дефолтная дата ведёт себя как «Забрать»: первый клик расширяет её в диапазон.
-  // Дальше — обычный цикл: клик → новый «Забрать», ещё клик → «Вернуть».
+  // Дальше — обычный цикл pickRange, общий с полем «Когда» в поиске:
+  // клик → новый «Забрать», ещё клик → «Вернуть».
   const [touched, setTouched] = useState(false);
   const onDayPick = (day: string) => {
     setSel((cur) => {
-      const extend = () => {
-        const [a, b] = day < cur.from ? [day, cur.from] : [cur.from, day];
-        return { ...cur, from: a, to: b };
-      };
-      if (!touched) return extend();
-      // Нет выбора или диапазон завершён → начинаем новый выбор с этой даты.
-      if (!cur.from || cur.to) return { ...cur, from: day, to: "" };
-      // Выбран только «Забрать» → эта дата закрывает диапазон.
-      return extend();
+      const next = pickRange(touched ? cur : { from: cur.from, to: null }, day);
+      return { ...cur, from: next.from, to: next.to ?? "" };
     });
     if (!touched) setTouched(true);
   };
 
-  const query = hasComplete ? buildBookingQuery(sel, props.today) : "";
-  const callbackUrl = query ? `${props.pathname}?${query}` : props.pathname;
-
+  // Адрес страницы с текущим выбором. Собирается из живого location.search, а
+  // не с нуля: виджет не знает чужих параметров и не должен их стирать.
+  const selectionHref = () => {
+    const qs = mergeBookingQuery(window.location.search, hasComplete ? sel : null, props.today);
+    return qs ? `${props.pathname}?${qs}` : props.pathname;
+  };
+  const selectionKey = hasComplete ? buildBookingQuery(sel, props.today) : "";
+  // Свой стартовый выбор (первый свободный день, когда сегодня занято) виджет
+  // в адрес не пишет: from/to адреса панель поиска показывает как даты
+  // «Когда» и уносит в следующий поиск, а их никто не выбирал. Адрес меняется,
+  // как только выбор сдвинулся, — или сразу, если даты в нём уже были (тогда
+  // это их нормализация). До входа выбор доезжает через callbackUrl.
+  // Зависимость — ключ выбора, а не sel: selectionHref читает sel, и ключ
+  // описывает его целиком (дефолты опущены так же, как в адресе).
+  const initialKey = useRef(selectionKey);
+  const moved = useRef(false);
   useEffect(() => {
-    window.history.replaceState(null, "", callbackUrl);
-  }, [callbackUrl]);
+    if (selectionKey !== initialKey.current) moved.current = true;
+    const query = new URLSearchParams(window.location.search);
+    if (!moved.current && !query.has("from") && !query.has("to")) return;
+    window.history.replaceState(null, "", selectionHref());
+  }, [selectionKey]);
+
+  // callbackUrl входа — снимок адреса в момент нажатия «Забронировать».
+  const [callbackUrl, setCallbackUrl] = useState(props.pathname);
 
   const days = hasComplete ? rentalDaysCount(sel) : 0;
   const estimate = useMemo(() => {
@@ -110,8 +124,12 @@ export function BookingWidget(props: BookingWidgetProps) {
 
   const onBook = () => {
     if (bookDisabled) return;
-    if (props.isAuthed) setFormOpen(true);
-    else setLoginOpen(true);
+    if (props.isAuthed) {
+      setFormOpen(true);
+    } else {
+      setCallbackUrl(selectionHref());
+      setLoginOpen(true);
+    }
   };
 
   // Место кнопки: владельцу мутация ответит own_listing, поэтому кнопки у него

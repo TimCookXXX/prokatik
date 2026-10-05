@@ -5,7 +5,9 @@
 // Запуск: pnpm db:seed:real (нужен DATABASE_URL в .env, миграции применены).
 // Ни исходников фотографий, ни доступа к бакету не требует: адреса и размеры
 // берутся из seed_real/photos.json, который пишет pnpm seed:photos. Поэтому
-// скрипт одинаково работает и локально, и на сервере.
+// скрипт одинаково работает и локально, и на сервере — кроме сверки города
+// объявления с его точкой: она строит движок геокодера и идёт только вне
+// прода (cityOfPointCheck).
 //
 // Демо-сид scripts/seed.ts ему не нужен и не мешает: дерево категорий оба
 // заводят через scripts/seed-categories.ts, и каждый поднимается в одиночку.
@@ -20,7 +22,10 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { Pool } from "pg";
 import { users, cities, listings } from "../drizzle/schema";
-import type { SeedData } from "../src/lib/seed/rows";
+import type { SeedCityOfPoint, SeedData } from "../src/lib/seed/rows";
+import { createGeocoder, type Geocoder } from "../src/lib/geocoder";
+import { listingCityOf, storedAddressHit } from "../src/lib/geo/address";
+import { loadGeoIndexFromDb } from "../src/server/geocoder-index";
 import { categoryPath } from "../src/lib/seed/categories";
 import { missingFromManifest, type SeedPhotoManifest } from "../src/lib/seed/photos";
 import { newId } from "../src/lib/id";
@@ -89,13 +94,16 @@ async function writeAll(db: SeedDb, data: SeedData, photos: Map<string, Photo>):
 
   const cityIds = new Map<string, string>();
   for (const city of data.cities) {
-    // lat/lon пишутся только заполненными: пустая ячейка означает «не знаю», а
-    // не «обнули». Иначе координаты, проставленные руками, стирались бы каждым
-    // прогоном. isActive не трогаем вовсе — отключение города решение админа.
+    // lat/lon и geo_region пишутся только заполненными: пустая ячейка означает
+    // «не знаю», а не «обнули». Иначе координаты и регион, проставленные в
+    // админке, стирались бы каждым прогоном. Обратная сторона: регион,
+    // выключенный в админке аварийно, заполненная ячейка вернёт. isActive не
+    // трогаем вовсе — отключение города решение админа.
     const values = {
       name: city.name, nameLocative: city.nameLocative, region: city.region,
       ...(city.lat === null ? {} : { lat: city.lat }),
       ...(city.lon === null ? {} : { lon: city.lon }),
+      ...(city.geoRegion === null ? {} : { geoRegion: city.geoRegion }),
     };
     const found = await db.select().from(cities).where(eq(cities.slug, city.slug)).limit(1);
     if (found.length > 0) {
@@ -143,6 +151,8 @@ async function writeAll(db: SeedDb, data: SeedData, photos: Map<string, Photo>):
     }
   }
 
+  const cityNames = new Map(data.cities.map((c) => [c.slug, c.name]));
+
   let photoCount = 0;
   let created = 0;
   let updated = 0;
@@ -158,7 +168,15 @@ async function writeAll(db: SeedDb, data: SeedData, photos: Map<string, Photo>):
       categoryId: categoryIds.get(categoryPath(listing.categoryRoot, listing.categoryChild))!,
       title: listing.title,
       description: listing.description,
+      // Адрес и точку ищет pnpm geo:backfill --csv, сид их только переносит —
+      // и сравнивает в differs() наравне с прочими полями. Пустой адрес бывает
+      // лишь в городе без геоданных: тогда он — подпись или сам город, как у
+      // формы, где адрес такого города вводится текстом.
       location: listing.location,
+      address: listing.address ?? listing.location ?? cityNames.get(listing.city)!,
+      lat: listing.lat,
+      lon: listing.lon,
+      geoPrecision: listing.precision,
       priceDay: listing.priceDay,
       depositAmount: listing.depositAmount,
       depositType: listing.depositType,
@@ -221,18 +239,51 @@ async function grantDevPasswords(db: SeedDb, data: SeedData): Promise<void> {
   }
 }
 
+// ------------------------------------------------------- город по точке
+
+/**
+ * Сверка города объявления с точкой: город определяет адрес, как в форме
+ * (listingCityOf по пунктам адреса из геокодера). Движок региона строится в
+ * этом процессе — сотни МБ, поэтому на проде (NODE_ENV=production, сервер с
+ * живым app) сверки нет: таблица приходит туда уже проверенной сидом на машине
+ * разработчика. Нет импорта региона — сверять нечем, строки не трогаются.
+ */
+async function cityOfPointCheck(pool: Pool): Promise<SeedCityOfPoint | undefined> {
+  if (process.env.NODE_ENV === "production") {
+    console.log("Сверка города с точкой пропущена на проде — её делает сид на машине разработчика.");
+    return undefined;
+  }
+  const { rows } = await pool.query<{ region: string }>("select distinct region from geo_imports");
+  const engines = new Map<string, Geocoder>();
+  for (const { region } of rows) {
+    const data = await loadGeoIndexFromDb(pool, region);
+    if (data) engines.set(region, createGeocoder(data));
+  }
+  return (listing, cities) => {
+    const region = cities.find((c) => c.slug === listing.city)?.geoRegion;
+    const g = region ? engines.get(region) : undefined;
+    if (!g || listing.lat === null || listing.lon === null) return null;
+    const point = { lat: listing.lat, lon: listing.lon };
+    const hit = storedAddressHit(g, listing.address, point);
+    const candidates = cities.flatMap((c) => (c.geoRegion === region && c.lat !== null && c.lon !== null
+      ? [{ id: c.slug, name: c.name, nameLocative: c.nameLocative, centre: { lat: c.lat, lon: c.lon } }]
+      : []));
+    return listingCityOf(hit ? g.settlementOf(hit) : null, point, candidates)?.id ?? null;
+  };
+}
+
 // -------------------------------------------------------------------- main
 
 async function main() {
   const url = process.env.DATABASE_URL;
   if (!url) die("DATABASE_URL is required");
 
-  const data = await readSeedData();
-  const photos = resolvePhotos(data, await readManifest());
-
   const pool = new Pool({ connectionString: url });
   const db = drizzle(pool);
   try {
+    const data = await readSeedData({ cityOfPoint: await cityOfPointCheck(pool) });
+    const photos = resolvePhotos(data, await readManifest());
+
     // Одна транзакция на всё: падение на тридцатом объявлении не должно
     // оставлять базу наполовину заполненной.
     const stats = await db.transaction(async (tx) => {

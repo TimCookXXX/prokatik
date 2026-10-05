@@ -120,8 +120,15 @@ export const cities = pgTable("cities", {
   nameLocative: varchar("name_locative", { length: 100 }),
   slug: varchar("slug", { length: 80 }).notNull().unique(),
   region: varchar("region", { length: 100 }),
+  // Центр города: от него ранжируются подсказки адресов, пока человек не
+  // выбрал своей точки. Задаётся вместе с geo_region.
   lat: doublePrecision("lat"),
   lon: doublePrecision("lon"),
+  // Ключ геоданных в geo_* — регион, а не город: город и его пригороды делят
+  // один индекс адресов (krasnodar и yablonovskiy — оба `krasnodar`). NULL —
+  // у города геоданных нет: «Где» не показывается, адрес вводится текстом.
+  // Это же аварийный выключатель геокодера для города.
+  geoRegion: varchar("geo_region", { length: 40 }),
   isActive: boolean("is_active").notNull().default(true),
 });
 
@@ -139,6 +146,10 @@ export const categories = pgTable("categories", {
 
 export const depositType = pgEnum("deposit_type", ["money", "document", "none"]);
 export const listingStatus = pgEnum("listing_status", ["active", "hidden", "archived"]);
+// Точность точки адреса объявления: дом, до улицы, до пункта (микрорайон,
+// посёлок, ЖК) или точки нет вовсе — город без геоданных или адрес не нашёлся.
+// Значения — GEO_PRECISIONS в src/lib/geo/precision.ts.
+export const listingGeoPrecision = pgEnum("listing_geo_precision", ["house", "street", "place", "city"]);
 
 // Товар принадлежит юзеру напрямую. Город и категория — атрибуты товара.
 // slug читаемый и НЕ уникальный: уникальность URL даёт id в хвосте пути.
@@ -151,7 +162,16 @@ export const listings = pgTable("listings", {
   title: varchar("title", { length: 200 }).notNull(),
   slug: varchar("slug", { length: 80 }).notNull(),
   description: text("description"),
-  location: varchar("location", { length: 120 }),   // район/ориентир выдачи, опц.
+  // Адрес получения. address — полная подпись, выбранная владельцем (может
+  // быть с номером дома), её видит только он сам в форме. location — публичная
+  // подпись без номера дома: её показывает страница объявления. Точку и
+  // address публичные чтения не выбирают вовсе (publicListingColumns в
+  // src/server/catalog.ts). NULL в address — только у строк до backfill.
+  location: varchar("location", { length: 120 }),
+  address: varchar("address", { length: 200 }),
+  lat: doublePrecision("lat"),
+  lon: doublePrecision("lon"),
+  geoPrecision: listingGeoPrecision("geo_precision").notNull().default("city"),
   // Цена одна: аренда посуточная — см. docs/BACKLOG.md о снятых тарифах.
   priceDay: integer("price_day").notNull(),
   depositAmount: integer("deposit_amount"),
@@ -175,6 +195,8 @@ export const listings = pgTable("listings", {
 }, (t) => ({
   cityCategoryStatusIdx: index("listings_city_category_status_idx").on(t.cityId, t.categoryId, t.status),
   ownerIdx: index("listings_owner_idx").on(t.ownerUserId),
+  // Точка — пара, а не половина: расстояние считается только по обеим.
+  pointPair: check("listings_point_pair", sql`(${t.lat} is null) = (${t.lon} is null)`),
 }));
 
 // availability — по строке на (listing, дата). Свободно = quantity - booked - blocked.
@@ -418,4 +440,98 @@ export const chatMessages = pgTable("chat_messages", {
   threadIdx: index("chat_messages_thread_idx").on(t.threadId, t.id),
   // Без него каскад при удалении пользователя пойдёт сиквеншл-сканом.
   senderIdx: index("chat_messages_sender_idx").on(t.senderUserId),
+}));
+
+// ============================== Геоданные ==============================
+// Адреса региона для своего геокодера: OpenStreetMap (© участники OSM, ODbL) и
+// ГАР ФНС (открытые данные). Таблицы — ровно то, что читает загрузчик движка
+// (src/server/geocoder-index.ts), в форме контракта GeoIndexData
+// (src/lib/geocoder/types.ts). Пишет их только `pnpm geo:import`: удаляет
+// строки региона и вставляет новые одной транзакцией.
+//
+// Ключ — регион (cities.geo_region), FK на cities нет: один регион обслуживает
+// несколько городов. FK между самими гео-таблицами тоже нет — регион
+// заменяется целиком, и целостность держит импорт. Индексы составные
+// (region, id): загрузчик читает регион с `order by id`, и с индексом по
+// одному region полмиллиона домов сортировались бы на диске.
+//
+// id мест, улиц и объектов — стабильные ключи выгрузки (p_…, s_…), уникальны в
+// пределах региона.
+
+// Населённые пункты, округа, микрорайоны и СНТ (PlaceKind).
+export const geoPlaces = pgTable("geo_places", {
+  id: text("id").notNull(),
+  region: varchar("region", { length: 40 }).notNull(),
+  kind: varchar("kind", { length: 20 }).notNull(),                          // city|town|village|…|okrug
+  name: varchar("name", { length: 160 }).notNull(),                         // «Яблоновский», «СНТ Кубаночка»
+  aliases: text("aliases").array().notNull(),                               // «пгт Яблоновский», «ЮМР»
+  parentId: text("parent_id"),
+  lat: doublePrecision("lat").notNull(),
+  lon: doublePrecision("lon").notNull(),
+}, (t) => ({
+  pk: primaryKey({ columns: [t.region, t.id] }),
+}));
+
+// Улицы: одна строка — одна улица одного пункта.
+export const geoStreets = pgTable("geo_streets", {
+  id: text("id").notNull(),
+  region: varchar("region", { length: 40 }).notNull(),
+  placeId: text("place_id"),
+  name: varchar("name", { length: 200 }).notNull(),                         // «улица Красная»
+  type: varchar("type", { length: 30 }).notNull(),                          // улица, проспект… ('' — без типа)
+  aliases: text("aliases").array().notNull(),
+  lat: doublePrecision("lat").notNull(),
+  lon: doublePrecision("lon").notNull(),
+  houses: integer("houses").notNull(),                                      // домов в индексе — вес ранжирования
+  // Линия улицы — куски [[lon, lat], …]; NULL — линии в OSM нет.
+  line: jsonb("line").$type<[number, number][][]>(),
+}, (t) => ({
+  pk: primaryKey({ columns: [t.region, t.id] }),
+}));
+
+// Дома. Своего ключа в выгрузке у них нет, поэтому id — identity: он же хранит
+// порядок файла (выгрузка отсортирована по улице и номеру), и загрузчик читает
+// дома в том же порядке, в каком их отдал бы JSON.
+export const geoHouses = pgTable("geo_houses", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  region: varchar("region", { length: 40 }).notNull(),
+  streetId: text("street_id"),                                              // NULL — адрес по пункту
+  placeId: text("place_id"),
+  number: varchar("number", { length: 40 }).notNull(),                      // «21к1», «7Б», «21/1»
+  lat: doublePrecision("lat").notNull(),
+  lon: doublePrecision("lon").notNull(),
+  precision: varchar("precision", { length: 12 }).notNull(),                // AddrPrecision
+  source: varchar("source", { length: 10 }).notNull(),                      // AddrSource
+  postcode: varchar("postcode", { length: 6 }),
+}, (t) => ({
+  regionIdx: index("geo_houses_region_idx").on(t.region, t.id),
+}));
+
+// Объекты, которые вводят вместо адреса: ТЦ, рынки, ЖК, вузы, вокзалы.
+export const geoPois = pgTable("geo_pois", {
+  id: text("id").notNull(),
+  region: varchar("region", { length: 40 }).notNull(),
+  name: varchar("name", { length: 200 }).notNull(),                         // «ТЦ Красная Площадь»
+  kind: varchar("kind", { length: 30 }).notNull(),                          // mall|market|residential_complex…
+  aliases: text("aliases").array().notNull(),
+  placeId: text("place_id"),
+  lat: doublePrecision("lat").notNull(),
+  lon: doublePrecision("lon").notNull(),
+  address: varchar("address", { length: 200 }),                             // «улица Дзержинского, 100»
+}, (t) => ({
+  pk: primaryKey({ columns: [t.region, t.id] }),
+}));
+
+// Импорт региона: какая выгрузка сейчас в таблицах. Строка на регион — импорт
+// заменяет и её. Версия и время сборки — из файла; по ним сервер узнаёт, что
+// данные сменились, и собирает движок заново. built_at с зоной: импорт идёт с
+// машины разработчика, и время без зоны съехало бы на разницу поясов.
+export const geoImports = pgTable("geo_imports", {
+  id: text("id").primaryKey(),                                              // ULID, newId()
+  region: varchar("region", { length: 40 }).notNull(),
+  version: varchar("version", { length: 64 }).notNull(),                    // «osm-2026-09-28+gar-2026-09-28»
+  builtAt: timestamp("built_at", { withTimezone: true }).notNull(),
+  counts: jsonb("counts").$type<Record<string, number>>().notNull(),        // мест, улиц, домов, объектов
+}, (t) => ({
+  regionIdx: index("geo_imports_region_idx").on(t.region, t.id),
 }));

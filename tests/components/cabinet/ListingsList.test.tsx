@@ -23,6 +23,7 @@ const row = (over: Partial<Row> = {}): Row => ({
   quantity: 1,
   pendingRequests: 0,
   publicHref: "/kazan/elektroinstrumenty/perforator-01ARZ3NDEKTSV4RRFFQ69G5FAW",
+  needsAddress: false,
   ...over,
 });
 
@@ -122,6 +123,22 @@ describe("ListingsList", () => {
     expect(screen.getByRole("menuitem", { name: /Смотреть объявление/ })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: /Скрыть/ })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: /В архив/ })).toBeInTheDocument();
+  });
+
+  // Строка без точки в городе с геоданными: покупатели не видят расстояния, а
+  // форма правки не сохранится без выбора адреса. Метка ведёт сразу в правку.
+  it("просит уточнить адрес у строки без точки и ведёт в правку", () => {
+    render(<ListingsList rows={[row({ needsAddress: true })]} />);
+    const links = screen.getAllByRole("link", { name: /Уточните адрес/ });
+    expect(links).toHaveLength(2);
+    for (const link of links) {
+      expect(link).toHaveAttribute("href", "/cabinet/listings/01ARZ3NDEKTSV4RRFFQ69G5FAW?tab=edit");
+    }
+  });
+
+  it("не просит уточнять адрес, когда точка есть", () => {
+    render(<ListingsList rows={[row()]} />);
+    expect(screen.queryByText(/Уточните адрес/)).toBeNull();
   });
 
   it("обе раскладки показывают один и тот же список", () => {
