@@ -79,6 +79,19 @@ describe("buildCategoryTree()", () => {
     expect(tree[0]!.children.map((c) => [c.slug, c.count])).toEqual([["power", 9]]);
   });
 
+  // Корень — не подкатегория: с точкой «Где» его страница живёт и тогда, когда
+  // всё лежит у соседа (200 + noindex, ссылка дерева несёт точку). Поэтому
+  // корень по своему городу не отсеивается — отсеиваются только его дети.
+  it("с региональными счётчиками оставляет корень, который есть только у соседа", () => {
+    const cats = [
+      cat("kids", "Детские товары"),
+      cat("strollers", "Коляски", "kids"),
+    ];
+    const tree = buildCategoryTree(cats, counts({ strollers: 2 }), counts({}));
+    expect(tree.map((r) => [r.slug, r.count])).toEqual([["kids", 2]]);
+    expect(tree[0]!.children).toEqual([]);
+  });
+
   it("пустой вход даёт пустое дерево", () => {
     expect(buildCategoryTree([], new Map())).toEqual([]);
   });

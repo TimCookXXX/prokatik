@@ -17,6 +17,7 @@ import { clientIp } from "@/lib/http/client-ip";
 import { mailTransportAvailable, sendMail } from "@/lib/mail/mailer";
 import { checkLimit } from "@/lib/rate-limit";
 import { getEnv } from "@/lib/env";
+import { siteUrl } from "@/lib/site-config";
 
 export type ActionResult<T = void> =
   | { ok: true; data: T }
@@ -30,7 +31,7 @@ function flowDeps(callbackUrl?: string): FlowDeps {
   return {
     store: drizzleAuthStore(),
     sendMail,
-    baseUrl: env.NEXTAUTH_URL,
+    baseUrl: siteUrl(),
     transportAvailable: mailTransportAvailable(),
     blockedExtra: env.BLOCKED_EMAIL_DOMAINS,
     callbackUrl,

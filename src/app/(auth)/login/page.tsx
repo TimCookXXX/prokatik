@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { auth } from "@/lib/auth";
 import { buildEdgeConfig } from "@/lib/auth/config.edge";
@@ -7,6 +8,14 @@ import { content } from "@theme/content";
 import { AuthPanel } from "@/components/auth/AuthPanel";
 import { mailTransportAvailable } from "@/lib/mail/mailer";
 import { safeCallback } from "@/lib/auth/session";
+
+// Страница входа — служебная: в индекс не идёт, но ссылки с неё робот
+// проходит. Не Disallow в robots.txt: тогда робот не прочитал бы noindex, а
+// Google держал бы голый адрес в индексе по ссылкам с каждой страницы.
+export const metadata: Metadata = {
+  title: "Вход",
+  robots: { index: false, follow: true },
+};
 
 // Тексты ошибок, с которыми сюда редиректят OAuth-роуты и подтверждение почты.
 const ERRORS: Record<string, string> = {

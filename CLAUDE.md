@@ -35,6 +35,7 @@ pnpm test                # vitest
 pnpm exec next typegen   # типы роутов (нужны tsc при typedRoutes)
 pnpm exec tsc --noEmit   # проверка типов
 pnpm check-theme         # проверка обязательных CSS-токенов
+pnpm seo:check <url>     # статусы, h1 до footer, canonical, robots, OG, sitemap живого сайта
 pnpm build:icons         # иконки из theme/brand/*.svg (после правки исходников)
 pnpm db:generate         # миграция из drizzle/schema.ts
 pnpm db:migrate          # применить миграции
@@ -128,6 +129,10 @@ pnpm db:studio           # drizzle studio
   экземплярах.
 - **Rate limiter в памяти процесса** — обнуляется рестартом, не переживёт
   масштабирование.
+- **В публичном каталоге нет `loading.tsx`/Suspense над страницей** — иначе
+  404 и 308 отдаются как 200 с meta refresh; программный переход — через
+  `useRouter` из `nextjs-toploader/app`. См.
+  [0024](docs/decisions/0024-no-loading-boundary-in-public-catalog.md).
 - **Индекс поиска «Что» в памяти `app`** — один на процесс, не переживёт
   масштабирование; см. [0022](docs/decisions/0022-search-index-in-app-memory.md).
 - **Геокодер живёт в памяти `app`** — движок региона строится лениво первым

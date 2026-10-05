@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { canonicalHref, extractListingId, listingPath } from "@/lib/catalog/listing-path";
+import { canonicalHref, categoryPath, extractListingId, listingPath } from "@/lib/catalog/listing-path";
 
 describe("extractListingId", () => {
   it("splits slug and ULID tail", () => {
@@ -18,6 +18,18 @@ describe("listingPath", () => {
   it("builds the canonical path", () => {
     expect(listingPath("kazan", "dreli", "drel-bosch", "01ARZ3NDEKTSV4RRFFQ69G5FAV"))
       .toBe("/kazan/dreli/drel-bosch-01ARZ3NDEKTSV4RRFFQ69G5FAV");
+  });
+});
+
+// Ссылки на раздел — только канонические: подкатегория под своим корнем,
+// прямой /{city}/{sub} живёт лишь редиректом.
+describe("categoryPath", () => {
+  it("корень — /{city}/{root}", () => {
+    expect(categoryPath("kazan", { slug: "instrumenty" })).toBe("/kazan/instrumenty");
+    expect(categoryPath("kazan", { slug: "instrumenty" }, null)).toBe("/kazan/instrumenty");
+  });
+  it("подкатегория — /{city}/{root}/{sub}", () => {
+    expect(categoryPath("kazan", { slug: "dreli" }, { slug: "instrumenty" })).toBe("/kazan/instrumenty/dreli");
   });
 });
 

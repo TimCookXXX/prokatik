@@ -1,11 +1,16 @@
 import type { Metadata } from "next";
 import { content } from "@theme/content";
+import { siteUrl } from "@/lib/site-config";
 
-// Как /privacy: индексируется, в sitemap не входит.
-export const metadata: Metadata = {
-  title: content.sources.title,
-  description: content.sources.intro,
-};
+// Как /privacy: индексируется, в sitemap не входит. Функция, а не объект:
+// адрес сайта читается при запросе, а не при импорте.
+export function generateMetadata(): Metadata {
+  return {
+    title: content.sources.title,
+    description: content.sources.intro,
+    alternates: { canonical: `${siteUrl()}/sources` },
+  };
+}
 
 const link = "underline underline-offset-2 transition-colors hover:text-accent";
 const heading = "mt-8 font-display text-lg font-semibold";

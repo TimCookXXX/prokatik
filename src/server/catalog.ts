@@ -53,17 +53,20 @@ export async function getCityById(id: string): Promise<City | null> {
   return rows[0] ?? null;
 }
 
-export async function getCityBySlug(slug: string): Promise<City | null> {
+// cache(): город и раздел по слагу спрашивают и generateMetadata, и сама
+// страница — в пределах запроса это один запрос к базе.
+export const getCityBySlug = cache(async (slug: string): Promise<City | null> => {
   const rows = await getDb().select().from(cities)
     .where(and(eq(cities.slug, slug), eq(cities.isActive, true)))
     .limit(1);
   return rows[0] ?? null;
-}
+});
 
-// Всё дерево категорий (строк мало — десятки). Сортировка по имени.
-export async function getAllCategories(): Promise<Category[]> {
+// Всё дерево категорий (строк мало — десятки). Сортировка по имени. cache():
+// страница каталога, дерево и метаданные берут один и тот же список.
+export const getAllCategories = cache(async (): Promise<Category[]> => {
   return getDb().select().from(categories).orderBy(asc(categories.name));
-}
+});
 
 /**
  * Города выдачи. Обычно один — город страницы; с точкой «Где» — все активные
@@ -77,8 +80,20 @@ function inCities(cityIds: CityIds) {
   return cityIds.length === 1 ? eq(listings.cityId, cityIds[0]) : inArray(listings.cityId, [...cityIds]);
 }
 
+// Ключ для cache(): React сравнивает аргументы по ссылке, а массив городов
+// каждый вызов собирается заново. Порядок городов на ответ не влияет.
+const idsKey = (ids: readonly string[]) => [...ids].sort().join(",");
+
 // Активные позиции городов, сгруппированные по category_id (прямому, без роллапа).
-export async function getListingCountsByCategory(cityIds: CityIds): Promise<Map<string, number>> {
+// cache(): те же счётчики нужны странице (пустой раздел — 404, пустой город —
+// noindex) и дереву разделов внутри CategoryListing. Map наружу общий — его
+// не мутируют.
+export function getListingCountsByCategory(cityIds: CityIds): Promise<Map<string, number>> {
+  return listingCountsByKey(idsKey(cityIds));
+}
+
+const listingCountsByKey = cache(async (key: string): Promise<Map<string, number>> => {
+  const cityIds = key ? key.split(",") : [];
   if (cityIds.length === 0) return new Map();
   const rows = await getDb()
     .select({ categoryId: listings.categoryId, cnt: sql<number>`count(*)::int` })
@@ -86,7 +101,7 @@ export async function getListingCountsByCategory(cityIds: CityIds): Promise<Map<
     .where(and(inCities(cityIds), eq(listings.status, "active")))
     .groupBy(listings.categoryId);
   return new Map(rows.map((r) => [r.categoryId, r.cnt]));
-}
+});
 
 // Дерево категорий со счётчиками для навигации каталога. Корню достаётся
 // роллап (свои позиции плюс детские), ребёнку — только его собственные.
@@ -100,7 +115,9 @@ export async function getListingCountsByCategory(cityIds: CityIds): Promise<Map<
 //
 // С точкой «Где» счётчики региональные, а страница подкатегории живёт по
 // позициям самого города (`own`): ветка, где всё — у соседа, в дерево не
-// попадает, иначе ссылка вела бы на страницу, которая без точки — 404.
+// попадает, иначе ссылка вела бы на страницу, которая без точки — 404. Корень
+// по `own` не отсеивается: с точкой и ненулевой региональной выдачей его
+// страница живёт (с noindex), а ссылка дерева несёт точку.
 export interface CategoryNode extends Category {
   count: number;
   children: Array<Category & { count: number }>;
@@ -138,10 +155,10 @@ export function rollupToRoots(cats: Category[], direct: Map<string, number>): Ma
 
 // Сегмент после города — категория (слаг категории уникален глобально).
 // Карточка товара живёт на 3-м сегменте и резолвится по id (getActiveListingById).
-export async function getCategoryBySlug(slug: string): Promise<Category | null> {
+export const getCategoryBySlug = cache(async (slug: string): Promise<Category | null> => {
   const rows = await getDb().select().from(categories).where(eq(categories.slug, slug)).limit(1);
   return rows[0] ?? null;
-}
+});
 
 export interface ListingFilters {
   priceMin?: number;
@@ -517,7 +534,14 @@ export interface CategoryStats {
 
 // Статистика для вводного SEO-блока категории — только из данных, без шаблонных простыней.
 // По тому же набору городов, что и выдача: из неё же границы слайдера цены.
-export async function getCategoryStats(cityIds: CityIds, categoryIds: string[]): Promise<CategoryStats> {
+// cache() — по ключу из обоих наборов, как у счётчиков.
+export function getCategoryStats(cityIds: CityIds, categoryIds: string[]): Promise<CategoryStats> {
+  return categoryStatsByKey(idsKey(cityIds), idsKey(categoryIds));
+}
+
+const categoryStatsByKey = cache(async (cityKey: string, categoryKey: string): Promise<CategoryStats> => {
+  const cityIds = cityKey ? cityKey.split(",") : [];
+  const categoryIds = categoryKey ? categoryKey.split(",") : [];
   if (categoryIds.length === 0 || cityIds.length === 0) {
     return { listingCount: 0, ownerCount: 0, minPriceDay: null, maxPriceDay: null, avgDeposit: null };
   }
@@ -536,7 +560,7 @@ export async function getCategoryStats(cityIds: CityIds, categoryIds: string[]):
       inArray(listings.categoryId, categoryIds),
     ));
   return rows[0];
-}
+});
 
 // Активные товары продавца — для профиля /u/{id}.
 export async function getActiveListingsByOwner(userId: string): Promise<PublicListing[]> {

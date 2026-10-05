@@ -1,4 +1,4 @@
-import { getEnv } from "@/lib/env";
+import { siteUrl as getSiteUrl } from "@/lib/site-config";
 
 const INDEXNOW_ENDPOINT = "https://api.indexnow.org/indexnow";
 const INDEXNOW_URLLIST_LIMIT = 10_000;
@@ -12,7 +12,7 @@ export async function pingIndexNow(urls: string[]): Promise<void> {
   if (!key) return;
   if (urls.length === 0) return;
 
-  const siteUrl = getEnv().NEXTAUTH_URL.replace(/\/$/, "");
+  const siteUrl = getSiteUrl();
   const host = new URL(siteUrl).host;
 
   try {

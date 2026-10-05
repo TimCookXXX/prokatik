@@ -1,9 +1,15 @@
 import type { Metadata } from "next";
 import { content } from "@theme/content";
+import { siteUrl } from "@/lib/site-config";
 
-export const metadata: Metadata = {
-  title: "Политика конфиденциальности",
-};
+// Функция, а не объект: адрес сайта читается при запросе, а не при импорте.
+export function generateMetadata(): Metadata {
+  return {
+    title: "Политика конфиденциальности",
+    description: content.privacy.intro,
+    alternates: { canonical: `${siteUrl()}/privacy` },
+  };
+}
 
 export default function PrivacyPage() {
   const p = content.privacy;

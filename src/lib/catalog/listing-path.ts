@@ -18,6 +18,19 @@ export function listingPath(
   return `/${citySlug}/${categorySlug}/${listingSlug}-${listingId}`;
 }
 
+/**
+ * Канонический путь раздела: корень — `/{city}/{root}`, подкатегория —
+ * `/{city}/{root}/{sub}`. `root` — родитель `cat`; без него `cat` считается
+ * корнем. Прямой `/{city}/{sub}` — только редирект, ссылки на него не ставятся.
+ */
+export function categoryPath(
+  citySlug: string,
+  cat: { slug: string },
+  root?: { slug: string } | null,
+): string {
+  return root ? `/${citySlug}/${root.slug}/${cat.slug}` : `/${citySlug}/${cat.slug}`;
+}
+
 /** Параметры, которые канонический редирект переносит: даты, количество, «Где». */
 export const CANONICAL_CARRY_KEYS = ["from", "to", "qty", "loc", "la", "src", "lp"] as const;
 

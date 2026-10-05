@@ -12,7 +12,7 @@ import {
   listingPhotos,
   type Category, type City, type PublicListing, type Seller,
 } from "@/server/catalog";
-import { canonicalHref, extractListingId, listingPath } from "@/lib/catalog/listing-path";
+import { canonicalHref, categoryPath, extractListingId, listingPath } from "@/lib/catalog/listing-path";
 import { carryParams } from "@/lib/catalog/filters";
 import { formatPrice } from "@/lib/catalog/format";
 import { addDaysStr, todayStr } from "@/lib/catalog/dates";
@@ -24,7 +24,7 @@ import { CategoryListing, type CategorySearchParams } from "@/components/catalog
 import { JsonLd } from "@/components/seo/JsonLd";
 import { buildBreadcrumbJsonLd, buildProductJsonLd } from "@/lib/jsonld";
 import { content } from "@theme/content";
-import { siteConfig } from "@/lib/site-config";
+import { siteUrl } from "@/lib/site-config";
 import { headingCity, proseCity } from "@/lib/catalog/city-locative";
 import { getCityScope } from "@/server/city";
 import { buildAvailabilityByListing, freeQty } from "@/lib/catalog/availability";
@@ -50,7 +50,11 @@ interface Props {
 
 type Resolved =
   | { kind: "subcategory"; city: City; root: Category; sub: Category }
-  | { kind: "listing"; city: City; category: Category; listing: PublicListing; seller: Seller };
+  | {
+    kind: "listing"; city: City; category: Category; listing: PublicListing; seller: Seller;
+    /** Корень раздела вещи; null — вещь лежит прямо в корневом разделе. */
+    root: Category | null;
+  };
 
 async function resolve(citySlug: string, seg: string, sub: string): Promise<Resolved | null> {
   const city = await getCityBySlug(citySlug);
@@ -74,7 +78,10 @@ async function resolve(citySlug: string, seg: string, sub: string): Promise<Reso
     // обе ходят сюда. Статус объявления бан гасит на записи, так что до этой
     // строки обычно не доходит; она страхует расхождение статуса с баном.
     if (!isPubliclyVisible({ status: listing.status, ownerBannedAt: seller.bannedAt })) return null;
-    return { kind: "listing", city: listingCity, category, listing, seller };
+    // Корень нужен крошкам и ссылке «Ещё в категории»: канонический адрес
+    // подкатегории — под ним, прямой /{city}/{sub} только редиректит.
+    const root = category.parentId ? await getCategoryById(category.parentId) : null;
+    return { kind: "listing", city: listingCity, category, listing, seller, root };
   }
 
   // Иначе: подкатегория /{city}/{root}/{sub}.
@@ -94,7 +101,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     return {
       title: `Аренда: ${r.sub.name.toLowerCase()} ${headingCity(r.city)}`,
       description: `${r.sub.name} напрокат ${proseCity(r.city)}: цены, залоги, календарь занятости.`,
-      alternates: { canonical: `${siteConfig.url}/${r.city.slug}/${seg}/${sub}` },
+      alternates: { canonical: `${siteUrl()}${categoryPath(r.city.slug, r.sub, r.root)}` },
     };
   }
   const priceBit = ` от ${formatPrice(r.listing.priceDay)}/сутки`;
@@ -104,7 +111,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     // Казань от 500 ₽» — читается как цена города.
     title: `${r.listing.title} — аренда${priceBit} ${proseCity(r.city)}`,
     description: r.listing.description ?? `${r.listing.title} напрокат ${proseCity(r.city)}.`,
-    alternates: { canonical: `${siteConfig.url}${canonical}` },
+    alternates: { canonical: `${siteUrl()}${canonical}` },
   };
 }
 
@@ -146,7 +153,8 @@ async function SubcategoryPage({
   ]);
   if ((ownCounts.get(sub.id) ?? 0) === 0) notFound();
 
-  const categoryBasePath = `/${city.slug}/${root.slug}`;
+  const rootPath = categoryPath(city.slug, root);
+  const subPath = categoryPath(city.slug, sub, root);
   // Крошки несут переносимые параметры (даты, «Где»), JSON-LD — нет: там канон.
   const carry = carryParams(searchParams).toString();
   const withCarry = (path: string) => (carry ? `${path}?${carry}` : path);
@@ -156,13 +164,13 @@ async function SubcategoryPage({
       <JsonLd data={buildBreadcrumbJsonLd([
         { name: "Главная", url: "/" },
         { name: city.name, url: `/${city.slug}` },
-        { name: root.name, url: categoryBasePath },
-        { name: sub.name, url: `${categoryBasePath}/${sub.slug}` },
-      ], siteConfig.url)} />
+        { name: root.name, url: rootPath },
+        { name: sub.name, url: subPath },
+      ], siteUrl())} />
       <Breadcrumbs items={[
         { label: "Главная", href: "/" },
         { label: city.name, href: withCarry(`/${city.slug}`) },
-        { label: root.name, href: withCarry(categoryBasePath) },
+        { label: root.name, href: withCarry(rootPath) },
         { label: sub.name },
       ]} />
       <h1 className="mb-4 mt-3 font-display text-2xl font-bold">
@@ -174,7 +182,7 @@ async function SubcategoryPage({
       <CategoryListing
         city={city}
         categoryIds={[sub.id]}
-        basePath={`${categoryBasePath}/${sub.slug}`}
+        basePath={subPath}
         activeRootSlug={root.slug}
         activeSubSlug={sub.slug}
         activeLabel={sub.name}
@@ -191,7 +199,7 @@ async function ListingPage({
   r: Extract<Resolved, { kind: "listing" }>;
   searchParams: CategorySearchParams & { qty?: string };
 }) {
-  const { city, category, listing, seller } = r;
+  const { city, category, listing, seller, root } = r;
   const photos = listingPhotos(listing);
   const sellerName = seller.name ?? "Продавец";
   const sellerHref = `/u/${seller.id}`;
@@ -245,10 +253,12 @@ async function ListingPage({
     console.error("[events] view_listing insert failed:", e);
   }
 
-  const categoryHref = `/${city.slug}/${category.slug}`;
+  // Ссылки на раздел — канонические: подкатегория под своим корнем.
+  const categoryHref = categoryPath(city.slug, category, root);
   const crumbs = [
     { label: "Главная", href: "/" },
     { label: city.name, href: `/${city.slug}` },
+    ...(root ? [{ label: root.name, href: categoryPath(city.slug, root) }] : []),
     { label: category.name, href: categoryHref },
     { label: listing.title },
   ];
@@ -285,13 +295,13 @@ async function ListingPage({
         description: listing.description,
         priceDay: listing.priceDay,
         photoUrls: photos.map((p) => p.url),
-        url: `${siteConfig.url}${canonicalPath}`,
+        url: `${siteUrl()}${canonicalPath}`,
         sellerName,
         available,
       })} />
       <JsonLd data={buildBreadcrumbJsonLd(
         crumbs.map((c) => ({ name: c.label, url: c.href })),
-        siteConfig.url,
+        siteUrl(),
       )} />
       <Breadcrumbs items={visibleCrumbs} />
       <h1 className="mt-2 font-display text-xl font-bold sm:text-2xl">{listing.title}</h1>

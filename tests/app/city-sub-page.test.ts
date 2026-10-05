@@ -20,13 +20,19 @@ const catalog = vi.hoisted(() => ({
   getCategoryBySlug: vi.fn(),
   getAllCategories: vi.fn(),
   getListingCountsByCategory: vi.fn(),
+  listingPhotos: vi.fn(() => []),
+  getAvailabilityRows: vi.fn(async () => []),
+  getActiveListingCardsByOwner: vi.fn(async () => []),
+  getListingsForCategories: vi.fn(async (): Promise<{ items: unknown[]; total: number }> => ({ items: [], total: 0 })),
+  getListingDistance: vi.fn(),
 }));
 const city = vi.hoisted(() => ({ getCityScope: vi.fn() }));
 
 vi.mock("@/server/catalog", () => catalog);
 vi.mock("@/server/city", () => city);
-vi.mock("@/lib/auth", () => ({ auth: vi.fn() }));
-vi.mock("@/lib/db", () => ({ getDb: vi.fn() }));
+vi.mock("@/lib/auth", () => ({ auth: vi.fn(async () => null) }));
+vi.mock("@/lib/auth/panel-props", () => ({ authPanelProps: () => ({}) }));
+vi.mock("@/lib/db", () => ({ getDb: () => ({ insert: () => ({ values: async () => {} }) }) }));
 vi.mock("@/server/booking", () => ({ getUserPhone: vi.fn() }));
 vi.mock("@/server/chat", () => ({ findThreadByListing: vi.fn() }));
 vi.mock("next/navigation", () => ({
@@ -99,5 +105,90 @@ describe("/{city}/{root}/{sub} with a «Где» point", () => {
     const Sub = el.type as (p: unknown) => Promise<unknown>;
     await expect(Sub(el.props)).rejects.toThrow("NEXT_NOT_FOUND");
     expect(catalog.getListingCountsByCategory).toHaveBeenCalledWith([krasnodar.id]);
+  });
+});
+
+// Вещь в подкатегории: крошки, BreadcrumbList и «Ещё в категории» ведут на
+// канонический /{city}/{root}/{sub}, а не на прямой /{city}/{sub} (тот лишь
+// редиректит). Корень — отдельной крошкой.
+describe("listing in a subcategory", () => {
+  const root = { id: "K1", slug: "foto-i-video", parentId: null, name: "Фото и видео" };
+  const sub = { id: "K2", slug: "ekshn-kamery", parentId: "K1", name: "Экшн-камеры" };
+
+  beforeEach(() => {
+    city.getCityScope.mockResolvedValue({ region: false, near: null, cityIds: [krasnodar.id], nearby: false });
+    catalog.getActiveListingById.mockResolvedValue({
+      id: LISTING_ID, slug: "gopro", title: "GoPro", cityId: krasnodar.id, categoryId: "K2",
+      ownerUserId: "U1", status: "active", priceDay: 700, description: null, quantity: 1,
+      depositType: "none", depositAmount: null, handoverPickup: true, handoverDelivery: false,
+    });
+    catalog.getCategoryById.mockImplementation(async (id: string) => [root, sub].find((c) => c.id === id) ?? null);
+    catalog.getListingsForCategories.mockResolvedValue({
+      items: [{ listing: { id: "01JZZZZZZZZZZZZZZZZZZZZZZZ" }, citySlug: "krasnodar" }], total: 1,
+    });
+  });
+
+  // Рендер ListingPage как функции и обход дерева элементов: так видны пропсы
+  // крошек и JSON-LD без DOM.
+  async function renderListing() {
+    const el = await CitySubPage({
+      params: Promise.resolve({ city: "krasnodar", seg: "ekshn-kamery", sub: `gopro-${LISTING_ID}` }),
+      searchParams: Promise.resolve({}),
+    });
+    const Page = el.type as (p: unknown) => Promise<unknown>;
+    const found: Array<{ type: unknown; props: Record<string, unknown> }> = [];
+    const walk = (n: unknown) => {
+      if (Array.isArray(n)) return n.forEach(walk);
+      if (n && typeof n === "object" && "props" in n) {
+        const node = n as { type: unknown; props: Record<string, unknown> };
+        found.push(node);
+        walk(node.props.children);
+      }
+    };
+    walk(await Page(el.props));
+    return found;
+  }
+
+  it("крошки: Главная / Город / Корень / Подкатегория / Название", async () => {
+    const nodes = await renderListing();
+    const crumbs = nodes.find((n) => Array.isArray(n.props.items))!.props.items as Array<{ label: string; href?: string }>;
+    expect(crumbs).toEqual([
+      { label: "Главная", href: "/" },
+      { label: "Краснодар", href: "/krasnodar" },
+      { label: "Фото и видео", href: "/krasnodar/foto-i-video" },
+      { label: "Экшн-камеры", href: "/krasnodar/foto-i-video/ekshn-kamery" },
+      { label: "GoPro" },
+    ]);
+  });
+
+  it("BreadcrumbList и «Ещё в категории» — на канонический адрес подкатегории", async () => {
+    const nodes = await renderListing();
+    const lists = nodes
+      .map((n) => n.props.data as { "@type"?: string; itemListElement?: Array<{ item?: string }> } | undefined)
+      .filter((d) => d?.["@type"] === "BreadcrumbList");
+    expect(lists).toHaveLength(1);
+    expect(lists[0]!.itemListElement!.map((i) => i.item && new URL(i.item).pathname)).toEqual([
+      "/", "/krasnodar", "/krasnodar/foto-i-video", "/krasnodar/foto-i-video/ekshn-kamery", undefined,
+    ]);
+    const hrefs = nodes.map((n) => n.props.href).filter((h): h is string => typeof h === "string");
+    expect(hrefs).toContain("/krasnodar/foto-i-video/ekshn-kamery");
+    expect(hrefs).not.toContain("/krasnodar/ekshn-kamery");
+  });
+
+  it("вещь прямо в корне — одна крошка раздела", async () => {
+    catalog.getActiveListingById.mockResolvedValue({
+      id: LISTING_ID, slug: "gopro", title: "GoPro", cityId: krasnodar.id, categoryId: "K1",
+      ownerUserId: "U1", status: "active", priceDay: 700, description: null, quantity: 1,
+      depositType: "none", depositAmount: null, handoverPickup: true, handoverDelivery: false,
+    });
+    const el = await CitySubPage({
+      params: Promise.resolve({ city: "krasnodar", seg: "foto-i-video", sub: `gopro-${LISTING_ID}` }),
+      searchParams: Promise.resolve({}),
+    });
+    const Page = el.type as (p: unknown) => Promise<{ props: { children: unknown[] } }>;
+    const tree = await Page(el.props);
+    const crumbs = (tree.props.children as Array<{ props?: { items?: Array<{ label: string }> } }>)
+      .find((c) => c?.props?.items)!.props!.items!;
+    expect(crumbs.map((c) => c.label)).toEqual(["Главная", "Краснодар", "Фото и видео", "GoPro"]);
   });
 });

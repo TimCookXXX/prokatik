@@ -13,6 +13,14 @@ vi.mock("next/image", () => ({
   default: (props: Record<string, unknown>) => React.createElement("img", props),
 }));
 
+// SearchBar и DateRangeFilter переходят через useRouter из nextjs-toploader:
+// он оборачивает роутер Next и запускает полосу загрузки. В тестах обёртка
+// отдаёт роутер из next/navigation — тот, что подменил сам тест.
+vi.mock("nextjs-toploader/app", async () => {
+  const nav = await import("next/navigation");
+  return { useRouter: () => nav.useRouter() };
+});
+
 const env = process.env as Record<string, string | undefined>;
 env.NODE_ENV ??= "test";
 env.DATABASE_URL ??= "postgres://app:test@localhost:5432/app";

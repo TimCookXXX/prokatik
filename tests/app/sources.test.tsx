@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { render } from "@testing-library/react";
-import SourcesPage, { metadata } from "@/app/(public)/sources/page";
+import SourcesPage, { generateMetadata } from "@/app/(public)/sources/page";
 import { content } from "@theme/content";
 
 describe("/sources", () => {
@@ -21,8 +21,10 @@ describe("/sources", () => {
     expect(email.getAttribute("href")).toBe(`mailto:${content.site.contactEmail}`);
   });
 
-  it("индексируется: метаданные без robots", () => {
+  it("индексируется: метаданные без robots, canonical абсолютный", () => {
+    const metadata = generateMetadata();
     expect(metadata.title).toBe(content.sources.title);
     expect(metadata.robots).toBeUndefined();
+    expect(metadata.alternates?.canonical).toBe(`${process.env.NEXTAUTH_URL!.replace(/\/$/, "")}/sources`);
   });
 });

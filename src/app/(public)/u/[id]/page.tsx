@@ -17,7 +17,7 @@ import { ListingCard } from "@/components/catalog/ListingCard";
 import { Metric } from "@/components/ui/Metric";
 import { ProfileCover } from "@/components/account/ProfileCover";
 import { ruPlural } from "@/lib/plural";
-import { siteConfig } from "@/lib/site-config";
+import { siteUrl } from "@/lib/site-config";
 
 export const dynamic = "force-dynamic";
 
@@ -32,7 +32,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   return {
     title: `${name} — объявления`,
     description: `Объявления пользователя ${name}: аренда вещей с бронью онлайн.`,
-    alternates: { canonical: `${siteConfig.url}/u/${id}` },
+    alternates: { canonical: `${siteUrl()}/u/${id}` },
   };
 }
 

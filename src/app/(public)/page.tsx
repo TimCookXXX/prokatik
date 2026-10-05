@@ -7,6 +7,7 @@ import {
 } from "@/server/catalog";
 import { getCitiesGeo, resolveViewerCity } from "@/server/city";
 import { getPopularQueries } from "@/server/search";
+import { siteUrl } from "@/lib/site-config";
 import { content } from "@theme/content";
 import { Hero } from "@/components/home/Hero";
 import { CategoryTiles } from "@/components/home/CategoryTiles";
@@ -16,12 +17,16 @@ import { ListYourItemBand } from "@/components/home/ListYourItemBand";
 
 export const dynamic = "force-dynamic";
 
-export const metadata: Metadata = {
-  // absolute — иначе к заголовку применится шаблон `%s — inrenta` из корневого
-  // layout и имя задвоится.
-  title: { absolute: seo.defaultTitle },
-  description: seo.defaultDescription,
-};
+// Функция, а не объект: адрес сайта читается при запросе, а не при импорте.
+export function generateMetadata(): Metadata {
+  return {
+    // absolute — иначе к заголовку применится шаблон `%s — inrenta` из корневого
+    // layout и имя задвоится.
+    title: { absolute: seo.defaultTitle },
+    description: seo.defaultDescription,
+    alternates: { canonical: `${siteUrl()}/` },
+  };
+}
 
 export default async function HomePage() {
   const [session, defaultCity, cats, citiesGeo] = await Promise.all([

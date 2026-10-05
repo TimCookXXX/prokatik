@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted (2026-08-31)
+Accepted (2026-08-31). Пункт «`loading.tsx` оставлен» для публичного каталога
+отменён в [0024](0024-no-loading-boundary-in-public-catalog.md).
 
 ## Context
 

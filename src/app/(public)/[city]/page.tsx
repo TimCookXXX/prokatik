@@ -3,12 +3,12 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import {
-  getAllCategories, getCityBySlug,
+  getAllCategories, getCityBySlug, getListingCountsByCategory,
 } from "@/server/catalog";
 import { Breadcrumbs } from "@/components/catalog/Breadcrumbs";
 import { CategoryListing, type CategorySearchParams } from "@/components/catalog/CategoryListing";
 import { content } from "@theme/content";
-import { siteConfig } from "@/lib/site-config";
+import { siteUrl } from "@/lib/site-config";
 import { headingCity, proseCity } from "@/lib/catalog/city-locative";
 import { getCityScope } from "@/server/city";
 
@@ -23,10 +23,17 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { city: citySlug } = await params;
   const city = await getCityBySlug(citySlug);
   if (!city) return {};
+  // Город без объявлений — не 404: на /{slug} ведёт селектор города, и только
+  // что заведённый город встречал бы людей «Страница не найдена». Но и в индекс
+  // пустая витрина не идёт; из sitemap её убирает sitemap.ts. Счётчики те же,
+  // что у дерева разделов на странице (cache()).
+  const counts = await getListingCountsByCategory([city.id]);
+  const empty = [...counts.values()].every((n) => n === 0);
   return {
     title: `Аренда вещей ${headingCity(city)}`,
     description: `Всё для аренды ${proseCity(city)}: инструмент, техника, спорт, одежда и другое. Каталог с ценами и заявкой на бронь онлайн.`,
-    alternates: { canonical: `${siteConfig.url}/${city.slug}` },
+    alternates: { canonical: `${siteUrl()}/${city.slug}` },
+    ...(empty ? { robots: { index: false, follow: true } } : {}),
   };
 }
 

@@ -1,17 +1,17 @@
 import type { MetadataRoute } from "next";
-import { siteConfig } from "@/lib/site-config";
+import { siteUrl } from "@/lib/site-config";
 import {
   getActiveCities, getAllActiveListingPaths, getAllCategories,
   getListingCountsByCategory, rollupToRoots,
 } from "@/server/catalog";
-import { listingPath } from "@/lib/catalog/listing-path";
+import { categoryPath, listingPath } from "@/lib/catalog/listing-path";
 
 // Sitemap читает БД в рантайме; force-dynamic — иначе Next prerender'ит
 // во время build без БД и падает.
 export const dynamic = "force-dynamic";
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
-  const base = siteConfig.url;
+  const base = siteUrl();
   const out: MetadataRoute.Sitemap = [
     { url: `${base}/`, changeFrequency: "daily", priority: 1.0 },
   ];
@@ -19,16 +19,19 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const [citiesList, cats] = await Promise.all([getActiveCities(), getAllCategories()]);
 
   for (const city of citiesList) {
+    const direct = await getListingCountsByCategory([city.id]);
+    // Город без объявлений живёт (на него ведёт селектор), но с noindex — в
+    // sitemap ему не место, как и его пустым разделам.
+    if ([...direct.values()].every((n) => n === 0)) continue;
     out.push({ url: `${base}/${city.slug}`, changeFrequency: "daily", priority: 0.9 });
 
-    const direct = await getListingCountsByCategory([city.id]);
     const rootCounts = rollupToRoots(cats, direct);
 
     // Корневые категории — главные SEO-страницы; пустые в sitemap не попадают.
     for (const cat of cats.filter((c) => c.parentId === null)) {
       if ((rootCounts.get(cat.id) ?? 0) === 0) continue;
       out.push({
-        url: `${base}/${city.slug}/${cat.slug}`,
+        url: `${base}${categoryPath(city.slug, cat)}`,
         changeFrequency: "daily",
         priority: 0.8,
       });
@@ -40,7 +43,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       const root = cats.find((c) => c.id === sub.parentId);
       if (!root) continue;
       out.push({
-        url: `${base}/${city.slug}/${root.slug}/${sub.slug}`,
+        url: `${base}${categoryPath(city.slug, sub, root)}`,
         changeFrequency: "daily",
         priority: 0.7,
       });

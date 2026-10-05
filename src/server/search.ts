@@ -8,6 +8,7 @@ import {
 import { completeQuery, pickCompletions } from "@/lib/search/complete";
 import { hasSearchWords, MAX_QUERY_LENGTH } from "@/lib/search/match";
 import type { DateRange } from "@/lib/catalog/filters";
+import { categoryPath } from "@/lib/catalog/listing-path";
 import { getFreeSearchIds, type City } from "@/server/catalog";
 import { getSearchIndex, type SearchIndex } from "@/server/search-index";
 
@@ -95,7 +96,7 @@ export async function suggestForCity(
 
   const categories = suggestCategories(ix, q, SUGGEST_CATEGORIES).map((c) => ({
     name: c.category.name,
-    href: `/${city.slug}/${c.slugs.join("/")}`,
+    href: categoryPath(city.slug, c.category, c.root),
   }));
 
   return { queries, categories };

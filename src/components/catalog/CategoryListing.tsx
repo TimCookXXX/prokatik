@@ -2,6 +2,7 @@
 // категорий, фильтры, сетка карточек, пагинация. Server component.
 
 import Link from "next/link";
+import { notFound } from "next/navigation";
 import { EmptyState } from "@/components/ui/EmptyState";
 import {
   buildCategoryTree, getAllCategories, getAvailabilityRows, getCategoryStats,
@@ -84,6 +85,9 @@ export async function CategoryListing({
 
   const page = filters.page ?? 1;
   const totalPages = Math.max(1, Math.ceil(total / DEFAULT_PAGE_SIZE));
+  // Страница за концом выдачи — 404, а не пустая сетка с кодом 200. Пустая
+  // первая страница остаётся: фильтры, которые всё отсеяли, — законный адрес.
+  if (page > 1 && page > totalPages) notFound();
   const view = parseView(searchParams.view);
   const withParams = (mutate: (q: URLSearchParams) => void) => {
     const q = filterParams(searchParams, { today });

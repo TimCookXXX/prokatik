@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { getEnv } from "@/lib/env";
+import { siteUrl } from "@/lib/site-config";
 import { drizzleAuthStore, type AuthStore } from "@/lib/auth/store";
 import { sessionTtlSeconds } from "@/lib/auth/session";
 
@@ -23,8 +24,7 @@ export function isVkSubProvider(v: string | null | undefined): v is VkSubProvide
 }
 
 export function vkCallbackUrl(): string {
-  const base = getEnv().NEXTAUTH_URL.replace(/\/$/, "");
-  return `${base}/api/oauth/vk/callback`;
+  return `${siteUrl()}/api/oauth/vk/callback`;
 }
 
 export const pkceTtlSeconds = PKCE_TTL_SECONDS;

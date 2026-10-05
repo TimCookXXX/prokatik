@@ -20,7 +20,7 @@
 // случай, когда аккаунт жив, но писать ему уже не о чем.
 
 import { after } from "next/server";
-import { getEnv } from "@/lib/env";
+import { siteUrl } from "@/lib/site-config";
 import { getDb } from "@/lib/db";
 import { eq } from "drizzle-orm";
 import { users } from "@db/schema";
@@ -61,7 +61,7 @@ export function queueBookingMail(input: {
       const period = input.dateFrom === input.dateTo
         ? formatDayMonth(input.dateFrom)
         : `${formatDayMonth(input.dateFrom)} — ${formatDayMonth(input.dateTo)}`;
-      const link = `${getEnv().NEXTAUTH_URL.replace(/\/$/, "")}/cabinet/requests`;
+      const link = `${siteUrl()}/cabinet/requests`;
 
       await sendMail(bookingEmail(input.kind, recipient.email, input.listingTitle, period, link));
     } catch (e) {

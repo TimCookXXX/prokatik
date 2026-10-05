@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+// Свой useRouter у toploader: программный переход тоже запускает полосу
+// загрузки. Без loading.tsx в каталоге другого отклика у перехода нет.
+import { useRouter } from "nextjs-toploader/app";
 import { CalendarDays, X } from "lucide-react";
 import { content } from "@theme/content";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/Popover";

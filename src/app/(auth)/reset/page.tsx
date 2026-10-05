@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { redirect } from "next/navigation";
@@ -8,6 +9,12 @@ import { content } from "@theme/content";
 import { ResetPasswordForm } from "@/components/auth/ResetPasswordForm";
 
 export const dynamic = "force-dynamic";
+
+// Служебная, как /login: noindex, ссылки проходимы.
+export const metadata: Metadata = {
+  title: "Восстановление пароля",
+  robots: { index: false, follow: true },
+};
 
 export default async function ResetPage({
   searchParams,

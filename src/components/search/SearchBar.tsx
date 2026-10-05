@@ -1,7 +1,10 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
+// Свой useRouter у toploader: программный переход тоже запускает полосу
+// загрузки. Без loading.tsx в каталоге другого отклика у перехода нет.
+import { useRouter } from "nextjs-toploader/app";
 import { Search } from "lucide-react";
 import { content } from "@theme/content";
 import { cn } from "@/lib/utils";

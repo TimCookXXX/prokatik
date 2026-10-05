@@ -1,6 +1,11 @@
-import { seo } from "@theme/seo";
+import { getEnv } from "@/lib/env";
 
-export const siteConfig = {
-  name: seo.siteName,
-  url: process.env.NEXTAUTH_URL ?? "http://localhost:3000",
-} as const;
+/**
+ * Адрес сайта без завершающего `/` — основа canonical, sitemap, robots.txt,
+ * JSON-LD и ссылок в письмах. Единственный источник: NEXTAUTH_URL через
+ * getEnv(), читается при вызове, а не при импорте модуля, — иначе адрес
+ * застывал бы тем, что было в окружении на этапе сборки.
+ */
+export function siteUrl(): string {
+  return getEnv().NEXTAUTH_URL.replace(/\/+$/, "");
+}
