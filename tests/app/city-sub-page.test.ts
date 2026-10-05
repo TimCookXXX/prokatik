@@ -20,7 +20,8 @@ const catalog = vi.hoisted(() => ({
   getCategoryBySlug: vi.fn(),
   getAllCategories: vi.fn(),
   getListingCountsByCategory: vi.fn(),
-  listingPhotos: vi.fn(() => []),
+  getCategoryStats: vi.fn(),
+  listingPhotos: vi.fn((): Array<{ url: string; width: number; height: number }> => []),
   getAvailabilityRows: vi.fn(async () => []),
   getActiveListingCardsByOwner: vi.fn(async () => []),
   getListingsForCategories: vi.fn(async (): Promise<{ items: unknown[]; total: number }> => ({ items: [], total: 0 })),
@@ -99,6 +100,16 @@ describe("/{city}/{root}/{sub} with a «Где» point", () => {
 
   const subProps = { params: Promise.resolve({ city: "krasnodar", seg: "tools", sub: "drills" }),
     searchParams: Promise.resolve({ loc: "p:45.000,39.000" }) };
+
+  it("title подкатегории — по самому городу, без цены, когда позиций нет", async () => {
+    catalog.getCategoryStats.mockResolvedValue({
+      listingCount: 0, ownerCount: 0, minPriceDay: null, maxPriceDay: null, avgDeposit: null,
+    });
+    const meta = await generateMetadata(subProps);
+    expect(meta.title).toEqual({ absolute: "Дрели — аренда и прокат в Краснодаре" });
+    expect(catalog.getCategoryStats).toHaveBeenCalledWith([krasnodar.id], ["K2"]);
+    expect(String(meta.alternates?.canonical)).toMatch(/\/krasnodar\/tools\/drills$/);
+  });
 
   it("is 404 when the subcategory is empty in the city itself", async () => {
     const el = await CitySubPage(subProps);
@@ -190,5 +201,74 @@ describe("listing in a subcategory", () => {
     const crumbs = (tree.props.children as Array<{ props?: { items?: Array<{ label: string }> } }>)
       .find((c) => c?.props?.items)!.props!.items!;
     expect(crumbs.map((c) => c.label)).toEqual(["Главная", "Краснодар", "Фото и видео", "GoPro"]);
+  });
+});
+
+// Карточка: title без шаблона сайта и не длиннее 65 символов, описание —
+// сначала факты, свой openGraph (url, первое фото с размерами), «Поделиться»
+// с каноническим адресом без дат, количества и «Где».
+describe("listing metadata and share", () => {
+  const plain = (v: unknown) => JSON.parse(JSON.stringify(v).replace(/\u00a0/g, " "));
+  const listing = {
+    id: LISTING_ID, slug: "drill", title: "Дрель", cityId: krasnodar.id, categoryId: "K1",
+    ownerUserId: "U1", status: "active", priceDay: 500, quantity: 1,
+    description: "Ударная,  с кейсом.", depositType: "money", depositAmount: 3000,
+    handoverPickup: true, handoverDelivery: true,
+  };
+  const canonical = `/krasnodar/tools/drill-${LISTING_ID}`;
+
+  beforeEach(() => {
+    catalog.getActiveListingById.mockResolvedValue(listing);
+    city.getCityScope.mockResolvedValue({ region: false, near: null, cityIds: [krasnodar.id], nearby: false });
+    catalog.listingPhotos.mockReturnValue([]);
+  });
+
+  it("title absolute, описание с фактами впереди", async () => {
+    const meta = await generateMetadata(props("krasnodar"));
+    expect(plain(meta.title)).toEqual({ absolute: "Дрель — аренда в Краснодаре, 500 ₽/сутки" });
+    expect(plain(meta.description)).toBe(
+      "Аренда в Краснодаре: 500 ₽/сутки, залог 3 000 ₽, самовывоз или доставка. Ударная, с кейсом.",
+    );
+  });
+
+  it("openGraph: канонический url и первое фото с размерами", async () => {
+    catalog.listingPhotos.mockReturnValue([
+      { url: "https://cdn.example/1.webp", width: 1600, height: 900 },
+      { url: "https://cdn.example/2.webp", width: 800, height: 600 },
+    ]);
+    const meta = await generateMetadata(props("krasnodar"));
+    const og = meta.openGraph as Record<string, unknown>;
+    expect(String(og.url)).toMatch(new RegExp(`^https?://[^/]+${canonical}$`));
+    expect(og.images).toEqual([{ url: "https://cdn.example/1.webp", width: 1600, height: 900, alt: "Дрель" }]);
+    // Общая часть из корневого layout повторена: слияние поверхностное.
+    expect(og).toMatchObject({ type: "website", siteName: "inrenta", locale: "ru_RU" });
+  });
+
+  it("без фото — картинка сайта из родительских метаданных", async () => {
+    const parentImages = [{ url: "https://site.example/opengraph-image?abc", width: 1200, height: 630 }];
+    const parent = Promise.resolve({ openGraph: { images: parentImages } }) as never;
+    const meta = await generateMetadata(props("krasnodar"), parent);
+    expect((meta.openGraph as Record<string, unknown>).images).toEqual(parentImages);
+  });
+
+  it("«Поделиться» получает абсолютный канонический адрес без query", async () => {
+    const el = await CitySubPage(props("krasnodar", {
+      from: "2026-10-10", to: "2026-10-12", qty: "2", loc: "p:45.035,38.975", la: "x", src: "address", lp: "house",
+    }));
+    const Page = el.type as (p: unknown) => Promise<unknown>;
+    const found: Array<{ props: Record<string, unknown> }> = [];
+    const walk = (n: unknown) => {
+      if (Array.isArray(n)) return n.forEach(walk);
+      if (n && typeof n === "object" && "props" in n) {
+        const node = n as { props: Record<string, unknown> };
+        found.push(node);
+        walk(node.props.children);
+      }
+    };
+    walk(await Page(el.props));
+    const share = found.find((n) => typeof n.props.url === "string" && "text" in n.props)!;
+    expect(String(share.props.url)).toMatch(new RegExp(`^https?://[^/?#]+${canonical}$`));
+    expect(share.props.title).toBe("Дрель");
+    expect(plain(share.props.text)).toBe("Дрель — аренда в Краснодаре, 500 ₽/сутки");
   });
 });

@@ -8,6 +8,8 @@ import {
 import { getCitiesGeo, resolveViewerCity } from "@/server/city";
 import { getPopularQueries } from "@/server/search";
 import { siteUrl } from "@/lib/site-config";
+import { buildOrganizationJsonLd, buildWebSiteJsonLd } from "@/lib/jsonld";
+import { JsonLd } from "@/components/seo/JsonLd";
 import { content } from "@theme/content";
 import { Hero } from "@/components/home/Hero";
 import { CategoryTiles } from "@/components/home/CategoryTiles";
@@ -73,6 +75,10 @@ export default async function HomePage() {
     // Стопка панелей одной ширины. Контейнер совпадает с шапкой и подвалом,
     // иначе края главной разъезжаются с плавающей панелью над ней.
     <main className="mx-auto flex w-full max-w-[1200px] flex-col gap-6 px-4 pb-4 pt-5">
+      <JsonLd data={buildOrganizationJsonLd({
+        name: seo.siteName, siteUrl: siteUrl(), email: content.site.contactEmail,
+      })} />
+      <JsonLd data={buildWebSiteJsonLd({ name: seo.siteName, siteUrl: siteUrl() })} />
       <Hero city={heroCity} popular={popular} />
 
       {defaultCity && <CategoryTiles citySlug={defaultCity.slug} categories={chips} />}

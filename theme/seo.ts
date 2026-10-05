@@ -8,5 +8,6 @@ export const seo = {
   // tests/app/icons.test.ts, иначе смена палитры увела бы цвет молча.
   themeColor: "#171719",
   locale: "ru_RU",
-  ogDefault: "/og-default.png",
+  // Картинки для соцсетей по умолчанию здесь нет: её рисует при сборке
+  // src/app/opengraph-image.tsx, и адрес с хешем Next ставит сам.
 } as const;

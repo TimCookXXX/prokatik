@@ -113,6 +113,7 @@ describe("middleware matcher", () => {
       "/favicon.ico",
       "/icon.svg",
       "/apple-icon.png",
+      "/opengraph-image",
       "/icons/icon-192.png",
       "/manifest.webmanifest",
     ]) {

@@ -2,6 +2,8 @@ import type { Metadata, Viewport } from "next";
 import NextTopLoader from "nextjs-toploader";
 import { fontDisplay, fontText, fontMark, fontMono } from "@theme/fonts";
 import { seo } from "@theme/seo";
+import { siteUrl } from "@/lib/site-config";
+import { baseOpenGraph } from "@/lib/seo/open-graph";
 import { ThemeProvider } from "@/components/providers/ThemeProvider";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
@@ -17,15 +19,25 @@ import { RealtimeProvider } from "@/components/realtime/RealtimeProvider";
 import { RealtimeToaster } from "@/components/realtime/RealtimeToaster";
 import { ConnectionStatus } from "@/components/realtime/ConnectionStatus";
 
-export const metadata: Metadata = {
-  title: { default: seo.defaultTitle, template: `%s — ${seo.siteName}` },
-  description: seo.defaultDescription,
-  // icons здесь намеренно не задаются: favicon.ico, icon.svg и apple-icon.png
-  // лежат рядом в src/app/ и подхватываются файловой конвенцией. Next
-  // подмешивает icon и apple-icon, ТОЛЬКО пока metadata.icons пуст: стоит
-  // любому сегменту задать это поле, и вектор вкладки с иконкой iOS пропадут
-  // без ошибки сборки. favicon.ico исключение — его Next добавляет всегда.
-};
+// Функция, а не объект: адрес сайта (metadataBase) читается при запросе, а не
+// застывает при импорте модуля значением со сборки.
+export function generateMetadata(): Metadata {
+  return {
+    metadataBase: new URL(siteUrl()),
+    title: { default: seo.defaultTitle, template: `%s — ${seo.siteName}` },
+    description: seo.defaultDescription,
+    // Картинку по умолчанию даёт src/app/opengraph-image.tsx: Next подставляет
+    // её сам, пока здесь нет openGraph.images. og:title и og:description он
+    // дописывает из title и description страницы.
+    openGraph: { ...baseOpenGraph },
+    twitter: { card: "summary_large_image" },
+    // icons здесь намеренно не задаются: favicon.ico, icon.svg и apple-icon.png
+    // лежат рядом в src/app/ и подхватываются файловой конвенцией. Next
+    // подмешивает icon и apple-icon, ТОЛЬКО пока metadata.icons пуст: стоит
+    // любому сегменту задать это поле, и вектор вкладки с иконкой iOS пропадут
+    // без ошибки сборки. favicon.ico исключение — его Next добавляет всегда.
+  };
+}
 
 // Цвет адресной строки. Один тёмный, а не пара под prefers-color-scheme: та
 // media смотрит на тему ОС, а тема сайта от неё не зависит — next-themes берёт

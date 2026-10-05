@@ -1,12 +1,12 @@
 // /{city}/{seg}/{sub} — снова двусмысленно:
 //   sub = {slug}-{id} и товар с этим id активен → карточка товара;
 //   иначе seg = корневая категория, sub = подкатегория (список, 404 если пусто).
-import type { Metadata } from "next";
+import type { Metadata, ResolvingMetadata } from "next";
 import { notFound, permanentRedirect } from "next/navigation";
 import Link from "next/link";
 import { CircleCheck } from "lucide-react";
 import {
-  getAllCategories, getAvailabilityRows, getCategoryById, getCategoryBySlug,
+  getAllCategories, getAvailabilityRows, getCategoryById, getCategoryBySlug, getCategoryStats,
   getCityById, getCityBySlug, getActiveListingById, getListingCountsByCategory, getSellerById,
   getActiveListingCardsByOwner, getListingDistance, getListingsForCategories,
   listingPhotos,
@@ -15,6 +15,11 @@ import {
 import { canonicalHref, categoryPath, extractListingId, listingPath } from "@/lib/catalog/listing-path";
 import { carryParams } from "@/lib/catalog/filters";
 import { formatPrice } from "@/lib/catalog/format";
+import {
+  catalogDescription, catalogHeading, catalogTitle, listingDescription, listingShareText, listingTitle,
+} from "@/lib/seo/titles";
+import { baseOpenGraph } from "@/lib/seo/open-graph";
+import { ShareButton } from "@/components/catalog/ShareButton";
 import { addDaysStr, todayStr } from "@/lib/catalog/dates";
 import type { AvailabilityMap } from "@/lib/catalog/availability";
 import { Breadcrumbs } from "@/components/catalog/Breadcrumbs";
@@ -25,7 +30,6 @@ import { JsonLd } from "@/components/seo/JsonLd";
 import { buildBreadcrumbJsonLd, buildProductJsonLd } from "@/lib/jsonld";
 import { content } from "@theme/content";
 import { siteUrl } from "@/lib/site-config";
-import { headingCity, proseCity } from "@/lib/catalog/city-locative";
 import { getCityScope } from "@/server/city";
 import { buildAvailabilityByListing, freeQty } from "@/lib/catalog/availability";
 import { isPubliclyVisible } from "@/lib/catalog/visibility";
@@ -93,25 +97,36 @@ async function resolve(citySlug: string, seg: string, sub: string): Promise<Reso
   return { kind: "subcategory", city, root, sub: subCat };
 }
 
-export async function generateMetadata({ params }: Props): Promise<Metadata> {
+// parent необязателен только для тестов: Next передаёт его всегда.
+export async function generateMetadata({ params }: Props, parent?: ResolvingMetadata): Promise<Metadata> {
   const { city: citySlug, seg, sub } = await params;
   const r = await resolve(citySlug, seg, sub);
   if (!r) return {};
   if (r.kind === "subcategory") {
+    // Цена «от» и счётчики — по самому городу: страница без своих позиций — 404.
+    const stats = await getCategoryStats([r.city.id], [r.sub.id]);
     return {
-      title: `Аренда: ${r.sub.name.toLowerCase()} ${headingCity(r.city)}`,
-      description: `${r.sub.name} напрокат ${proseCity(r.city)}: цены, залоги, календарь занятости.`,
+      title: { absolute: catalogTitle(r.sub.name, r.city, stats.minPriceDay) },
+      description: catalogDescription(r.sub.name, r.city, stats),
       alternates: { canonical: `${siteUrl()}${categoryPath(r.city.slug, r.sub, r.root)}` },
     };
   }
-  const priceBit = ` от ${formatPrice(r.listing.priceDay)}/сутки`;
-  const canonical = listingPath(r.city.slug, r.category.slug, r.listing.slug, r.listing.id);
+  const canonical = `${siteUrl()}${listingPath(r.city.slug, r.category.slug, r.listing.slug, r.listing.id)}`;
+  // Своя картинка — первое фото с размерами из photosJson: без width/height
+  // мессенджер ждёт загрузки, чтобы решить, крупное ли превью. Без фото —
+  // картинка сайта из корневого layout: openGraph страницы заменяет его
+  // целиком (слияние поверхностное), и унаследовать её молча нельзя.
+  const photo = listingPhotos(r.listing)[0];
+  const images = photo
+    ? [{ url: photo.url, width: photo.width, height: photo.height, alt: r.listing.title }]
+    : (parent ? (await parent).openGraph?.images : undefined);
   return {
-    // Город в хвосте, а не перед ценой: без падежа получалось бы «аренда,
-    // Казань от 500 ₽» — читается как цена города.
-    title: `${r.listing.title} — аренда${priceBit} ${proseCity(r.city)}`,
-    description: r.listing.description ?? `${r.listing.title} напрокат ${proseCity(r.city)}.`,
-    alternates: { canonical: `${siteUrl()}${canonical}` },
+    // absolute, как у всех страниц каталога: см. src/lib/seo/titles.ts.
+    title: { absolute: listingTitle(r.listing.title, r.city, r.listing.priceDay) },
+    description: listingDescription(r.listing, r.city),
+    alternates: { canonical },
+    // og:title и og:description Next дописывает сам из title и description.
+    openGraph: { ...baseOpenGraph, url: canonical, ...(images ? { images } : {}) },
   };
 }
 
@@ -174,7 +189,7 @@ async function SubcategoryPage({
         { label: sub.name },
       ]} />
       <h1 className="mb-4 mt-3 font-display text-2xl font-bold">
-        Аренда: {sub.name.toLowerCase()} {headingCity(city)}
+        {catalogHeading(sub.name, city)}
       </h1>
       {scope.nearby && (
         <p className="-mt-2 mb-4 text-sm text-muted-foreground">{content.search.nearby(city.name)}</p>
@@ -304,7 +319,16 @@ async function ListingPage({
         siteUrl(),
       )} />
       <Breadcrumbs items={visibleCrumbs} />
-      <h1 className="mt-2 font-display text-xl font-bold sm:text-2xl">{listing.title}</h1>
+      {/* «Поделиться» — справа от названия: рядом с тем, чем делятся, и на
+        * телефоне, и на десктопе. Делится канонический адрес без дат и «Где». */}
+      <div className="mt-2 flex items-start justify-between gap-3">
+        <h1 className="min-w-0 font-display text-xl font-bold sm:text-2xl">{listing.title}</h1>
+        <ShareButton
+          url={`${siteUrl()}${canonicalPath}`}
+          title={listing.title}
+          text={listingShareText(listing.title, city, listing.priceDay)}
+        />
+      </div>
 
       <div className="mt-3 grid grid-cols-1 gap-6 md:grid-cols-[1fr_360px]">
         <div>

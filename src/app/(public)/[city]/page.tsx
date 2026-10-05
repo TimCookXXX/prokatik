@@ -3,13 +3,16 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import {
-  getAllCategories, getCityBySlug, getListingCountsByCategory,
+  getAllCategories, getCategoryStats, getCityBySlug, getListingCountsByCategory,
 } from "@/server/catalog";
 import { Breadcrumbs } from "@/components/catalog/Breadcrumbs";
 import { CategoryListing, type CategorySearchParams } from "@/components/catalog/CategoryListing";
+import { JsonLd } from "@/components/seo/JsonLd";
+import { buildBreadcrumbJsonLd } from "@/lib/jsonld";
 import { content } from "@theme/content";
 import { siteUrl } from "@/lib/site-config";
-import { headingCity, proseCity } from "@/lib/catalog/city-locative";
+import { headingCity } from "@/lib/catalog/city-locative";
+import { cityDescription, cityTitle } from "@/lib/seo/titles";
 import { getCityScope } from "@/server/city";
 
 export const dynamic = "force-dynamic";
@@ -27,11 +30,15 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   // что заведённый город встречал бы людей «Страница не найдена». Но и в индекс
   // пустая витрина не идёт; из sitemap её убирает sitemap.ts. Счётчики те же,
   // что у дерева разделов на странице (cache()).
-  const counts = await getListingCountsByCategory([city.id]);
+  // Цена «от» — по всем разделам самого города; тот же вызов делает выдача
+  // без точки «Где», второй раз он берётся из cache().
+  const [counts, cats] = await Promise.all([getListingCountsByCategory([city.id]), getAllCategories()]);
   const empty = [...counts.values()].every((n) => n === 0);
+  const stats = await getCategoryStats([city.id], cats.map((c) => c.id));
   return {
-    title: `Аренда вещей ${headingCity(city)}`,
-    description: `Всё для аренды ${proseCity(city)}: инструмент, техника, спорт, одежда и другое. Каталог с ценами и заявкой на бронь онлайн.`,
+    // absolute, как у всех страниц каталога: см. src/lib/seo/titles.ts.
+    title: { absolute: cityTitle(city, stats.minPriceDay) },
+    description: cityDescription(city),
     alternates: { canonical: `${siteUrl()}/${city.slug}` },
     ...(empty ? { robots: { index: false, follow: true } } : {}),
   };
@@ -51,6 +58,10 @@ export default async function CityPage({ params, searchParams }: Props) {
 
   return (
     <main className="mx-auto w-full max-w-[1200px] px-4 py-6">
+      <JsonLd data={buildBreadcrumbJsonLd([
+        { name: "Главная", url: "/" },
+        { name: city.name, url: `/${city.slug}` },
+      ], siteUrl())} />
       <Breadcrumbs items={[{ label: "Главная", href: "/" }, { label: city.name }]} />
       <h1 className="mb-4 mt-3 font-display text-2xl font-bold">Всё для аренды {headingCity(city)}</h1>
       {scope.nearby && (

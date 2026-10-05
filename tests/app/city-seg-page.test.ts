@@ -18,6 +18,7 @@ const catalog = vi.hoisted(() => ({
   getCategoryBySlug: vi.fn(),
   getAllCategories: vi.fn(),
   getListingCountsByCategory: vi.fn(),
+  getCategoryStats: vi.fn(),
   // Настоящий роллап: он чистый, а именно по нему решается «пусто ли».
   rollupToRoots: (all: Array<{ id: string; parentId: string | null }>, direct: Map<string, number>) => {
     const parentOf = new Map(all.map((c) => [c.id, c.parentId]));
@@ -72,6 +73,9 @@ beforeEach(() => {
     return m;
   });
   city.getCityScope.mockImplementation(async (_c: unknown, sp: { loc?: string }) => (sp.loc ? withPoint : noPoint));
+  catalog.getCategoryStats.mockResolvedValue({
+    listingCount: 4, ownerCount: 2, minPriceDay: 700, maxPriceDay: 1500, avgDeposit: null,
+  });
 });
 
 describe("/{city}/{root} пустой в городе", () => {
@@ -118,5 +122,26 @@ describe("/{city}/{sub} — подкатегория по прямому сла�
     const meta = await generateMetadata(props("kolyaski"));
     expect(String(meta.alternates?.canonical)).toMatch(/\/krasnodar\/detskie-tovary\/kolyaski$/);
     expect(meta.robots).toBeUndefined();
+  });
+});
+
+// Заголовок и описание — из src/lib/seo/titles.ts, цена «от» и счётчики — по
+// самому городу и по разделу вместе с подразделами, как его выдача.
+describe("заголовки раздела", () => {
+  it("title без шаблона сайта, с ценой «от»; описание из данных", async () => {
+    const meta = await generateMetadata(props("detskie-tovary"));
+    // Цены форматируются с неразрывными пробелами; сравнение — по обычным.
+    const plain = (v: unknown) => JSON.parse(JSON.stringify(v).replace(/\u00a0/g, " "));
+    expect(plain(meta.title)).toEqual({ absolute: "Детские товары — аренда и прокат в Краснодаре, от 700 ₽/сутки" });
+    expect(plain(meta.description)).toBe(
+      "4 позиции, 2 продавца: детские товары напрокат в Краснодаре, от 700 ₽ до 1 500 ₽/сутки. Залог, даты и заявка на бронь онлайн.",
+    );
+    expect(catalog.getCategoryStats).toHaveBeenCalledWith([krasnodar.id], [kids.id, strollers.id]);
+  });
+
+  it("H1 — «{Раздел} — аренда и прокат {в городе}»", async () => {
+    const tree = await render("instrumenty") as { props: { children: unknown[] } };
+    const h1 = tree.props.children.find((c) => (c as { type?: unknown })?.type === "h1") as { props: { children: unknown } };
+    expect(h1.props.children).toBe("Инструменты — аренда и прокат в Краснодаре");
   });
 });

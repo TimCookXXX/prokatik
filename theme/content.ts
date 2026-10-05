@@ -341,6 +341,17 @@ export const content = {
     price: "Стоимость",
     deposit: "Залог",
   },
+  // «Поделиться» на карточке объявления. На телефоне — системный лист Web
+  // Share, на десктопе и без Web Share — меню с этими пунктами.
+  share: {
+    button: "Поделиться",
+    copy: "Скопировать ссылку",
+    copied: "Ссылка скопирована",
+    copyFailed: "Не удалось скопировать — возьмите адрес из строки браузера",
+    telegram: "Telegram",
+    whatsapp: "WhatsApp",
+    vk: "ВКонтакте",
+  },
   loading: {
     title: "Ищем рядом…",
     words: HANDOFF_WORDS as string[],

@@ -106,5 +106,5 @@ export type ListingForm = z.output<typeof listingFormSchema>;
 export const RESERVED_SLUGS = new Set([
   "api", "admin", "cabinet", "requests", "login", "reset", "welcome", "banned",
   "privacy", "dev", "u", "chat", "profile", "search", "sources",
-  "sitemap.xml", "robots.txt", "manifest.webmanifest",
+  "sitemap.xml", "robots.txt", "manifest.webmanifest", "opengraph-image",
 ]);

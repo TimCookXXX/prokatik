@@ -9,8 +9,8 @@
 import type { Metadata } from "next";
 import { notFound, permanentRedirect } from "next/navigation";
 import {
-  getAllCategories, getCategoryBySlug, getCityBySlug, getListingCountsByCategory, rollupToRoots,
-  type Category, type City, type CityIds,
+  getAllCategories, getCategoryBySlug, getCategoryStats, getCityBySlug, getListingCountsByCategory,
+  rollupToRoots, type Category, type City, type CityIds,
 } from "@/server/catalog";
 import { Breadcrumbs } from "@/components/catalog/Breadcrumbs";
 import { CategoryListing, type CategorySearchParams } from "@/components/catalog/CategoryListing";
@@ -18,7 +18,7 @@ import { JsonLd } from "@/components/seo/JsonLd";
 import { buildBreadcrumbJsonLd } from "@/lib/jsonld";
 import { content } from "@theme/content";
 import { siteUrl } from "@/lib/site-config";
-import { headingCity, proseCity } from "@/lib/catalog/city-locative";
+import { catalogDescription, catalogHeading, catalogTitle } from "@/lib/seo/titles";
 import { getCityScope } from "@/server/city";
 import { carryParams } from "@/lib/catalog/filters";
 import { canonicalHref, categoryPath } from "@/lib/catalog/listing-path";
@@ -44,6 +44,13 @@ async function rootCount(cityIds: CityIds, root: Category): Promise<number> {
   return rollupToRoots(cats, direct).get(root.id) ?? 0;
 }
 
+/** Раздел вместе с подразделами — как его выдача. */
+async function withChildren(cat: Category): Promise<string[]> {
+  if (cat.parentId !== null) return [cat.id];
+  const cats = await getAllCategories();
+  return [cat.id, ...cats.filter((c) => c.parentId === cat.id).map((c) => c.id)];
+}
+
 /** Подкатегория → её корень; у корня — null. */
 async function parentOf(cat: Category): Promise<Category | null> {
   if (cat.parentId === null) return null;
@@ -61,9 +68,11 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const canonical = `${siteUrl()}${categoryPath(r.city.slug, cat, root)}`;
   // Пустой в городе корень отрисовывается только с точкой «Где» — и не индексируется.
   const emptyInCity = cat.parentId === null && (await rootCount([r.city.id], cat)) === 0;
+  // Цена «от» и счётчики — по самому городу, как у canonical без точки «Где».
+  const stats = await getCategoryStats([r.city.id], await withChildren(cat));
   return {
-    title: `Аренда: ${cat.name.toLowerCase()} ${headingCity(r.city)}`,
-    description: `${cat.name} напрокат ${proseCity(r.city)}: каталог товаров с ценами, залогами и календарём занятости.`,
+    title: { absolute: catalogTitle(cat.name, r.city, stats.minPriceDay) },
+    description: catalogDescription(cat.name, r.city, stats),
     alternates: { canonical },
     ...(emptyInCity ? { robots: { index: false, follow: true } } : {}),
   };
@@ -100,8 +109,8 @@ async function RootCategoryPage({
 }) {
   // Дети входят в выдачу корневой категории. Счётчики те же, что у дерева
   // внутри CategoryListing, — cache() не даёт им уйти в базу второй раз.
-  const [cats, scope, own] = await Promise.all([
-    getAllCategories(),
+  const [categoryIds, scope, own] = await Promise.all([
+    withChildren(category),
     // С точкой «Где» выдача — по всем городам региона (getCityScope).
     getCityScope(city, searchParams),
     rootCount([city.id], category),
@@ -110,8 +119,6 @@ async function RootCategoryPage({
   // пока по региону есть что показать (noindex ставит generateMetadata).
   if (own === 0 && (!scope.near || (await rootCount(scope.cityIds, category)) === 0)) notFound();
 
-  const children = cats.filter((c) => c.parentId === category.id);
-  const categoryIds = [category.id, ...children.map((c) => c.id)];
   const basePath = categoryPath(city.slug, category);
   // Крошки несут переносимые параметры (даты, «Где»), JSON-LD — нет: там канон.
   const carry = carryParams(searchParams).toString();
@@ -130,7 +137,7 @@ async function RootCategoryPage({
         { label: category.name },
       ]} />
       <h1 className="mb-4 mt-3 font-display text-2xl font-bold">
-        Аренда: {category.name.toLowerCase()} {headingCity(city)}
+        {catalogHeading(category.name, city)}
       </h1>
       {scope.nearby && (
         <p className="-mt-2 mb-4 text-sm text-muted-foreground">{content.search.nearby(city.name)}</p>

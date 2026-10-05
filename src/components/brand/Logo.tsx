@@ -7,6 +7,20 @@ import { cn } from "@/lib/utils";
  *
  * Скобки охряные (--color-accent): по закону цвета они держат предмет, а не
  * зовут нажать. Переопределяются там, где знак работает иконкой навигации. */
+
+/** Размеры знака от кегля — одни на шапку и на картинку для соцсетей
+ *  (src/app/opengraph-image.tsx), чтобы знак не разъехался между ними. */
+export function logoMetrics(size: number) {
+  return {
+    stroke: Math.max(1.5, +(size * 0.08).toFixed(2)),
+    height: Math.round(size * 0.95),
+    flare: Math.max(4, Math.round(size * 0.26)),
+    gap: Math.round(size * (size < 14 ? 0.18 : 0.14)),
+    /** Трекинг слова в em. */
+    tracking: size >= 40 ? -0.035 : size >= 24 ? -0.03 : -0.02,
+  };
+}
+
 export function Logo({
   size = 20,
   word = "inrenta",
@@ -22,11 +36,8 @@ export function Logo({
    *  гаснуть вместе с остальной навигацией (таб-бар). */
   bracketClassName?: string;
 }) {
-  const stroke = Math.max(1.5, +(size * 0.08).toFixed(2));
-  const height = Math.round(size * 0.95);
-  const flare = Math.max(4, Math.round(size * 0.26));
-  const gap = Math.round(size * (size < 14 ? 0.18 : 0.14));
-  const tracking = size >= 40 ? "-0.035em" : size >= 24 ? "-0.03em" : "-0.02em";
+  const { stroke, height, flare, gap, tracking: trackingEm } = logoMetrics(size);
+  const tracking = `${trackingEm}em`;
 
   const bracket = (side: "left" | "right") => (
     <span

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { suggestLocative } from "@/lib/catalog/city-locative";
+import { headingCity, suggestLocative } from "@/lib/catalog/city-locative";
 
 // Правило — подсказка для админки, а не источник правды: результат человек
 // подтверждает глазами, и хранится он потом колонкой. Поэтому тест проверяет,
@@ -52,5 +52,16 @@ describe("suggestLocative", () => {
     expect(suggestLocative("")).toBe("");
     expect(suggestLocative("   ")).toBe("");
     expect(suggestLocative("Сочи")).toBe("Сочах"); // неверно, но правится руками
+  });
+});
+
+// Город во фразе один на все места: с падежом — «в Казани», без — «· Казань».
+// Именительный после «в» не подставляется, запятая перед городом не ставится.
+describe("headingCity", () => {
+  it("с падежом — предлог и падеж", () => {
+    expect(headingCity({ name: "Казань", nameLocative: "Казани" })).toBe("в Казани");
+  });
+  it("без падежа — «· Город», без запятой", () => {
+    expect(headingCity({ name: "Казань", nameLocative: null })).toBe("· Казань");
   });
 });
