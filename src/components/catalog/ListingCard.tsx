@@ -244,15 +244,22 @@ export function ListingCard({
       {/* Подвал сеткой: способ получения слева, город справа. Город виден и на
         * телефоне — он короткий, и когда рядом не помещается «Самовывоз или
         * доставка», обрезается многоточием именно способ получения: он длиннее
-        * и переживает обрезку понятнее, чем название города. */}
+        * и переживает обрезку понятнее, чем название города.
+        *
+        * Ниже sm, в две узкие колонки, от способа оставалось «С…» — подпись
+        * там только для скринридера, видно один значок (подсказка — в title).
+        * Значок у способа свой на каждый случай, и он тот же, что на странице
+        * позиции и в фильтре «Как забрать». */}
       {!list && (
         <div className="flex items-center gap-2 border-t border-border px-3 py-3 text-xs text-muted-foreground sm:px-4 sm:text-sm">
-          <HandoverIcon
-            pickup={listing.handoverPickup}
-            delivery={listing.handoverDelivery}
-            className={HANDOVER_ICON}
-          />
-          <span className="min-w-0 truncate">{handover}</span>
+          <span title={handover} className="flex shrink-0">
+            <HandoverIcon
+              pickup={listing.handoverPickup}
+              delivery={listing.handoverDelivery}
+              className={HANDOVER_ICON}
+            />
+          </span>
+          <span className="min-w-0 truncate max-sm:sr-only">{handover}</span>
           {distanceTag ? (
             // Прижат вправо: расстояние у края, город перед ним.
             distancePlace(distanceTag, "justify-end")

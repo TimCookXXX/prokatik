@@ -49,6 +49,21 @@ describe("ListingCard", () => {
   // В узкой колонке телефона одна строка оставляла от названия «Перфоратор
   // Ма…». Две строки — и место под две всегда, чтобы цены в ряду стояли
   // на одной высоте при названиях разной длины.
+  // В две колонки на 360 от «Самовывоз» оставалось «С…»: ниже sm видно
+  // только значок, подпись остаётся скринридеру, подсказка — в title.
+  it("в узкой сетке способ получения — значком, подпись для скринридера", () => {
+    render(card({ handoverPickup: true, handoverDelivery: true }));
+    const label = screen.getByText("Самовывоз / доставка");
+    expect(label).toHaveClass("max-sm:sr-only");
+    expect(label.previousElementSibling).toHaveAttribute("title", "Самовывоз / доставка");
+    expect(label.previousElementSibling!.querySelector("svg")).toBeInTheDocument();
+  });
+
+  it("в строке списка подпись способа видна всегда", () => {
+    render(card({}, { view: "list" }));
+    expect(screen.getByText("Самовывоз")).not.toHaveClass("max-sm:sr-only");
+  });
+
   it("название — до двух строк, место под две строки всегда", () => {
     render(card());
     const title = screen.getByRole("heading", { name: "Перфоратор Bosch GBH 2-26" });
