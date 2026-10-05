@@ -10,10 +10,11 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { useRouter, useSelectedLayoutSegment } from "next/navigation";
-import { Check, CheckCheck, ChevronLeft, MessageCircle, Search } from "lucide-react";
+import { useSelectedLayoutSegment } from "next/navigation";
+import { Check, CheckCheck, Search } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
 import { fieldWithin } from "@/components/ui/field";
+import { ChatMobileHeader } from "@/components/chat/ChatMobileHeader";
 import { filterThreads, type ThreadFilter } from "@/lib/chat/grouping";
 import { content } from "@theme/content";
 import type { ThreadListItem } from "@/server/chat";
@@ -33,7 +34,6 @@ function when(value: Date): string {
 
 export function ThreadList({ threads }: { threads: ThreadListItem[] }) {
   const activeId = useSelectedLayoutSegment();
-  const router = useRouter();
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<ThreadFilter>("all");
 
@@ -63,27 +63,7 @@ export function ThreadList({ threads }: { threads: ThreadListItem[] }) {
 
   return (
     <>
-      {/* Заголовок раздела только на мобайле: там панель занимает весь экран и
-        * перекрывает заголовок из каркаса кабинета, так что понять, где ты,
-        * иначе нельзя. На десктопе раздел назван подсвеченным пунктом сайдбара.
-        *
-        * aria-hidden: настоящий h1 остаётся в каркасе (там он sr-only), и
-        * второй заголовок с тем же текстом только мешал бы скринридеру. */}
-      <div
-        aria-hidden="true"
-        className="flex shrink-0 items-center gap-2.5 px-3 pb-1 pt-3 md:hidden"
-      >
-        <button
-          type="button"
-          tabIndex={-1}
-          onClick={() => router.push("/cabinet" as never)}
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground"
-        >
-          <ChevronLeft className="h-5 w-5" />
-        </button>
-        <MessageCircle className="h-6 w-6 shrink-0 text-accent" />
-        <span className="font-display text-2xl font-bold">{t.title}</span>
-      </div>
+      <ChatMobileHeader />
 
       {/* Шапка колонки вне <nav>: поиск и фильтры навигацией не являются. */}
       <div className="flex shrink-0 flex-col gap-2.5 border-b border-border p-3">

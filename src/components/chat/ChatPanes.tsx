@@ -14,6 +14,7 @@
 
 import { useSelectedLayoutSegment } from "next/navigation";
 import { useVisualViewport } from "@/components/chat/useVisualViewport";
+import { ChatMobileHeader } from "@/components/chat/ChatMobileHeader";
 
 // Высота считается от свободного места под обложкой и героем, а не от всего
 // экрана: панель должна помещаться целиком, без прокрутки страницы. Из вьюпорта
@@ -75,10 +76,15 @@ export function ChatPanes({
   const threadOpen = useSelectedLayoutSegment() !== null;
   useVisualViewport();
 
+  // Без переписок списка нет, а с ним и мобильной шапки раздела — она живёт
+  // над списком. Здесь она своя, иначе экран оставался без заголовка и без
+  // пути назад. Заглушка встаёт под шапку и над таб-баром: панель fixed на весь
+  // экран, и таб-бар ложится поверх её низа.
   if (!hasThreads) {
     return (
       <div data-chat-screen className={`surface flex flex-col overflow-hidden ${PANEL_MOBILE}`}>
-        {children}
+        <ChatMobileHeader />
+        <div className="min-h-0 flex-1 max-md:pb-[var(--tabbar-h)]">{children}</div>
       </div>
     );
   }
