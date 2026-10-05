@@ -46,8 +46,8 @@ const samePoint = (a: UserPoint, b: UserPoint | null) =>
 //   Только строка списка: применённым значением оно не становится.
 //
 // Раскладка повторяет «Когда»: с lg — поле в панели и поповер подсказок; ниже
-// — шторка Modal с полем и списком под ним. В шапке ниже lg шторку открывает
-// чип в панели подсказок «Что» (sheetOpen снаружи); в hero — своя кнопка.
+// — шторка Modal с полем и списком под ним. На экране поиска шторку открывает
+// чип (вариант sheet, sheetOpen снаружи); в hero — своя кнопка.
 // Оба вида в DOM сразу и переключаются классами: поле, а не кнопка, нужно с
 // первого кадра, а ширину экрана сервер не знает.
 //
@@ -55,16 +55,17 @@ const samePoint = (a: UserPoint, b: UserPoint | null) =>
 export function WhereField({
   variant, city, value, onChange, track, sheetOpen, onSheetOpenChange, returnFocus, className,
 }: {
-  variant: "header" | "hero";
+  /** sheet — только шторка, без поля: её открывает чип экрана поиска. */
+  variant: "header" | "hero" | "sheet";
   city: WhereCity;
   value: UserPoint | null;
   onChange: (p: UserPoint | null) => void;
   /** Место определяется асинхронно (Enter по адресу, геолокация) — поиск ждёт этот промис. */
   track?: (pending: Promise<void>) => void;
-  /** Шторка под управлением снаружи — её открывает чип панели подсказок. */
+  /** Шторка под управлением снаружи — её открывает чип экрана поиска. */
   sheetOpen?: boolean;
   onSheetOpenChange?: (open: boolean) => void;
-  /** Куда вернуть фокус, когда шторка закрылась (чип к тому времени размонтирован). */
+  /** Куда вернуть фокус, когда шторка закрылась. */
   returnFocus?: () => HTMLElement | null;
   className?: string;
 }) {
@@ -196,6 +197,8 @@ export function WhereField({
     </Modal>
   );
 
+  if (variant === "sheet") return sheetBox;
+
   if (variant === "header") {
     return (
       <>
@@ -249,10 +252,15 @@ export function WhereField({
   );
 }
 
-/** Чип «Где» в верхней строке панели подсказок (шапка ниже lg). */
-export function WhereChip({ value, onClick }: { value: UserPoint | null; onClick: () => void }) {
+/** Чип «Где» под полем экрана поиска (ниже lg). */
+export function WhereChip({ value, onClick, buttonRef }: {
+  value: UserPoint | null;
+  onClick: () => void;
+  buttonRef?: React.Ref<HTMLButtonElement>;
+}) {
   return (
     <button
+      ref={buttonRef}
       type="button"
       onClick={onClick}
       aria-label={`${t.label}: ${value ? whereLabel(value) : t.any}`}

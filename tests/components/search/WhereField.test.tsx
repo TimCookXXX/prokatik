@@ -9,9 +9,10 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const push = vi.fn();
+const replace = vi.fn();
 const url = { pathname: "/krasnodar", search: "" };
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push }),
+  useRouter: () => ({ push, replace }),
   usePathname: () => url.pathname,
   useSearchParams: () => new URLSearchParams(url.search),
 }));
@@ -23,6 +24,7 @@ import { WhereField } from "@/components/search/WhereField";
 import { HeaderSearch } from "@/components/layout/HeaderSearch";
 import { _resetPanelDates } from "@/components/search/panel-dates";
 import { _resetSuggestCache } from "@/components/search/suggest-client";
+import { _resetSearchQuery } from "@/components/search/search-query";
 import { FIXTURE } from "../../geocoder/fixture";
 
 const engine = createGeocoder(structuredClone(FIXTURE));
@@ -34,6 +36,7 @@ let token = 0;
 const calls: URL[] = [];
 
 beforeEach(() => {
+  _resetSearchQuery();
   calls.length = 0;
   push.mockClear();
   _resetPanelDates();

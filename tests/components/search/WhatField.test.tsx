@@ -1,17 +1,20 @@
 import { readFileSync } from "node:fs";
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const push = vi.fn();
+const replace = vi.fn();
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push }),
+  useRouter: () => ({ push, replace }),
   usePathname: () => "/kazan",
   useSearchParams: () => new URLSearchParams(""),
 }));
 
 import { content } from "@theme/content";
 import { SearchBar } from "@/components/search/SearchBar";
+import { MobileSearchScreen } from "@/components/search/MobileSearchScreen";
 import { _resetSuggestCache } from "@/components/search/suggest-client";
+import { _resetSearchQuery, openSearchScreen } from "@/components/search/search-query";
 
 const CITIES = [{ slug: "kazan", name: "Казань", geo: null }];
 
@@ -49,8 +52,10 @@ const fetchMock = vi.fn(async (url: string) => {
 });
 
 beforeEach(() => {
+  _resetSearchQuery();
   _resetSuggestCache();
   push.mockClear();
+  replace.mockClear();
   fetchMock.mockClear();
   replies = { "дре": { status: 200, body: DRE }, "дрель": { status: 200, body: DRILL } };
   gates.clear();
@@ -59,7 +64,6 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
-  delete (window as { matchMedia?: unknown }).matchMedia;
 });
 
 const field = () => screen.getByRole("combobox");
@@ -168,12 +172,26 @@ describe("WhatField", () => {
     expect(field()).toHaveValue("дрель makita");
   });
 
-  it("a click on a section opens the section", async () => {
-    renderBar();
-    act(() => field().focus());
+  // Раздел в форме ведёт к «Когда» (WhenField.test), на экране поиска — сразу.
+  it("a click on a section on the search screen opens the section", async () => {
+    render(<MobileSearchScreen cities={CITIES} />);
+    act(() => openSearchScreen(null));
     type("дрель");
     fireEvent.click(await screen.findByRole("option", { name: "Электроинструменты" }));
-    expect(push).toHaveBeenCalledWith("/kazan/instrumenty/elektro");
+    expect(replace).toHaveBeenCalledWith("/kazan/instrumenty/elektro");
+    expect(push).not.toHaveBeenCalled();
+  });
+
+  // Экран поиска: список не зависит от фокуса — спрятанная клавиатура его не закрывает.
+  it("keeps the suggestions on the search screen when the field loses focus", async () => {
+    render(<MobileSearchScreen cities={CITIES} />);
+    act(() => openSearchScreen(null));
+    expect(document.activeElement).toBe(field());
+    type("дрель");
+    await screen.findByRole("option", { name: "дрель makita" });
+
+    act(() => field().blur());
+    expect(screen.getByRole("option", { name: "дрель makita" })).toBeInTheDocument();
   });
 
   it("Enter without an active row searches the free text", async () => {
@@ -252,65 +270,13 @@ describe("WhatField", () => {
     expect(options().map((o) => o.textContent)).toEqual(["Электроинструменты", content.search.showAll("дрель")]);
   });
 
-  it("keeps the field focused and opens the full-screen panel on phones", async () => {
-    renderBar();
-    act(() => field().focus());
-
-    const panel = document.querySelector("[data-suggest-panel]");
-    expect(panel).not.toBeNull();
-    expect(panel).toHaveClass("z-50");
-    expect(document.activeElement).toBe(field());
-    // Пустое поле — в панели только верхняя строка, без списка.
-    expect(within(panel as HTMLElement).queryByRole("listbox")).toBeNull();
-
-    fireEvent.click(within(panel as HTMLElement).getByRole("button", { name: content.search.closeSuggest }));
-    expect(document.querySelector("[data-suggest-panel]")).toBeNull();
-  });
-
-  // Ниже lg hero отдаёт фокус полю шапки — но только касанием или кликом. С
-  // клавиатуры фокус остаётся в hero, иначе Tab ходил бы по кругу шапка → hero.
-  describe("hero below lg", () => {
-    function renderHeaderAndHero() {
-      render(
-        <>
-          <header data-site-header><SearchBar variant="header" cities={CITIES} /></header>
-          <SearchBar variant="hero" cities={CITIES} citySlug="kazan" />
-        </>,
-      );
-      const [header, hero] = screen.getAllByRole("combobox");
-      return { header, hero };
-    }
-
-    it("hands a tap over to the header field", () => {
-      const { header, hero } = renderHeaderAndHero();
-      fireEvent.pointerDown(hero);
-      act(() => hero.focus());
-      expect(document.activeElement).toBe(header);
-    });
-
-    it("keeps keyboard focus in the hero, without a panel of its own", () => {
-      const { hero } = renderHeaderAndHero();
-      act(() => hero.focus());
-      expect(document.activeElement).toBe(hero);
-      expect(document.querySelector("[data-suggest-panel]")).toBeNull();
-
-      fireEvent.change(hero, { target: { value: "дрель" } });
-      expect(document.querySelector("[data-suggest-panel]")).toBeNull();
-    });
-  });
-
-  it("uses a popover under the field from lg", async () => {
-    Object.defineProperty(window, "matchMedia", { configurable: true, writable: true, value: (q: string) => ({
-      matches: q === "(min-width: 1024px)",
-      addEventListener: () => {},
-      removeEventListener: () => {},
-    }) });
+  // Форма видна только с lg: ниже её место занимает триггер экрана поиска.
+  it("uses a popover under the field in the form", async () => {
     renderBar();
     act(() => field().focus());
     type("дрель");
 
     await screen.findByRole("option", { name: "дрель makita" });
-    expect(document.querySelector("[data-suggest-panel]")).toBeNull();
     // Поповер — в портале, вне формы: секция hero с overflow-hidden его не обрежет.
     expect(screen.getByRole("search")).not.toContainElement(screen.getByRole("listbox"));
 

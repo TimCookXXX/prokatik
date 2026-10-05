@@ -26,9 +26,13 @@ function useHeroSearchInView(): boolean | null {
       return;
     }
     // Верх видимой области — низ липкой шапки: поиск hero, ушедший под неё,
-    // уже не виден, и шапка должна показать свой.
+    // уже не виден, и шапка должна показать свой. Верхний системный инсет
+    // (--safe-top) — env(), его в JS не разобрать: берём готовый отступ шапки.
     const css = getComputedStyle(document.documentElement);
-    const top = (parseFloat(css.getPropertyValue("--header-h")) || 0)
+    const siteHeader = document.querySelector("[data-site-header]");
+    const safeTop = siteHeader ? parseFloat(getComputedStyle(siteHeader).paddingTop) || 0 : 0;
+    const top = safeTop
+      + (parseFloat(css.getPropertyValue("--header-h")) || 0)
       + (parseFloat(css.getPropertyValue("--header-inset")) || 0);
     const io = new IntersectionObserver(
       // Последняя запись — самая свежая: за один вызов их может прийти
@@ -55,11 +59,10 @@ function useHeroSearchInView(): boolean | null {
 //   Так без JS и без города (hero без поиска) поиск шапки работает, а с поиском
 //   hero его скрытые поля не попадают ни в табуляцию, ни в дерево доступности.
 // - поиск hero на экране — inert: вне табуляции, касаний и дерева доступности
-//   вместе со всем, что панель смонтирует потом. Ниже lg поле «Что» hero
-//   отдаёт фокус полю шапки — перед этим SearchBar снимает inert, и фокус его
-//   показывает. Пока внутри фокус — в поле, в поповере, шторке или панели
-//   подсказок (порталы, но события фокуса React всплывают по дереву
-//   компонентов), — поиск не прячется.
+//   вместе со всем, что панель смонтирует потом. Пока внутри фокус — в поле,
+//   поповере или календаре (порталы, но события фокуса React всплывают по
+//   дереву компонентов), — поиск не прячется. Экран поиска на телефоне
+//   (MobileSearchScreen) живёт вне этой обёртки: inert его не задевает.
 export function HeaderSearch({
   className,
   // Активные города — чтобы узнать город в адресе и не принять за него первый

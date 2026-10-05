@@ -1,10 +1,11 @@
-import { act, render, screen, fireEvent } from "@testing-library/react";
+import { act, render, screen, fireEvent, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 
 const push = vi.fn();
+const replace = vi.fn();
 const url = { pathname: "/", search: "" };
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push }),
+  useRouter: () => ({ push, replace }),
   usePathname: () => url.pathname,
   useSearchParams: () => new URLSearchParams(url.search),
 }));
@@ -12,14 +13,16 @@ vi.mock("next/navigation", () => ({
 import { content } from "@theme/content";
 import { HeaderSearch } from "@/components/layout/HeaderSearch";
 import { SearchBar } from "@/components/search/SearchBar";
+import { MobileSearchScreen } from "@/components/search/MobileSearchScreen";
 import { _resetSuggestCache } from "@/components/search/suggest-client";
+import { _resetSearchQuery } from "@/components/search/search-query";
 
 const CITIES = [
   { slug: "kazan", name: "Казань", geo: null },
   { slug: "spb", name: "Санкт-Петербург", geo: null },
 ];
 
-const field = () => screen.getByRole("combobox");
+const field = () => screen.getAllByRole("combobox")[0];
 
 const submit = (query?: string) => {
   if (query !== undefined) {
@@ -29,6 +32,7 @@ const submit = (query?: string) => {
 };
 
 beforeEach(() => {
+  _resetSearchQuery();
   push.mockClear();
   _resetSuggestCache();
   // Подсказки здесь не проверяются (WhatField.test) — сервер молчит.
@@ -128,6 +132,24 @@ describe("HeaderSearch", () => {
     expect(field()).toHaveValue("палатка");
   });
 
+  // Поле, ушедшее из DOM в фокусе («назад» с главной), blur не присылает —
+  // шапка всё равно снова следует за адресом.
+  it("follows the address again after a focused field unmounts", () => {
+    url.pathname = "/";
+    url.search = "";
+    const { rerender } = render(
+      <><HeaderSearch cities={CITIES} /><SearchBar variant="hero" cities={[CITIES[0]]} citySlug="kazan" /></>,
+    );
+    const hero = screen.getAllByRole("combobox")[1];
+    act(() => hero.focus());
+    fireEvent.change(hero, { target: { value: "палатка" } });
+
+    url.pathname = "/search";
+    url.search = "q=дрель";
+    rerender(<HeaderSearch cities={CITIES} />);
+    expect(field()).toHaveValue("дрель");
+  });
+
   it("does not overwrite what is being typed", () => {
     url.pathname = "/search";
     url.search = "q=дрель";
@@ -142,17 +164,37 @@ describe("HeaderSearch", () => {
     expect(field()).toHaveValue("перфоратор");
   });
 
-  // Настоящее поле, а не кнопка-сводка: тап сразу ставит фокус и поднимает
-  // клавиатуру, панель подсказок открывается под шапкой.
-  it("takes the focus right on the tap on phones", () => {
+  // Десктоп не меняется: форма в разметке всегда, ниже lg её прячет CSS, а
+  // место занимает кнопка экрана поиска. Без JS-ветки — сервер ширины не знает.
+  it("renders both the form and the phone trigger, switched by CSS only", () => {
     url.pathname = "/spb";
     url.search = "";
 
     render(<HeaderSearch cities={CITIES} />);
-    act(() => field().focus());
+    const form = screen.getByRole("search", { name: content.search.headerLabel });
+    expect(form).toHaveClass("hidden", "lg:flex");
+    expect(form.querySelector("[data-what-input]")).not.toBeNull();
+    const trigger = screen.getByRole("button", { name: content.search.whatLabel });
+    expect(trigger).toHaveClass("lg:hidden");
+    expect(trigger).toHaveAttribute("aria-haspopup", "dialog");
+  });
 
-    expect(document.activeElement).toBe(field());
-    expect(document.querySelector("[data-suggest-panel]")).not.toBeNull();
+  // Тап по кнопке-полю открывает экран поиска и сразу ставит фокус в его поле
+  // (iOS поднимает клавиатуру только так); текст — тот же, что в шапке.
+  it("opens the search screen from the trigger with the focus in its field", () => {
+    url.pathname = "/search";
+    url.search = "q=дрель&city=spb";
+
+    render(<><HeaderSearch cities={CITIES} /><MobileSearchScreen cities={CITIES} /></>);
+    const trigger = screen.getByRole("button", { name: `${content.search.whatLabel}: дрель` });
+    expect(trigger).toHaveTextContent("дрель");
+    fireEvent.click(trigger);
+
+    const dialog = screen.getByRole("dialog", { name: content.search.screenLabel });
+    expect(dialog).toHaveAttribute("aria-modal", "true");
+    const input = within(dialog).getByRole("combobox");
+    expect(document.activeElement).toBe(input);
+    expect(input).toHaveValue("дрель");
   });
 });
 
@@ -259,7 +301,7 @@ describe("HeaderSearch on the home page", () => {
     heroVisible(true);
     const input = box().querySelector<HTMLInputElement>("[data-what-input]")!;
 
-    // Программно: inert снимают те, кто отдаёт фокус (поле «Что» hero).
+    // Фокус пришёл, пока поиск был виден, а потом hero вернулся на экран.
     box().removeAttribute("inert");
     act(() => input.focus());
     expect(document.activeElement).toBe(input);
@@ -272,27 +314,27 @@ describe("HeaderSearch on the home page", () => {
     expect(box()).toHaveAttribute("inert");
   });
 
-  // Ниже lg поле «Что» hero отдаёт фокус полю шапки: скрытое поле обязано его
-  // принять и показаться вместе с панелью подсказок.
-  it("takes the focus redirected from the hero field on phones", () => {
-    // jsdom inert не знает: как браузер, не даём фокус элементу внутри inert.
-    const focus = HTMLElement.prototype.focus;
-    const spy = vi.spyOn(HTMLElement.prototype, "focus").mockImplementation(function (this: HTMLElement, o) {
-      if (!this.closest("[inert]")) focus.call(this, o);
-    });
-    renderHome();
+  // Ниже lg hero и шапка открывают один и тот же экран; скрытый (inert)
+  // поиск шапки при этом не трогается — экран живёт вне его обёртки.
+  it("opens the same search screen from the hero, outside the hidden header search", () => {
+    render(
+      <>
+        <header data-site-header><HeaderSearch cities={CITIES} /></header>
+        <main><SearchBar variant="hero" cities={[CITIES[0]]} citySlug="kazan" /></main>
+        <MobileSearchScreen cities={CITIES} />
+      </>,
+    );
     heroVisible(true);
-    const hero = screen.getByRole("search", { name: content.search.heroLabel })
-      .querySelector<HTMLInputElement>("[data-what-input]")!;
+    const hero = screen.getByRole("search", { name: content.search.heroLabel });
+    fireEvent.click(within(hero).getByRole("button", { name: content.search.whatLabel }));
 
-    fireEvent.pointerDown(hero);
-    act(() => hero.focus());
-    spy.mockRestore();
-
-    const header = box().querySelector("[data-what-input]");
-    expect(document.activeElement).toBe(header);
-    expect(box()).not.toHaveAttribute("inert");
-    expect(document.querySelector("[data-suggest-panel]")).not.toBeNull();
+    const dialog = screen.getByRole("dialog", { name: content.search.screenLabel });
+    expect(box()).not.toContainElement(dialog);
+    const input = within(dialog).getByRole("combobox");
+    fireEvent.change(input, { target: { value: "палатка" } });
+    // Текст общий: его видят и триггер hero, и триггер шапки.
+    expect(screen.getAllByRole("button", { name: `${content.search.whatLabel}: палатка`, hidden: true })).toHaveLength(2);
+    expect(box()).toHaveAttribute("inert");
   });
 
   it("is visible on any other page without waiting for the observer", () => {

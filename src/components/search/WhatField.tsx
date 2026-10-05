@@ -11,7 +11,6 @@ import { highlight } from "@/lib/search/match";
 import type { WhatValue } from "@/lib/search/submit-href";
 import type { DateRange } from "@/lib/catalog/filters";
 import { PopoverContent } from "@/components/ui/Popover";
-import { MobileSuggestPanel, usePopoverLayout } from "./MobileSuggestPanel";
 import {
   EMPTY_SUGGEST, SUGGEST_DEBOUNCE_MS, cachedSuggest, fetchSuggest, sameTyping, shouldApply,
   suggestQuery, type SuggestCategory, type SuggestQuery, type SuggestResult, type SuggestWhere,
@@ -42,12 +41,13 @@ const prevent = (e: React.SyntheticEvent | Event) => e.preventDefault();
 //
 // Поле прозрачное: вид несёт обёртка fieldWithin в SearchBar.
 //
-// Список — поповер под полем с lg и полноэкранная панель под шапкой ниже
-// (MobileSuggestPanel). Фокус всегда остаётся в поле: курсор по строкам
-// ведётся aria-activedescendant, строки отмечены data-active (globals.css).
+// Список — поповер под полем в форме (шапка и hero с lg) или часть разметки
+// экрана поиска на телефоне (renderInline, MobileSearchScreen). Фокус всегда
+// остаётся в поле: курсор по строкам ведётся aria-activedescendant, строки
+// отмечены data-active (globals.css).
 export function WhatField({
   id, citySlug, dates = null, where = null, value, onChange, onPick, inputRef, label, labelClassName, placeholder,
-  inputClassName, clearClassName, className, redirectFocus, panelToolbar,
+  inputClassName, clearClassName, className, onFocusChange, renderInline,
 }: {
   /** Стабильный id: не useId, поле рендерится и на сервере, ids совпадают при гидрации. */
   id: string;
@@ -68,25 +68,28 @@ export function WhatField({
   /** Классы крестика очистки: в узкой шапке он прячется, чтобы не съесть поле. */
   clearClassName?: string;
   className?: string;
+  /** Фокус пришёл в поле или ушёл из него. */
+  onFocusChange?: (focused: boolean) => void;
   /**
-   * Ниже lg — куда отдать фокус вместо своего списка. Hero на телефоне так
-   * открывает ту же панель, что и шапка: панель лежит под шапкой и закрыла бы
-   * поле hero, в котором человек печатает. Фокус уходит только по касанию или
-   * клику: с клавиатуры Tab вернул бы его в hero, и дальше по странице было бы
-   * не пройти. С клавиатуры поле ниже lg — простой ввод без списка.
+   * Экран поиска: поле и список раскладывает он сам, а список не зависит от
+   * фокуса — спрятанная клавиатура или открытая шторка его не закрывают.
    */
-  redirectFocus?: () => HTMLElement | null;
-  /** Чипы других полей в верхней строке панели подсказок (ниже lg). */
-  panelToolbar?: React.ReactNode;
+  renderInline?: (parts: { field: React.ReactNode; list: React.ReactNode; typing: boolean }) => React.ReactNode;
 }) {
-  const popover = usePopoverLayout();
+  const inline = Boolean(renderInline);
   const anchorRef = useRef<HTMLDivElement>(null);
-  // Ниже lg у поля с redirectFocus своего списка нет — список у поля шапки.
-  const ownList = popover || !redirectFocus;
+  // Поле, ушедшее из DOM в фокусе (переход «назад» с главной), blur не
+  // присылает: сообщаем об уходе фокуса сами, иначе флаг «поле под руками»
+  // залип бы и адрес перестал бы обновлять текст.
+  const hasFocus = useRef(false);
+  const focusChange = useRef(onFocusChange);
+  focusChange.current = onFocusChange;
+  useEffect(() => () => {
+    if (hasFocus.current) focusChange.current?.(false);
+  }, []);
   const [requested, setOpen] = useState(false);
-  const open = requested && ownList;
-  // Фокус пришёл от указателя, а не с клавиатуры: pointerdown идёт раньше focus.
-  const byPointer = useRef(false);
+  // На экране список живёт, пока живёт экран: экран и монтирует поле.
+  const open = requested || inline;
   const [active, setActive] = useState(-1);
   const [reply, setReply] = useState<Reply | null>(null);
   const seq = useRef(0);
@@ -184,7 +187,7 @@ export function WhatField({
     } else if (e.key === "Enter" && showList && active >= 0 && flat[active]) {
       e.preventDefault();
       choose(flat[active]);
-    } else if (e.key === "Escape" && open) {
+    } else if (e.key === "Escape" && open && !inline) {
       e.preventDefault();
       close();
     }
@@ -254,67 +257,77 @@ export function WhatField({
     </>
   );
 
+  const field = (
+    <div ref={anchorRef} className={cn("flex min-w-0 flex-col", className)}>
+      <label htmlFor={`${id}-input`} className={labelClassName}>{label}</label>
+      <div className="flex items-center gap-1">
+        <input
+          ref={inputRef}
+          id={`${id}-input`}
+          name="q"
+          type="text"
+          role="combobox"
+          data-what-input
+          aria-autocomplete="list"
+          aria-expanded={showList}
+          // Ссылка только на смонтированный список: aria-controls на
+          // несуществующий id скринридер считает битой связью.
+          aria-controls={showList ? listId : undefined}
+          aria-activedescendant={showList && active >= 0 ? optionId(active) : undefined}
+          autoComplete="off"
+          autoCapitalize="off"
+          spellCheck={false}
+          enterKeyHint="search"
+          placeholder={placeholder}
+          value={value}
+          onFocus={(e) => {
+            hasFocus.current = true;
+            onFocusChange?.(true);
+            setOpen(true);
+            setActive(-1);
+            e.currentTarget.select();
+          }}
+          onBlur={() => { hasFocus.current = false; onFocusChange?.(false); close(); }}
+          onChange={(e) => { onChange(e.target.value); setOpen(true); setActive(-1); }}
+          onKeyDown={onKeyDown}
+          className={cn(
+            "w-full min-w-0 truncate bg-transparent text-foreground outline-none placeholder:text-muted-foreground",
+            inputClassName,
+          )}
+        />
+        {value !== "" && (
+          <button
+            type="button"
+            aria-label={content.search.clear}
+            onMouseDown={prevent}
+            onClick={() => { onChange(""); setOpen(true); setActive(-1); inputRef.current?.focus(); }}
+            className={cn("hoverable grid h-7 w-7 shrink-0 place-items-center rounded-sm text-muted-foreground", clearClassName)}
+          >
+            <X className="h-4 w-4" aria-hidden="true" />
+          </button>
+        )}
+      </div>
+    </div>
+  );
+
+  const status = <div role="status" className="sr-only">{announce}</div>;
+
+  if (renderInline) {
+    return (
+      <>
+        {renderInline({ field, list, typing })}
+        {status}
+      </>
+    );
+  }
+
   return (
-    <PopoverPrimitive.Root open={popover && showList} onOpenChange={(o) => { if (!o) close(); }}>
-      <PopoverPrimitive.Anchor asChild>
-        <div ref={anchorRef} className={cn("flex min-w-0 flex-col", className)}>
-          <label htmlFor={`${id}-input`} className={labelClassName}>{label}</label>
-          <div className="flex items-center gap-1">
-            <input
-              ref={inputRef}
-              id={`${id}-input`}
-              name="q"
-              type="text"
-              role="combobox"
-              data-what-input
-              aria-autocomplete="list"
-              aria-expanded={showList}
-              // Ссылка только на смонтированный список: aria-controls на
-              // несуществующий id скринридер считает битой связью.
-              aria-controls={showList ? listId : undefined}
-              aria-activedescendant={showList && active >= 0 ? optionId(active) : undefined}
-              autoComplete="off"
-              autoCapitalize="off"
-              spellCheck={false}
-              enterKeyHint="search"
-              placeholder={placeholder}
-              value={value}
-              onPointerDown={() => { byPointer.current = true; }}
-              onFocus={(e) => {
-                const pointer = byPointer.current;
-                byPointer.current = false;
-                const target = !ownList && pointer ? redirectFocus?.() : null;
-                if (target && target !== e.currentTarget) { target.focus(); return; }
-                setOpen(true);
-                setActive(-1);
-                e.currentTarget.select();
-              }}
-              onBlur={() => { byPointer.current = false; close(); }}
-              onChange={(e) => { onChange(e.target.value); setOpen(true); setActive(-1); }}
-              onKeyDown={onKeyDown}
-              className={cn(
-                "w-full min-w-0 truncate bg-transparent text-foreground outline-none placeholder:text-muted-foreground",
-                inputClassName,
-              )}
-            />
-            {value !== "" && (
-              <button
-                type="button"
-                aria-label={content.search.clear}
-                onMouseDown={prevent}
-                onClick={() => { onChange(""); setOpen(true); setActive(-1); inputRef.current?.focus(); }}
-                className={cn("hoverable grid h-7 w-7 shrink-0 place-items-center rounded-sm text-muted-foreground", clearClassName)}
-              >
-                <X className="h-4 w-4" aria-hidden="true" />
-              </button>
-            )}
-          </div>
-        </div>
-      </PopoverPrimitive.Anchor>
+    <PopoverPrimitive.Root open={showList} onOpenChange={(o) => { if (!o) close(); }}>
+      <PopoverPrimitive.Anchor asChild>{field}</PopoverPrimitive.Anchor>
 
-      <div role="status" className="sr-only">{announce}</div>
+      {status}
 
-      {popover && showList && (
+      {showList && (
         <PopoverContent
           // Обёртка списка, а не диалог: фокус в нём не бывает.
           role="presentation"
@@ -329,10 +342,6 @@ export function WhatField({
         >
           {list}
         </PopoverContent>
-      )}
-
-      {!popover && open && (
-        <MobileSuggestPanel onClose={() => inputRef.current?.blur()} toolbar={panelToolbar}>{list}</MobileSuggestPanel>
       )}
     </PopoverPrimitive.Root>
   );

@@ -2,16 +2,19 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const push = vi.fn();
+const replace = vi.fn();
 const url = { pathname: "/kazan", search: "" };
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push }),
+  useRouter: () => ({ push, replace }),
   usePathname: () => url.pathname,
   useSearchParams: () => new URLSearchParams(url.search),
 }));
 
 import { content } from "@theme/content";
 import { SearchBar } from "@/components/search/SearchBar";
+import { MobileSearchScreen } from "@/components/search/MobileSearchScreen";
 import { _resetSuggestCache } from "@/components/search/suggest-client";
+import { _resetSearchQuery } from "@/components/search/search-query";
 import { _resetPanelDates } from "@/components/search/panel-dates";
 
 const CITIES = [{ slug: "kazan", name: "Казань", geo: null }];
@@ -42,6 +45,7 @@ function desktop(on: boolean) {
 }
 
 beforeEach(() => {
+  _resetSearchQuery();
   vi.useFakeTimers({ toFake: ["Date"] });
   setToday("2026-09-01");
   push.mockClear();
@@ -196,19 +200,27 @@ describe("WhenField", () => {
     expect(push).toHaveBeenCalledWith(`/search?${new URLSearchParams({ q: "дрель ударная", city: "kazan" })}`);
   });
 
-  // Ниже lg «Когда» в шапке — чип в панели подсказок и точка на иконке поля.
-  it("ниже lg: чип в панели подсказок открывает шторку, точка на поле — когда даты выбраны", async () => {
+  // Ниже lg «Когда» в шапке — чип на экране поиска и точка на триггере.
+  it("ниже lg: чип на экране поиска открывает шторку, точка на триггере — когда даты выбраны", async () => {
     url.search = "from=2026-09-05&to=2026-09-10";
-    render(<header data-site-header><SearchBar variant="header" cities={CITIES} /></header>);
-    expect(screen.getByText(content.search.when.datesSet)).toBeInTheDocument();
+    render(
+      <>
+        <header data-site-header><SearchBar variant="header" cities={CITIES} /></header>
+        <MobileSearchScreen cities={CITIES} />
+      </>,
+    );
+    const trigger = screen.getByRole("button", { name: new RegExp(content.search.when.datesSet) });
+    fireEvent.click(trigger);
 
-    act(() => screen.getByRole("combobox").focus());
-    const panel = document.querySelector<HTMLElement>("[data-suggest-panel]")!;
-    const chip = within(panel).getByRole("button", { name: /^Когда:/ });
+    const dialog = screen.getByRole("dialog", { name: content.search.screenLabel });
+    const chip = within(dialog).getByRole("button", { name: /^Когда:/ });
     expect(chip).toHaveTextContent("сб 5 — чт 10 сен");
 
     fireEvent.click(chip);
-    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    const sheet = await screen.findByRole("dialog", { name: content.search.when.title });
+    expect(within(sheet).getAllByRole("grid")).toHaveLength(1);
+    // Шторка поверх экрана — экран остаётся открытым.
+    expect(document.querySelector("[data-search-screen]")).toHaveAttribute("data-state", "open");
   });
 
   // Неотправленный выбор живёт до перехода: вернувшись на тот же адрес
@@ -231,8 +243,8 @@ describe("WhenField", () => {
     expect(hidden("from")).toBeNull();
   });
 
-  // На телефоне человек выбирает даты в hero, а подсказку берёт в панели
-  // шапки (поле hero отдаёт ей фокус) — шапка отправляет те же даты.
+  // На телефоне человек выбирает даты в hero, а ищет на экране поиска,
+  // открытом из шапки, — шапка отправляет те же даты.
   it("даты, выбранные в hero, видит и отправляет шапка", async () => {
     render(
       <>

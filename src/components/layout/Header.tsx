@@ -11,6 +11,7 @@ import { getCitiesGeo } from "@/server/city";
 import { UserMenu } from "@/components/auth/UserMenu";
 import { CitySelector } from "./CitySelector";
 import type { SearchCity } from "@/components/search/SearchBar";
+import { MobileSearchScreen } from "@/components/search/MobileSearchScreen";
 import { HeaderSearch } from "./HeaderSearch";
 
 export async function Header() {
@@ -68,8 +69,10 @@ export async function Header() {
             </div>
           </div>
 
-          {/* Поиск занимает всё оставшееся место в ряду. */}
+          {/* Поиск занимает всё оставшееся место в ряду. Ниже lg это кнопка
+            * экрана поиска; сам экран — порталом в body, вне HeaderSearch. */}
           <HeaderSearch className="min-w-0 flex-1" cities={searchCities} />
+          <MobileSearchScreen cities={searchCities} />
 
           {/* Действия: на мобайле их роль берёт таб-бар — «Сдать», «Профиль»,
            * а переключатель темы живёт в подвале. */}

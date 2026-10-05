@@ -13,7 +13,7 @@ import { Modal, ModalContent, ModalTitle } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/button";
 import { filterChip } from "@/components/ui/filter-chip";
 import { DateRangeCalendar, whenLabel } from "@/components/catalog/DateRangeCalendar";
-import { usePopoverLayout } from "./MobileSuggestPanel";
+import { usePopoverLayout } from "./use-popover-layout";
 
 const t = content.search.when;
 
@@ -21,7 +21,8 @@ const t = content.search.when;
 // - с lg — поповер под полем, два месяца, период фиксируется сам через 220 мс
 //   после второго клика или закрытием поповера; переход — кнопкой поиска;
 // - ниже — шторка Modal с одним месяцем и «Готово». В шапке ниже lg самого
-//   поля нет: шторку открывает чип в панели подсказок (sheetOpen снаружи).
+//   поля нет: на экране поиска шторку открывает чип (вариант sheet, sheetOpen
+//   снаружи).
 //
 // «Сегодня» считается на клиенте при открытии, а не приходит пропом: шапка
 // живёт в корневом layout'е и не перерисовывается, и после полуночи открытая
@@ -29,13 +30,14 @@ const t = content.search.when;
 export function WhenField({
   variant, value, onChange, sheetOpen, onSheetOpenChange, returnFocus, className,
 }: {
-  variant: "header" | "hero";
+  /** sheet — только шторка, без поля: её открывает чип экрана поиска. */
+  variant: "header" | "hero" | "sheet";
   value: DateRange | null;
   onChange: (range: DateRange | null) => void;
-  /** Шторка под управлением снаружи — её открывает чип панели подсказок. */
+  /** Шторка под управлением снаружи — её открывает чип экрана поиска. */
   sheetOpen?: boolean;
   onSheetOpenChange?: (open: boolean) => void;
-  /** Куда вернуть фокус, когда шторка закрылась (чип к тому времени размонтирован). */
+  /** Куда вернуть фокус, когда шторка закрылась. */
   returnFocus?: () => HTMLElement | null;
   className?: string;
 }) {
@@ -84,6 +86,34 @@ export function WhenField({
 
   const header = variant === "header";
   const valueText = value ? whenLabel(value.from, value.to) : t.any;
+
+  const sheetBox = (
+    <Modal open={sheet} onOpenChange={setSheet}>
+      <ModalContent
+        aria-describedby={undefined}
+        className="md:max-w-[26rem]"
+        onCloseAutoFocus={(e) => {
+          const target = returnFocus?.();
+          if (!target) return;
+          e.preventDefault();
+          target.focus();
+        }}
+      >
+        <ModalTitle className="mb-3 text-lg font-bold">{t.title}</ModalTitle>
+        {today && (
+          <DateRangeCalendar months={1} autoClose={false} today={today} selected={sel} onSelect={setSel} />
+        )}
+        <div className="mt-3 flex items-center gap-2">
+          <Button type="button" variant="ghost" onClick={reset}>{t.any}</Button>
+          <Button type="button" className="flex-1" onClick={() => { commit(sel); setSheet(false); }}>
+            {t.done}
+          </Button>
+        </div>
+      </ModalContent>
+    </Modal>
+  );
+
+  if (variant === "sheet") return sheetBox;
 
   return (
     <>
@@ -152,38 +182,20 @@ export function WhenField({
           </PopoverContent>
         )}
       </PopoverPrimitive.Root>
-
-      <Modal open={sheet} onOpenChange={setSheet}>
-        <ModalContent
-          aria-describedby={undefined}
-          className="md:max-w-[26rem]"
-          onCloseAutoFocus={(e) => {
-            const target = returnFocus?.();
-            if (!target) return;
-            e.preventDefault();
-            target.focus();
-          }}
-        >
-          <ModalTitle className="mb-3 text-lg font-bold">{t.title}</ModalTitle>
-          {today && (
-            <DateRangeCalendar months={1} autoClose={false} today={today} selected={sel} onSelect={setSel} />
-          )}
-          <div className="mt-3 flex items-center gap-2">
-            <Button type="button" variant="ghost" onClick={reset}>{t.any}</Button>
-            <Button type="button" className="flex-1" onClick={() => { commit(sel); setSheet(false); }}>
-              {t.done}
-            </Button>
-          </div>
-        </ModalContent>
-      </Modal>
+      {sheetBox}
     </>
   );
 }
 
-/** Чип «Когда» в верхней строке панели подсказок (шапка ниже lg). */
-export function WhenChip({ value, onClick }: { value: DateRange | null; onClick: () => void }) {
+/** Чип «Когда» под полем экрана поиска (ниже lg). */
+export function WhenChip({ value, onClick, buttonRef }: {
+  value: DateRange | null;
+  onClick: () => void;
+  buttonRef?: React.Ref<HTMLButtonElement>;
+}) {
   return (
     <button
+      ref={buttonRef}
       type="button"
       onClick={onClick}
       aria-label={`${t.label}: ${value ? whenLabel(value.from, value.to) : t.any}`}
