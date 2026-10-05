@@ -32,7 +32,7 @@ beforeEach(() => {
   push.mockClear();
   _resetSuggestCache();
   // Подсказки здесь не проверяются (WhatField.test) — сервер молчит.
-  vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => ({ items: [], categories: [] }) })));
+  vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => ({ queries: [], categories: [] }) })));
 });
 
 afterEach(() => {

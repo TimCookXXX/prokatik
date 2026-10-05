@@ -5,10 +5,10 @@
 // Запись объявления: `own` — слова заголовка, `context` — раздел, корень и
 // keywords раздела (вес CONTEXT_WEIGHT), `extra` — первые слова описания (вес
 // EXTRA_WEIGHT, только точное совпадение, начало или основа). Каждое слово
-// запроса обязано совпасть. В подсказки объявление идёт, только если все слова
-// совпали в заголовке или разделе; выдаче `/search` хватает и описания, но такие
-// совпадения стоят после всех остальных. Поэтому верх выдачи без фасетов — это
-// ровно подсказки.
+// запроса обязано совпасть. Выдача `/search` (режим `results`) сначала берёт
+// совпавшие в заголовке или разделе, затем — только по описанию. Подсказки
+// панели «Что» объявлений не показывают: они дополняют запрос (complete.ts) и
+// проверяют каждую фразу этим же движком.
 //
 // Скорость. Наивный перебор (match.ts) сравнивал бы каждое слово запроса с
 // каждым словом каждой записи. Здесь слова записей сведены в словарь
@@ -19,8 +19,8 @@
 import { categoryKeywords } from "@/lib/seed/categories";
 import { compact, stem, words } from "./text";
 import {
-  CONTEXT_WEIGHT, EXTRA_WEIGHT, extraWordScore, queryTokens, stopWordSet, subsets, tokenForms, wordScorer,
-  matchToken, withoutTypoNoise, type MatchFields, type TokenForm,
+  CATEGORY_RULES, CONTEXT_WEIGHT, EXTRA_WEIGHT, RESULTS_RULES, extraWordScore, queryTokens, stopWordSet, subsets,
+  tokenForms, wordScorer, matchToken, withoutTypoNoise, type MatchFields, type TokenForm, type WordRules,
 } from "./match";
 
 /** Сколько слов описания попадает в индекс. */
@@ -45,7 +45,14 @@ export interface IndexCategory {
 export interface ListingHit<T extends IndexListing> {
   row: T;
   score: number;
-  /** Совпало только с описанием: в подсказки не идёт, в выдаче — в хвосте. */
+  /** Совпало только с описанием: в выдаче — в хвосте. */
+  byDescription: boolean;
+}
+
+/** То же, что ListingHit, но номером записи в `listings`. */
+export interface EntryHit {
+  e: number;
+  score: number;
   byDescription: boolean;
 }
 
@@ -196,7 +203,8 @@ const maxInto = (map: Map<number, number>, entries: readonly number[], s: number
   }
 };
 
-function lowerBound(sorted: readonly string[], key: string): number {
+/** Первый индекс в отсортированном (по `<`) списке, где строка не меньше ключа. */
+export function lowerBound(sorted: readonly string[], key: string): number {
   let lo = 0;
   let hi = sorted.length;
   while (lo < hi) {
@@ -206,17 +214,23 @@ function lowerBound(sorted: readonly string[], key: string): number {
   return lo;
 }
 
-class Scorer {
+/**
+ * Оценки слов запроса по словарю индекса с кэшем на слово. Один на запрос:
+ * подмножества выдачи и фразы подсказок делят его кэш, и словарь по каждому
+ * слову просматривается один раз. `rules` — что считается совпадением слова:
+ * по умолчанию как в выдаче `/search` (WordRules).
+ */
+export class Scorer {
   private cache = new Map<string, PartHits>();
 
-  constructor(private ix: ListingIndex<IndexListing>) {}
+  constructor(private ix: ListingIndex<IndexListing>, private rules: WordRules = RESULTS_RULES) {}
 
   hits(part: string, strict: boolean, withExtra: boolean): PartHits {
     const key = `${strict ? 1 : 0}${part}`;
     let h = this.cache.get(key);
     if (!h) {
       h = { own: new Map(), context: new Map(), extra: null };
-      const score = wordScorer(part, strict);
+      const score = wordScorer(part, strict, this.rules);
       const { words: dict, own, context } = this.ix.main;
       for (let id = 0; id < dict.length; id++) {
         const s = score(dict[id]);
@@ -303,12 +317,20 @@ export function rankListings<T extends IndexListing>(
 
 /**
  * rankListings по готовым словам запроса. Scorer передаётся снаружи: подмножества
- * запроса в rankResults делят его кэш, и словарь по каждому слову
- * просматривается один раз на запрос, а не на каждое подмножество.
+ * запроса в rankResults и фразы подсказок делят его кэш, и словарь по каждому
+ * слову просматривается один раз на запрос, а не на каждое подмножество.
  */
 function rankTokens<T extends IndexListing>(
-  ix: ListingIndex<T>, scorer: Scorer, tokens: readonly string[], { mode, limit }: RankOptions,
+  ix: ListingIndex<T>, scorer: Scorer, tokens: readonly string[], options: RankOptions,
 ): ListingHit<T>[] {
+  return rankEntries(ix, scorer, tokens, options)
+    .map(({ e, score, byDescription }) => ({ row: ix.listings[e], score, byDescription }));
+}
+
+/** rankTokens номерами записей: подсказкам нужны множества записей, а не строки. */
+export function rankEntries(
+  ix: ListingIndex<IndexListing>, scorer: Scorer, tokens: readonly string[], { mode, limit }: RankOptions,
+): EntryHit[] {
   if (tokens.length === 0) return [];
   const forms = tokens.map(tokenForms);
   const order = (scores: Map<number, number>, skip?: ReadonlySet<number>) =>
@@ -319,12 +341,12 @@ function rankTokens<T extends IndexListing>(
 
   const all = order(scoreListings(scorer, forms, false));
   const main = withoutTypoNoise(all);
-  const out: ListingHit<T>[] = main.slice(0, limit).map(({ e, score }) => ({ row: ix.listings[e], score, byDescription: false }));
+  const out: EntryHit[] = main.slice(0, limit).map(({ e, score }) => ({ e, score, byDescription: false }));
   if (mode === "results" && out.length < limit) {
     // Отброшенные как шум опечаток в хвост через описание не возвращаются.
     const matched = new Set(all.map(({ e }) => e));
     for (const { e, score } of order(scoreListings(scorer, forms, true), matched).slice(0, limit - out.length)) {
-      out.push({ row: ix.listings[e], score, byDescription: true });
+      out.push({ e, score, byDescription: true });
     }
   }
   return out;
@@ -386,43 +408,31 @@ const stronger = (a: ListingHit<IndexListing>, b: ListingHit<IndexListing>) =>
  * Разделы по запросу: хотя бы одно слово должно попасть в имя или keywords
  * раздела, а не только в его корень. Бонус — как у прокатов в sravniprokat:
  * за то, что раздел вообще есть в городе, и за число объявлений в нём.
- * Пустой или односимвольный запрос — популярные подразделы.
+ * Совпадение — по началу, основе, синонимам и раскладке, без опечаток и
+ * подстрок (CATEGORY_RULES): «перф» не «серфинг». Пустой или односимвольный
+ * запрос — ничего.
  */
 export function suggestCategories(ix: ListingIndex, q: string, limit = 4): CategoryHit[] {
-  if (isBlankQuery(q)) return popularCategories(ix, limit);
+  if (isBlankQuery(q)) return [];
   const tokens = queryTokens(q, ix.stopWords);
   if (tokens.length === 0) return [];
   const forms = tokens.map(tokenForms);
-  const scored: (CategoryHit & { clear: number })[] = [];
+  const scored: CategoryHit[] = [];
   for (const entry of ix.categories) {
     let sum = 0;
     let anyOwn = false;
     let ok = true;
     for (const f of forms) {
-      const m = matchToken(f, entry.fields, false);
+      const m = matchToken(f, entry.fields, false, CATEGORY_RULES);
       if (!m) { ok = false; break; }
       sum += m.score;
       anyOwn ||= m.own;
     }
     if (!ok || !anyOwn) continue;
     const { fields: _fields, ...hit } = entry;
-    const clear = sum / forms.length;
-    scored.push({ ...hit, clear, score: clear + CATEGORY_BONUS + Math.min(entry.count, 20) * 0.01 });
+    scored.push({ ...hit, score: sum / forms.length + CATEGORY_BONUS + Math.min(entry.count, 20) * 0.01 });
   }
-  // Шум опечаток — по оценке совпадения, без бонусов раздела.
-  const kept = withoutTypoNoise(scored.map((h) => ({ h, score: h.clear }))).map(({ h }) => h);
+  // Опечаток здесь нет, и отсеивать шум опечаток (withoutTypoNoise) не нужно.
   // Сортировка устойчивая: при равенстве — порядок дерева.
-  return kept
-    .sort((a, b) => b.score - a.score)
-    .slice(0, limit)
-    .map(({ clear: _clear, ...hit }) => hit);
-}
-
-/** Подразделы с наибольшим числом объявлений в городе. */
-export function popularCategories(ix: ListingIndex, limit = 4): CategoryHit[] {
-  return ix.categories
-    .filter((c) => c.root)
-    .sort((a, b) => b.count - a.count)
-    .slice(0, limit)
-    .map(({ fields: _fields, ...hit }) => ({ ...hit, score: 0 }));
+  return scored.sort((a, b) => b.score - a.score).slice(0, limit);
 }

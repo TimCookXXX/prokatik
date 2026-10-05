@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // Чипы «Часто ищут» под поиском hero: кандидаты, по которым в городе есть хотя
 // бы одно объявление в режиме подсказок. Индекс собирается из фикстуры поиска
 // тем же buildListingIndex, что и в проде.
-vi.mock("@/server/catalog", () => ({ getFreeListingIds: vi.fn() }));
+vi.mock("@/server/catalog", () => ({ getFreeSearchIds: vi.fn() }));
 vi.mock("@/server/search-index", () => ({ getSearchIndex: vi.fn() }));
 // Настоящий скоринг, но со счётчиком вызовов — для проверки подсчёта про запас.
 vi.mock("@/lib/search/listing-index", async (orig) => {
@@ -18,13 +18,10 @@ import { content } from "@theme/content";
 import { CATEGORIES, CITY_NAMES, ROWS, countsOf } from "../search/fixture";
 
 const CITY = "c1";
-const rows = ROWS.map((r) => ({ ...r, cityId: CITY, priceDay: 500, photoUrl: null }));
 
 /** Новый объект индекса — как после сборки: подсчёт чипов на нём ещё не делался. */
 const freshIndex = () => ({
-  ix: buildListingIndex(rows, CATEGORIES, countsOf(rows), CITY_NAMES),
-  categories: new Map(CATEGORIES.map((c) => [c.id, c])),
-  citySlugs: new Map([[CITY, "krasnodar"]]),
+  ix: buildListingIndex(ROWS, CATEGORIES, countsOf(ROWS), CITY_NAMES),
 }) as never;
 
 beforeEach(() => {

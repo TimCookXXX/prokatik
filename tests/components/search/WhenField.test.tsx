@@ -15,16 +15,14 @@ import { _resetSuggestCache } from "@/components/search/suggest-client";
 import { _resetPanelDates } from "@/components/search/panel-dates";
 
 const CITIES = [{ slug: "kazan", name: "Казань", geo: null }];
+const MAKITA_HREF = `/search?${new URLSearchParams({ q: "дрель makita", city: "kazan" })}`;
 const DRILL = {
-  items: [{
-    id: "l1", title: "Дрель Makita", priceDay: 500, href: "/kazan/instrumenty/elektro/drel-makita-l1",
-    categoryName: "Электроинструменты", photoUrl: null,
-  }],
-  categories: [],
+  queries: [{ text: "дрель makita", href: MAKITA_HREF }],
+  categories: [{ name: "Электроинструменты", href: "/kazan/instrumenty/elektro" }],
 };
 const fetchMock = vi.fn(async (u: string) => {
   const q = new URL(u, "http://x").searchParams.get("q") ?? "";
-  return { ok: true, status: 200, json: async () => (q === "дрель" ? DRILL : { items: [], categories: [] }) };
+  return { ok: true, status: 200, json: async () => (q === "дрель" ? DRILL : { queries: [], categories: [] }) };
 });
 
 // «Сегодня» в деловой зоне: 12:00 по Москве 1 сентября.
@@ -152,37 +150,37 @@ describe("WhenField", () => {
     expect(when()).toHaveAccessibleName(`Когда: ${content.search.when.any}`);
   });
 
-  // После выбора подсказки «Что» фокус переходит на «Когда», как в
+  // После выбора раздела в «Что» фокус переходит на «Когда», как в
   // sravniprokat; переход — кнопкой поиска, с выбранными датами.
-  it("с lg выбор подсказки «Что» ведёт фокус в «Когда», а не на карточку", async () => {
+  it("с lg выбор раздела в «Что» ведёт фокус в «Когда», а не в раздел", async () => {
     desktop(true);
     url.search = "from=2026-09-05&to=2026-09-10";
     render(<SearchBar variant="header" cities={CITIES} />);
 
     act(() => screen.getByRole("combobox").focus());
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "дрель" } });
-    fireEvent.click(await screen.findByRole("option", { name: /Дрель Makita/ }));
+    fireEvent.click(await screen.findByRole("option", { name: "Электроинструменты" }));
 
     expect(push).not.toHaveBeenCalled();
     expect(document.activeElement).toBe(when());
-    // Подсказки — на те же даты: занятые на них сервер отсеивает.
+    // Подсказки — на те же даты: фразы без свободных на них сервер отсеивает.
     expect(fetchMock.mock.calls.some(([u]) => String(u).includes("from=2026-09-05&to=2026-09-10"))).toBe(true);
 
     fireEvent.submit(screen.getByRole("search"));
-    expect(push).toHaveBeenCalledWith("/kazan/instrumenty/elektro/drel-makita-l1?from=2026-09-05&to=2026-09-10");
+    expect(push).toHaveBeenCalledWith("/kazan/instrumenty/elektro?from=2026-09-05&to=2026-09-10");
   });
 
-  // Ниже lg поля «Когда» рядом нет, а панель подсказок с выбором закрывается:
-  // подсказка ведёт сразу, с датами, выбранными до неё.
-  it("ниже lg выбор подсказки «Что» ведёт на карточку с датами", async () => {
+  // Подсказка-запрос — сам поиск: ведёт в выдачу сразу, с выбранными датами.
+  it.each([["с lg", true], ["ниже lg", false]])("%s выбор запроса в «Что» ведёт в выдачу с датами", async (_, wide) => {
+    desktop(wide);
     url.search = "from=2026-09-05&to=2026-09-10";
     render(<header data-site-header><SearchBar variant="header" cities={CITIES} /></header>);
 
     act(() => screen.getByRole("combobox").focus());
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "дрель" } });
-    fireEvent.click(await screen.findByRole("option", { name: /Дрель Makita/ }));
+    fireEvent.click(await screen.findByRole("option", { name: "дрель makita" }));
 
-    expect(push).toHaveBeenCalledWith("/kazan/instrumenty/elektro/drel-makita-l1?from=2026-09-05&to=2026-09-10");
+    expect(push).toHaveBeenCalledWith(`${MAKITA_HREF}&from=2026-09-05&to=2026-09-10`);
   });
 
   it("правка текста после выбора подсказки — снова свободный поиск", async () => {
@@ -191,7 +189,7 @@ describe("WhenField", () => {
 
     act(() => screen.getByRole("combobox").focus());
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "дрель" } });
-    fireEvent.click(await screen.findByRole("option", { name: /Дрель Makita/ }));
+    fireEvent.click(await screen.findByRole("option", { name: "Электроинструменты" }));
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "дрель ударная" } });
 
     fireEvent.submit(screen.getByRole("search"));

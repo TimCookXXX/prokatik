@@ -1,6 +1,8 @@
-// Подсказки панели «Что»: объявления и разделы города по набранному тексту
-// (src/server/search.ts); с `from&to` — только свободные на эти дни, с точкой
-// «Где» (`loc`) — по всем городам региона, как и выдача. Роут, а
+// Подсказки панели «Что»: дополнения запроса и разделы города по набранному
+// тексту (src/server/search.ts), без объявлений и чисел; с `from&to` — только
+// фразы, у которых выдача на эти дни непуста, с точкой «Где» (`loc`) — по всем
+// городам региона, как и выдача. Пустой или односимвольный запрос — пустой
+// ответ без чтения БД. Роут, а
 // не Server Action: actions — это POST, клиент выполняет их очередью и не
 // кэширует, а подсказкам нужен параллельный кэшируемый GET
 // (docs/architecture.md, исключения).
@@ -15,6 +17,7 @@ import { checkLimit } from "@/lib/rate-limit";
 import { clientIp } from "@/lib/http/client-ip";
 import { parseDateRange } from "@/lib/catalog/filters";
 import { MAX_QUERY_LENGTH } from "@/lib/search/match";
+import { isBlankQuery } from "@/lib/search/listing-index";
 import { getCityBySlug } from "@/server/catalog";
 import { getCityScope } from "@/server/city";
 import { suggestForCity, type SuggestResult } from "@/server/search";
@@ -24,7 +27,7 @@ export const dynamic = "force-dynamic";
 
 const MAX_SLUG = 80;
 
-const EMPTY: SuggestResult = { items: [], categories: [] };
+const EMPTY: SuggestResult = { queries: [], categories: [] };
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const limit = checkLimit(clientIp(req.headers), "search");
@@ -39,6 +42,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const city = (sp.get("city") ?? "").trim().slice(0, MAX_SLUG);
   const q = (sp.get("q") ?? "").slice(0, MAX_QUERY_LENGTH);
   if (!city) return NextResponse.json(EMPTY, { status: 400 });
+  if (isBlankQuery(q)) return NextResponse.json(EMPTY, { headers: { "Cache-Control": "private, max-age=30" } });
   // Даты — по тем же правилам, что у выдачи: мусор, половинка или прошлое —
   // подсказки без фильтра дат, как и страница по тому же адресу.
   const dates = parseDateRange({ from: sp.get("from") ?? undefined, to: sp.get("to") ?? undefined });

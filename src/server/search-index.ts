@@ -16,25 +16,13 @@ import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import { categories, cities, listings, users } from "@db/schema";
 import {
-  buildListingIndex, type IndexCategory, type IndexListing, type ListingIndex,
+  buildListingIndex, type IndexListing, type ListingIndex,
 } from "@/lib/search/listing-index";
 
 export const VERSION_TTL_MS = 30_000;
 
-/** Строка индекса: поля для скоринга и для ответа подсказок. */
-export interface SearchRow extends IndexListing {
-  slug: string;
-  cityId: string;
-  priceDay: number;
-  photoUrl: string | null;
-}
-
 export interface SearchIndex {
-  ix: ListingIndex<SearchRow>;
-  /** Разделы по id — для пути карточки и подписи раздела в подсказке. */
-  categories: ReadonlyMap<string, IndexCategory>;
-  /** Слаги городов набора по id — для пути карточки. */
-  citySlugs: ReadonlyMap<string, string>;
+  ix: ListingIndex<IndexListing>;
 }
 
 interface Entry {
@@ -87,17 +75,13 @@ async function build(cityIds: string[]): Promise<Entry> {
   const version = await readVersion(cityIds);
   const [rows, cats, activeCities] = await Promise.all([
     // Скрытые, архивные, забаненные и отключённые города в индекс не попадают
-    // вовсе: подсказка не должна вести на карточку, которая отдаст 404.
+    // вовсе: подсказка не должна обещать то, чего выдача не покажет.
     db.select({
       id: listings.id,
-      slug: listings.slug,
       title: listings.title,
       description: listings.description,
       categoryId: listings.categoryId,
-      cityId: listings.cityId,
       createdAt: listings.createdAt,
-      priceDay: listings.priceDay,
-      photoUrl: sql<string | null>`${listings.photosJson}->0->>'url'`,
     })
       .from(listings)
       .innerJoin(users, and(eq(users.id, listings.ownerUserId), isNull(users.bannedAt)))
@@ -110,14 +94,14 @@ async function build(cityIds: string[]): Promise<Entry> {
     }).from(categories).orderBy(asc(categories.name)),
     // Названия активных городов — стоп-слова, снимаются в момент сборки:
     // переименованный или новый город становится стоп-словом после инвалидации.
-    db.select({ id: cities.id, slug: cities.slug, name: cities.name, nameLocative: cities.nameLocative })
+    db.select({ name: cities.name, nameLocative: cities.nameLocative })
       .from(cities).where(eq(cities.isActive, true)),
   ]);
 
   const counts = new Map<string, number>();
   for (const r of rows) counts.set(r.categoryId, (counts.get(r.categoryId) ?? 0) + 1);
 
-  const ix = buildListingIndex<SearchRow>(
+  const ix = buildListingIndex(
     rows, cats, counts, activeCities.flatMap((c) => [c.name, c.nameLocative]),
   );
   // Слова описания уже в словаре индекса, сам текст дальше не нужен — а это
@@ -125,11 +109,7 @@ async function build(cityIds: string[]): Promise<Entry> {
   for (const r of rows) r.description = null;
 
   return {
-    index: {
-      ix,
-      categories: new Map(cats.map((c) => [c.id, c])),
-      citySlugs: new Map(activeCities.map((c) => [c.id, c.slug])),
-    },
+    index: { ix },
     version,
     checkedAt: Date.now(),
   };

@@ -19,32 +19,59 @@ const SYNONYM_PREFIX_WEIGHT = 0.8;
 const FUZZY = 0.8;
 
 /**
+ * Что считается совпадением слова, кроме точного, по началу и по основе.
+ * Выдача `/search` берёт всё; панель подсказок «Что» строже: там человек ещё
+ * печатает, и опечатка против начала длинного слова находила бы чужое —
+ * «палат» ≈ «плат(ье)», «перф» ≈ «серф(инг)» (docs/decisions/0023).
+ */
+export interface WordRules {
+  /**
+   * Опечатки. `any` — против слова целиком и против начала длинного слова;
+   * `whole` — только против слова целиком (слово набрано полностью) и если
+   * исправленное слово начинается с тех же двух букв; `none` — никаких.
+   */
+  typos: "any" | "whole" | "none";
+  /** Совпадение подстрокой: «ратор» в «перфоратор». */
+  substrings: boolean;
+}
+
+/** Выдача `/search` и всё, что должно совпадать с ней. */
+export const RESULTS_RULES: WordRules = { typos: "any", substrings: true };
+/** Объявления в панели подсказок: опечатка — только в слове, набранном целиком. */
+export const SUGGEST_RULES: WordRules = { typos: "whole", substrings: true };
+/** Разделы в панели подсказок: по началу, основе, синонимам и раскладке, без опечаток и подстрок. */
+export const CATEGORY_RULES: WordRules = { typos: "none", substrings: false };
+
+/**
  * Насколько слово запроса совпадает со словом записи; 0 — не совпадает.
  * `strict` — для раскладки, транслита и синонимов: опечатка только против слова
  * целиком, иначе «max» → «макс» ≈ «макита», а «бензорез» ≈ «бензогенератор».
  */
-export function wordScore(t: string, w: string, strict = false): number {
-  return wordScorer(t, strict)(w);
+export function wordScore(t: string, w: string, strict = false, rules = RESULTS_RULES): number {
+  return wordScorer(t, strict, rules)(w);
 }
 
 /**
  * Тот же wordScore с основой слова запроса, посчитанной один раз: индекс города
  * сравнивает одно слово запроса со всем словарём.
  */
-export function wordScorer(t: string, strict = false): (w: string) => number {
+export function wordScorer(t: string, strict = false, rules = RESULTS_RULES): (w: string) => number {
   const s = stem(t);
+  const typos = t.length >= 4 ? rules.typos : "none";
+  const start = t.slice(0, 2);
   return (w) => {
     if (w === t) return 3;
     if (w.startsWith(t)) return 2 + 0.5 * (t.length / w.length);
     // Падеж и число: «перфоратора», «перфораторы», «моющего».
     if (s !== t && w.startsWith(s)) return 1.9;
-    if (t.length >= 3 && w.includes(t)) return 1;
-    if (t.length >= 4) {
+    if (rules.substrings && t.length >= 3 && w.includes(t)) return 1;
+    if (typos !== "none" && (typos === "any" || w.startsWith(start))) {
       // Опечатки: против слова целиком (±1 буква) — до двух в длинном, одна в коротком;
       // против начала длинного слова (человек ещё печатает) — только одна.
       for (let len = t.length - 1; len <= t.length + 1; len++) {
         if (len > w.length) break;
         const whole = len >= w.length - 1;
+        if (!whole && typos === "whole") continue;
         const max = whole ? (!strict && t.length >= 6 ? 2 : 1) : strict ? -1 : 1;
         if (max >= 0 && editDistance(t, w.slice(0, len), max) <= max) return FUZZY;
       }
@@ -80,8 +107,10 @@ export function extraWordScore(t: string, w: string): number {
   return 0;
 }
 
-const best = (t: string, list: readonly string[], strict: boolean) =>
-  list.reduce((m, w) => Math.max(m, wordScore(t, w, strict)), 0);
+const best = (t: string, list: readonly string[], strict: boolean, rules: WordRules) => {
+  const score = wordScorer(t, strict, rules);
+  return list.reduce((m, w) => Math.max(m, score(w)), 0);
+};
 
 const bestExtra = (t: string, list: readonly string[]) =>
   list.reduce((m, w) => Math.max(m, extraWordScore(t, w)), 0);
@@ -243,9 +272,12 @@ export interface TokenMatch {
 /**
  * Лучшее совпадение слова запроса (всеми его формами) с записью; null — не
  * совпало. Многословная форма совпадает, только если совпали все её части.
- * `withExtra: false` — описание не смотрим вовсе (подсказки).
+ * `withExtra: false` — описание не смотрим вовсе (подсказки). `rules` — что
+ * ещё считается совпадением (WordRules).
  */
-export function matchToken(forms: readonly TokenForm[], e: MatchFields, withExtra: boolean): TokenMatch | null {
+export function matchToken(
+  forms: readonly TokenForm[], e: MatchFields, withExtra: boolean, rules = RESULTS_RULES,
+): TokenMatch | null {
   let result: TokenMatch | null = null;
   for (const f of forms) {
     let sum = 0;
@@ -253,8 +285,8 @@ export function matchToken(forms: readonly TokenForm[], e: MatchFields, withExtr
     let ok = true;
     const strict = f.weight < 1;
     for (const part of f.parts) {
-      const o = best(part, e.own, strict);
-      const c = best(part, e.context, strict) * CONTEXT_WEIGHT;
+      const o = best(part, e.own, strict, rules);
+      const c = best(part, e.context, strict, rules) * CONTEXT_WEIGHT;
       const x = withExtra && e.extra ? bestExtra(part, e.extra) * EXTRA_WEIGHT : 0;
       if (o === 0 && c === 0 && x === 0) { ok = false; break; }
       if (o < Math.max(c, x)) own = false;

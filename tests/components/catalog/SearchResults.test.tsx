@@ -120,6 +120,28 @@ describe("SearchResults", () => {
     expect(screen.getByText(/Ничего не найдено по запросу/)).toBeInTheDocument();
   });
 
+  // Число найденного — только над выдачей: подсказки «Что» чисел не показывают.
+  it("says how many listings were found above the results", async () => {
+    vi.mocked(rankListingIds).mockResolvedValue({ ids: ["1", "2"], usedQuery: "дрель", dropped: [] });
+    vi.mocked(searchListings).mockResolvedValue({ items: [item("1", "Дрель Makita")], total: 21 });
+
+    render(await SearchResults({ city, q: "дрель", searchParams: { q: "дрель" } }));
+    expect(screen.getByText("21 объявление")).toBeInTheDocument();
+  });
+
+  it.each([[1, "1 объявление"], [3, "3 объявления"], [12, "12 объявлений"]])(
+    "declines the count: %i", async (total, text) => {
+      vi.mocked(searchListings).mockResolvedValue({ items: [item("1", "Дрель Makita")], total });
+      render(await SearchResults({ city, q: "", searchParams: {} }));
+      expect(screen.getByText(text)).toBeInTheDocument();
+    },
+  );
+
+  it("shows no count on an empty result", async () => {
+    render(await SearchResults({ city, q: "дрель", searchParams: { q: "дрель" } }));
+    expect(screen.queryByText(/\d+ объявлени/)).not.toBeInTheDocument();
+  });
+
   it("blames the filters when they empty the feed", async () => {
     render(await SearchResults({ city, q: "", searchParams: { price_min: "100000" } }));
 

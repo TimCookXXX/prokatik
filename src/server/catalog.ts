@@ -688,20 +688,29 @@ export interface AvailabilityRow {
 }
 
 /**
- * Какие из позиций свободны во все дни диапазона — тем же условием, что фильтр
- * дат в выдаче (freeInRange), одним запросом. Для подсказок «Что» при выбранных
- * датах: они не должны вести на карточку, где виджет сразу скажет «Занято».
+ * Какие из позиций нашлись бы в выдаче `/search` на эти даты: ровно условия
+ * searchListings без фильтров панели — набор городов, `status = 'active'` и
+ * свобода во все дни диапазона (freeInRange). Для подсказок «Что» с датами:
+ * фраза без свободных вещей вела бы в пустую выдачу. id всех фраз — один
+ * запрос, массив — одним параметром (`= any($1::text[])`), а не списком
+ * плейсхолдеров на тысячи id.
  */
-export async function getFreeListingIds(
+export async function getFreeSearchIds(
+  cityIds: CityIds,
   listingIds: readonly string[],
   dateFrom: string,
   dateTo: string,
 ): Promise<Set<string>> {
-  if (listingIds.length === 0) return new Set();
+  if (listingIds.length === 0 || cityIds.length === 0) return new Set();
   const rows = await getDb()
     .select({ id: listings.id })
     .from(listings)
-    .where(and(inArray(listings.id, [...listingIds]), freeInRange(dateFrom, dateTo)));
+    .where(and(
+      inCities(cityIds),
+      eq(listings.status, "active"),
+      sql`${listings.id} = any(${sql.param([...listingIds])}::text[])`,
+      freeInRange(dateFrom, dateTo),
+    ));
   return new Set(rows.map((r) => r.id));
 }
 

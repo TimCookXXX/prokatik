@@ -1,14 +1,12 @@
 "use client";
 
 import { Fragment, useEffect, useRef, useState } from "react";
-import Image from "next/image";
 import * as PopoverPrimitive from "@radix-ui/react-popover";
-import { ImageOff, LayoutGrid, Search, X } from "lucide-react";
+import { LayoutGrid, Search, X } from "lucide-react";
 import { content } from "@theme/content";
 import { cn } from "@/lib/utils";
 import { ruPlural } from "@/lib/plural";
-import { formatPrice } from "@/lib/catalog/format";
-import { compact } from "@/lib/search/text";
+import { compact, normalize } from "@/lib/search/text";
 import { highlight } from "@/lib/search/match";
 import type { WhatValue } from "@/lib/search/submit-href";
 import type { DateRange } from "@/lib/catalog/filters";
@@ -16,12 +14,12 @@ import { PopoverContent } from "@/components/ui/Popover";
 import { MobileSuggestPanel, usePopoverLayout } from "./MobileSuggestPanel";
 import {
   EMPTY_SUGGEST, SUGGEST_DEBOUNCE_MS, cachedSuggest, fetchSuggest, sameTyping, shouldApply,
-  suggestQuery, type SuggestCategory, type SuggestItem, type SuggestResult, type SuggestWhere,
+  suggestQuery, type SuggestCategory, type SuggestQuery, type SuggestResult, type SuggestWhere,
 } from "./suggest-client";
 
 type Row =
+  | { kind: "query"; key: string; query: SuggestQuery }
   | { kind: "category"; key: string; category: SuggestCategory }
-  | { kind: "listing"; key: string; item: SuggestItem }
   | { kind: "all"; key: string };
 
 interface Reply {
@@ -34,8 +32,10 @@ interface Reply {
 
 const prevent = (e: React.SyntheticEvent | Event) => e.preventDefault();
 
-// «Что» (перенос WhatField из sravniprokat). Подсказки — объявления и разделы
-// города с сервера (/api/search/suggest), а не из клиентского индекса.
+// «Что» (перенос WhatField из sravniprokat). Подсказки — дополнения запроса и
+// разделы города с сервера (/api/search/suggest), без объявлений и чисел:
+// подсказка ведёт в выдачу со всеми подходящими вещами, а не к одному
+// продавцу (docs/decisions/0023). Пустое поле подсказок не показывает.
 // Выбор подсказки или строка «Показать все» сразу отдаётся наверх (onPick):
 // куда дальше — к «Когда» или в переход, — решает панель. Enter без
 // выделенной строки отправляет форму — свободный текст.
@@ -89,7 +89,6 @@ export function WhatField({
   const byPointer = useRef(false);
   const [active, setActive] = useState(-1);
   const [reply, setReply] = useState<Reply | null>(null);
-  const [popular, setPopular] = useState<Reply | null>(null);
   const seq = useRef(0);
   const shownSeq = useRef(0);
   // Текст на момент прихода ответа: ответ сверяется с ним, а не с замыканием.
@@ -101,7 +100,7 @@ export function WhatField({
   const whereLoc = where?.loc;
   const whereLp = where?.lp;
   const datesKey = `${datesFrom && datesTo ? `${datesFrom}|${datesTo}` : ""}|${whereLoc ?? ""}`;
-  // Одна значимая буква — не запрос (как на сервере): показываем популярное.
+  // Одна значимая буква — не запрос (как на сервере): подсказок нет.
   const typing = compact(value).length >= 2;
 
   // Подсказки на набранный текст: с дебаунсом, а из кэша — сразу. Устаревший
@@ -130,44 +129,34 @@ export function WhatField({
     return () => clearTimeout(t);
   }, [open, citySlug, typing, query, datesFrom, datesTo, whereLoc, whereLp, datesKey]);
 
-  // Популярные разделы — при первом фокусе, дальше из кэша.
-  const popularHere = popular?.city === citySlug ? popular : null;
-  const popularReady = popularHere !== null;
-  useEffect(() => {
-    if (!open || !citySlug || typing || popularReady) return;
-    let live = true;
-    void fetchSuggest(citySlug, "").then((result) => {
-      if (live && result) setPopular({ city: citySlug, q: "", dates: "", result });
-    });
-    return () => { live = false; };
-  }, [open, citySlug, typing, popularReady]);
-
   // Прошлый ответ держится, пока летит новый (без спиннера и мигания), — если
   // он про этот же ввод, а не про стёртый целиком.
   const shown = typing && reply && reply.city === citySlug && reply.dates === datesKey && sameTyping(reply.q, query)
     ? reply
     : null;
-  const sections: { title: string; rows: Row[] }[] = typing
+  const queries = shown?.result.queries ?? [];
+  const sections: { title: string; visible: boolean; rows: Row[] }[] = typing
     ? [
       {
-        title: content.search.categories,
-        rows: (shown?.result.categories ?? []).map((c) => ({ kind: "category" as const, key: `c:${c.href}`, category: c })),
+        // Запросы — без видимого заголовка, как в поиске маркетплейса.
+        title: content.search.queries,
+        visible: false,
+        rows: queries.map((q) => ({ kind: "query" as const, key: `q:${q.text}`, query: q })),
       },
       {
-        title: content.search.listings,
-        rows: (shown?.result.items ?? []).map((item) => ({ kind: "listing" as const, key: `l:${item.id}`, item })),
+        title: content.search.categories,
+        visible: true,
+        rows: (shown?.result.categories ?? []).map((c) => ({ kind: "category" as const, key: `c:${c.href}`, category: c })),
       },
     ].filter((s) => s.rows.length)
-    : popularHere?.result.categories.length
-      ? [{
-        title: content.search.popular,
-        rows: popularHere.result.categories.map((c) => ({ kind: "category" as const, key: `c:${c.href}`, category: c })),
-      }]
-      : [];
+    : [];
   const suggestions = sections.flatMap((s) => s.rows);
-  // «Показать все» — последней строкой при любом тексте: ведёт на /search и
-  // работает, даже когда сервер не ответил.
-  const flat: Row[] = typing ? [...suggestions, { kind: "all", key: "all" }] : suggestions;
+  // «Показать все» — последней строкой: ведёт на /search и работает, даже
+  // когда сервер не ответил. Если среди подсказок уже есть ровно набранный
+  // запрос, строка его бы повторила.
+  const typedNorm = normalize(value);
+  const exact = queries.some((q) => normalize(q.text) === typedNorm);
+  const flat: Row[] = typing && !exact ? [...suggestions, { kind: "all", key: "all" }] : suggestions;
   const noMatches = shown !== null && suggestions.length === 0;
   const showList = open && flat.length > 0;
 
@@ -181,8 +170,8 @@ export function WhatField({
       onChange(row.category.name);
       onPick({ kind: "category", href: row.category.href });
     } else {
-      onChange(row.item.title);
-      onPick({ kind: "listing", href: row.item.href });
+      onChange(row.query.text);
+      onPick({ kind: "query", href: row.query.href });
     }
   };
 
@@ -225,40 +214,20 @@ export function WhatField({
         row.kind === "all" && suggestions.length > 0 && "mt-1 border-t border-border",
       )}
     >
-      {row.kind === "listing" ? <Thumb url={row.item.photoUrl} /> : (
-        <span className="grid h-10 w-10 shrink-0 place-items-center text-muted-foreground" aria-hidden="true">
-          {row.kind === "category" ? <LayoutGrid className="h-4 w-4" /> : <Search className="h-4 w-4" />}
-        </span>
-      )}
-      {row.kind === "all" ? (
-        <span className="min-w-0 flex-1 truncate text-[15px] text-foreground">
-          {content.search.showAll(value.trim())}
-        </span>
-      ) : (
-        <span className="flex min-w-0 flex-1 flex-col">
-          <span className="line-clamp-2 text-[15px] leading-snug text-foreground">
-            {highlight(row.kind === "listing" ? row.item.title : row.category.name, typing ? value : "")
-              .map((part, j) => (part.hit
-                ? <b key={j} className="font-semibold">{part.text}</b>
-                // Голым текстом, а не <span>: пробел между словами в
-                // отдельном элементе выпадает из доступного имени строки.
-                : <Fragment key={j}>{part.text}</Fragment>))}
-          </span>
-          <span className="truncate text-[13px] leading-snug text-muted-foreground">
-            {row.kind === "listing" ? (
-              <>
-                {row.item.categoryName}
-                {" · "}
-                <span className="font-mark font-semibold text-foreground">{formatPrice(row.item.priceDay)}</span>
-                {" "}
-                {content.search.perDay}
-              </>
-            ) : (
-              `${row.category.count} ${ruPlural(row.category.count, ...content.search.listingCount)}`
-            )}
-          </span>
-        </span>
-      )}
+      <span className="grid h-6 w-6 shrink-0 place-items-center text-muted-foreground" aria-hidden="true">
+        {row.kind === "category" ? <LayoutGrid className="h-4 w-4" /> : <Search className="h-4 w-4" />}
+      </span>
+      {/* Один текстовый узел строки — одно доступное имя. */}
+      <span className="min-w-0 flex-1 truncate text-[15px] leading-snug text-foreground">
+        {row.kind === "all"
+          ? content.search.showAll(value.trim())
+          : highlight(row.kind === "query" ? row.query.text : row.category.name, value)
+            .map((part, j) => (part.hit
+              ? <b key={j} className="font-semibold">{part.text}</b>
+              // Голым текстом, а не <span>: пробел между словами в
+              // отдельном элементе выпадает из доступного имени строки.
+              : <Fragment key={j}>{part.text}</Fragment>))}
+      </span>
     </div>
   );
 
@@ -272,13 +241,15 @@ export function WhatField({
         {sections.map((sec) => (
           <div key={sec.title} role="group" aria-label={sec.title}>
             {/* Заголовок группы уже прочитан её aria-label. */}
-            <p aria-hidden="true" className="px-4 pb-1 pt-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              {sec.title}
-            </p>
+            {sec.visible && (
+              <p aria-hidden="true" className="px-4 pb-1 pt-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                {sec.title}
+              </p>
+            )}
             {sec.rows.map((row) => option(row, ++n))}
           </div>
         ))}
-        {typing && option(flat[flat.length - 1], flat.length - 1)}
+        {flat.length > suggestions.length && option(flat[flat.length - 1], flat.length - 1)}
       </div>
     </>
   );
@@ -364,19 +335,5 @@ export function WhatField({
         <MobileSuggestPanel onClose={() => inputRef.current?.blur()} toolbar={panelToolbar}>{list}</MobileSuggestPanel>
       )}
     </PopoverPrimitive.Root>
-  );
-}
-
-function Thumb({ url }: { url: string | null }) {
-  return (
-    <span className="relative h-10 w-10 shrink-0 overflow-hidden rounded-sm bg-muted" aria-hidden="true">
-      {url ? (
-        <Image src={url} alt="" fill sizes="40px" className="object-cover" />
-      ) : (
-        <span className="flex h-full items-center justify-center text-muted-foreground">
-          <ImageOff className="h-4 w-4" />
-        </span>
-      )}
-    </span>
   );
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  listingFields, popularCategories, rankListings, rankResults, suggestCategories,
+  listingFields, rankListings, rankResults, suggestCategories,
   type IndexCategory, type ListingIndex,
 } from "@/lib/search/listing-index";
 import { matchToken, queryTokens, tokenForms, withoutTypoNoise } from "@/lib/search/match";
@@ -71,30 +71,15 @@ describe("listings", () => {
   });
 });
 
-// R8: без фасетов верх выдачи — ровно подсказки, в том же порядке.
-describe("results start with the suggestions", () => {
+// Выдача (`results`) — совпавшие по заголовку и разделу (`suggest`) в том же
+// порядке, а за ними — только по описанию.
+describe("results are the title and section matches, then the description tail", () => {
   for (const q of ["перфоратор", "makita", "болгарка", "велик", "karcher", "платье", "дача", "перфоратор бур", "зубило", "бетон"]) {
     it(q, () => {
       const suggest = rankListings(ix, q, { mode: "suggest", limit: 100 });
       const results = rankListings(ix, q, { mode: "results", limit: 100 });
       expect(results.slice(0, suggest.length)).toEqual(suggest);
       expect(results.slice(suggest.length).every((h) => h.byDescription)).toBe(true);
-    });
-  }
-});
-
-// R8 с датами. Подсказки берут верх ранжирования подсказок и отсеивают занятые
-// (getFreeListingIds), выдача — свой список и то же условие в SQL с порядком по
-// позиции id. Отсев порядок не меняет, поэтому подсказки остаются началом
-// выдачи; что условие одно и то же — tests/server/catalog-search.test.ts.
-describe("results start with the suggestions when dates are set", () => {
-  const busy = new Set(ROWS.filter((_, i) => i % 3 === 0).map((r) => r.id));
-  const free = (h: { row: FixtureListing }) => !busy.has(h.row.id);
-  for (const q of ["перфоратор", "makita", "болгарка", "велик", "дача", "бетон"]) {
-    it(q, () => {
-      const suggest = rankListings(ix, q, { mode: "suggest", limit: 50 }).filter(free).slice(0, 6);
-      const results = rankListings(ix, q, { mode: "results", limit: 100 }).filter(free);
-      expect(results.slice(0, suggest.length)).toEqual(suggest);
     });
   }
 });
@@ -206,12 +191,10 @@ describe("categories", () => {
     expect(suggestCategories(ix, "уборочная")[0]).toMatchObject({ slugs: ["dom-i-meropriyatiya", "uborochnaya-tekhnika"], count: 3 });
   });
 
-  it("blank query — popular subcategories", () => {
-    const popular = suggestCategories(ix, "с");
-    expect(popular).toEqual(popularCategories(ix, 4));
-    expect(popular[0].category.name).toBe("Электроинструменты");
-    expect(popular.every((c) => c.root)).toBe(true);
-    expect(popular.map((c) => c.count)).toEqual([...popular.map((c) => c.count)].sort((a, b) => b - a));
+  // Пустое поле подсказок не показывает: ни популярных разделов, ни чего-то ещё.
+  it("blank or one-letter query — no sections", () => {
+    expect(suggestCategories(ix, "")).toEqual([]);
+    expect(suggestCategories(ix, "с")).toEqual([]);
   });
 });
 

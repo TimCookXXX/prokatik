@@ -15,22 +15,17 @@ import { _resetSuggestCache } from "@/components/search/suggest-client";
 
 const CITIES = [{ slug: "kazan", name: "Казань", geo: null }];
 
-const POPULAR = {
-  items: [],
-  categories: [{ name: "Электроинструменты", href: "/kazan/instrumenty/elektro", count: 12 }],
+const hrefOf = (q: string) => `/search?${new URLSearchParams({ q, city: "kazan" })}`;
+const ELECTRO = { name: "Электроинструменты", href: "/kazan/instrumenty/elektro" };
+// «дре» — дописанные запросы и раздел; набранного запроса среди них нет.
+const DRE = {
+  queries: [{ text: "дрель", href: hrefOf("дрель") }, { text: "дрель-миксер", href: hrefOf("дрель-миксер") }],
+  categories: [ELECTRO],
 };
+// «дрель» — среди подсказок ровно набранный запрос.
 const DRILL = {
-  items: [
-    {
-      id: "l1", title: "Дрель Makita", priceDay: 500, href: "/kazan/instrumenty/elektro/drel-makita-l1",
-      categoryName: "Электроинструменты", photoUrl: null,
-    },
-    {
-      id: "l2", title: "Дрель ударная Bosch", priceDay: 700, href: "/kazan/instrumenty/elektro/drel-bosch-l2",
-      categoryName: "Электроинструменты", photoUrl: null,
-    },
-  ],
-  categories: [{ name: "Электроинструменты", href: "/kazan/instrumenty/elektro", count: 12 }],
+  queries: [{ text: "дрель", href: hrefOf("дрель") }, { text: "дрель makita", href: hrefOf("дрель makita") }],
+  categories: [ELECTRO],
 };
 
 type Reply = { status: number; body?: unknown } | Error;
@@ -48,7 +43,7 @@ const fetchMock = vi.fn(async (url: string) => {
   const q = new URL(url, "http://x").searchParams.get("q") ?? "";
   const reply = gates.has(q)
     ? await gates.get(q)!.promise
-    : replies[q] ?? { status: 200, body: { items: [], categories: [] } };
+    : replies[q] ?? { status: 200, body: { queries: [], categories: [] } };
   if (reply instanceof Error) throw reply;
   return { ok: reply.status < 400, status: reply.status, json: async () => reply.body };
 });
@@ -57,7 +52,7 @@ beforeEach(() => {
   _resetSuggestCache();
   push.mockClear();
   fetchMock.mockClear();
-  replies = { "": { status: 200, body: POPULAR }, "дрель": { status: 200, body: DRILL } };
+  replies = { "дре": { status: 200, body: DRE }, "дрель": { status: 200, body: DRILL } };
   gates.clear();
   vi.stubGlobal("fetch", fetchMock);
 });
@@ -76,43 +71,70 @@ function renderBar() {
 }
 
 describe("WhatField", () => {
-  it("on focus shows popular sections and wires aria-controls only to a mounted list", async () => {
+  it("shows nothing and asks nothing for an empty field", async () => {
     renderBar();
     expect(field()).not.toHaveAttribute("aria-controls");
-    expect(field()).toHaveAttribute("aria-expanded", "false");
-
     act(() => field().focus());
-    const group = await screen.findByRole("group", { name: content.search.popular });
-    expect(within(group).getByRole("option", { name: /Электроинструменты/ })).toBeInTheDocument();
+    // Дебаунс прошёл бы — запроса всё равно нет.
+    await act(async () => { await new Promise((r) => setTimeout(r, 150)); });
 
-    const list = screen.getByRole("listbox");
-    expect(field()).toHaveAttribute("aria-controls", list.id);
-    expect(field()).toHaveAttribute("aria-expanded", "true");
-    expect(fetchMock).toHaveBeenCalledWith("/api/search/suggest?city=kazan&q=");
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    expect(field()).toHaveAttribute("aria-expanded", "false");
+    expect(field()).not.toHaveAttribute("aria-controls");
+    expect(screen.queryByText(/Популярн/)).not.toBeInTheDocument();
   });
 
-  it("lists sections, then listings, then the «show all» row, and announces the count", async () => {
+  it("lists completed queries, then sections, then «show all», and announces the count", async () => {
+    renderBar();
+    act(() => field().focus());
+    type("дре");
+
+    await screen.findByRole("option", { name: "дрель-миксер" });
+    expect(options().map((o) => o.textContent)).toEqual([
+      "дрель", "дрель-миксер", "Электроинструменты", content.search.showAll("дре"),
+    ]);
+    // Запросы — без видимого заголовка, разделы — с ним.
+    expect(screen.getByRole("group", { name: content.search.queries })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: content.search.categories })).toHaveTextContent(content.search.categories);
+    expect(screen.getByRole("listbox")).not.toHaveTextContent(content.search.queries);
+    // Совпавшее начало слова выделено.
+    expect(screen.getAllByText("дре", { selector: "b" }).length).toBeGreaterThan(0);
+    expect(screen.getByRole("status")).toHaveTextContent("3 подсказки");
+  });
+
+  it("has no listings, prices or counts in the rows, and one accessible name per row", async () => {
     renderBar();
     act(() => field().focus());
     type("дрель");
+    await screen.findByRole("option", { name: "дрель makita" });
 
-    await screen.findByRole("option", { name: /Дрель Makita/ });
-    const names = options().map((o) => o.textContent);
-    expect(names[0]).toContain("Электроинструменты");
-    expect(names[1]).toContain("Дрель Makita");
-    expect(names[2]).toContain("Дрель ударная Bosch");
-    expect(names.at(-1)).toBe(content.search.showAll("дрель"));
+    for (const o of options()) expect(o.textContent).not.toMatch(/\d|₽|объявлен/);
+    expect(screen.getByRole("option", { name: "Электроинструменты" })).toBeInTheDocument();
+    expect(document.querySelector('[role="option"] img')).toBeNull();
+  });
 
-    // Совпавшее начало слова выделено.
-    expect(screen.getAllByText("Дрель", { selector: "b" }).length).toBeGreaterThan(0);
-    expect(screen.getByRole("status")).toHaveTextContent("3 подсказки");
+  it("drops «show all» when a suggestion is exactly the typed query", async () => {
+    renderBar();
+    act(() => field().focus());
+    type("Дрель");
+    await screen.findByRole("option", { name: "дрель makita" });
+    expect(screen.queryByRole("option", { name: content.search.showAll("Дрель") })).not.toBeInTheDocument();
+    expect(options()).toHaveLength(3);
+  });
+
+  it("sends a trailing space: after it the server offers the typed query", async () => {
+    renderBar();
+    act(() => field().focus());
+    type("дрель ");
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/search/suggest?city=kazan&q=%D0%B4%D1%80%D0%B5%D0%BB%D1%8C+"));
   });
 
   it("moves the active row with arrows and marks it for the stylesheet", async () => {
     renderBar();
     act(() => field().focus());
-    type("дрель");
-    await screen.findByRole("option", { name: /Дрель Makita/ });
+    type("дре");
+    await screen.findByRole("option", { name: "дрель-миксер" });
 
     fireEvent.keyDown(field(), { key: "ArrowDown" });
     const first = options()[0];
@@ -131,26 +153,26 @@ describe("WhatField", () => {
     expect(css).toMatch(/\[role="option"\]\[data-active="true"\]\s*\{[^}]*var\(--color-hover\)/);
   });
 
-  it("Enter on a listing opens its card", async () => {
+  it("Enter on a query opens /search with it", async () => {
     renderBar();
     act(() => field().focus());
     type("дрель");
-    await screen.findByRole("option", { name: /Дрель Makita/ });
+    await screen.findByRole("option", { name: "дрель makita" });
 
     fireEvent.keyDown(field(), { key: "ArrowDown" });
     fireEvent.keyDown(field(), { key: "ArrowDown" });
     fireEvent.keyDown(field(), { key: "Enter" });
 
-    expect(push).toHaveBeenCalledWith("/kazan/instrumenty/elektro/drel-makita-l1");
-    // Шапка показывает то, что будет в адресе, — без названия вещи.
-    expect(field()).toHaveValue("");
+    expect(push).toHaveBeenCalledWith(hrefOf("дрель makita"));
+    // Шапка показывает то, что будет в адресе, — сам запрос.
+    expect(field()).toHaveValue("дрель makita");
   });
 
   it("a click on a section opens the section", async () => {
     renderBar();
     act(() => field().focus());
     type("дрель");
-    fireEvent.click(await screen.findByRole("option", { name: /^Электроинструменты/ }));
+    fireEvent.click(await screen.findByRole("option", { name: "Электроинструменты" }));
     expect(push).toHaveBeenCalledWith("/kazan/instrumenty/elektro");
   });
 
@@ -158,7 +180,7 @@ describe("WhatField", () => {
     renderBar();
     act(() => field().focus());
     type("дрель");
-    await screen.findByRole("option", { name: /Дрель Makita/ });
+    await screen.findByRole("option", { name: "дрель makita" });
 
     fireEvent.submit(screen.getByRole("search"));
     expect(push).toHaveBeenCalledWith("/search?q=%D0%B4%D1%80%D0%B5%D0%BB%D1%8C&city=kazan");
@@ -190,7 +212,7 @@ describe("WhatField", () => {
 
   it.each([
     ["a network error", new Error("offline")],
-    ["the rate limit", { status: 429, body: { items: [], categories: [] } }],
+    ["the rate limit", { status: 429, body: { queries: [], categories: [] } }],
   ])("treats %s as «no suggestions»", async (_, reply) => {
     replies["дрель"] = reply as Reply;
     renderBar();
@@ -209,14 +231,25 @@ describe("WhatField", () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/search/suggest?city=kazan&q=%D0%B4%D1%80%D0%B5"));
 
     type("дрель");
-    await screen.findByRole("option", { name: /Дрель Makita/ });
+    await screen.findByRole("option", { name: "дрель makita" });
 
     // Ответ на «дре» пришёл последним — список не откатывается.
     await act(async () => {
-      gates.get("дре")!.open({ status: 200, body: { items: [], categories: [] } });
+      gates.get("дре")!.open({ status: 200, body: { queries: [], categories: [] } });
     });
-    expect(screen.getByRole("option", { name: /Дрель Makita/ })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "дрель makita" })).toBeInTheDocument();
     expect(screen.queryByText(content.search.noMatches("дрель"))).not.toBeInTheDocument();
+  });
+
+  // Браузер мог закэшировать ответ прежней формы (`items`) — он не роняет поле.
+  it("reads an old-shaped body as sections only", async () => {
+    replies["дрель"] = { status: 200, body: { items: [{ id: "l1", title: "Дрель" }], categories: [ELECTRO] } };
+    renderBar();
+    act(() => field().focus());
+    type("дрель");
+
+    await screen.findByRole("option", { name: "Электроинструменты" });
+    expect(options().map((o) => o.textContent)).toEqual(["Электроинструменты", content.search.showAll("дрель")]);
   });
 
   it("keeps the field focused and opens the full-screen panel on phones", async () => {
@@ -227,6 +260,8 @@ describe("WhatField", () => {
     expect(panel).not.toBeNull();
     expect(panel).toHaveClass("z-50");
     expect(document.activeElement).toBe(field());
+    // Пустое поле — в панели только верхняя строка, без списка.
+    expect(within(panel as HTMLElement).queryByRole("listbox")).toBeNull();
 
     fireEvent.click(within(panel as HTMLElement).getByRole("button", { name: content.search.closeSuggest }));
     expect(document.querySelector("[data-suggest-panel]")).toBeNull();
@@ -274,9 +309,13 @@ describe("WhatField", () => {
     act(() => field().focus());
     type("дрель");
 
-    await screen.findByRole("option", { name: /Дрель Makita/ });
+    await screen.findByRole("option", { name: "дрель makita" });
     expect(document.querySelector("[data-suggest-panel]")).toBeNull();
     // Поповер — в портале, вне формы: секция hero с overflow-hidden его не обрежет.
     expect(screen.getByRole("search")).not.toContainElement(screen.getByRole("listbox"));
+
+    // Запрос с lg ведёт в выдачу сразу — это сам поиск, а не выбор вещи.
+    fireEvent.click(screen.getByRole("option", { name: "дрель makita" }));
+    expect(push).toHaveBeenCalledWith(hrefOf("дрель makita"));
   });
 });
