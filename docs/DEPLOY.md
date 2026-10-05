@@ -205,6 +205,10 @@ git clone https://github.com/<you>/prokat.git inrenta   # репозиторий
 cd inrenta
 ```
 
+Дальше все команды на сервере выполняются из каталога проекта — здесь
+`/opt/inrenta`. Если сервер поднят в другом каталоге, `cd` в примерах ниже — в
+него.
+
 ### 7.1. Прод `.env`
 
 Секреты сгенерировать на локалке:
@@ -333,7 +337,7 @@ dev-стека и сыпать "Failed to find Server Action"):
 [seo.md, «IndexNow»](seo.md#indexnow).
 
 ```bash
-cd ~/prokat
+cd /opt/inrenta
 # в .env: INDEXNOW_KEY=<openssl rand -hex 16>   (см. 7.1)
 docker compose up -d --force-recreate app     # пересоздание, не restart: env_file
 curl https://example.ru/indexnow.txt          # вернёт ключ; 404 — ключа нет в окружении
@@ -410,7 +414,7 @@ docker volume rm prokat_pg_data prokat_caddy_data prokat_caddy_config
 ### Обновление кода
 
 ```bash
-cd ~/prokat
+cd /opt/inrenta
 git pull
 docker compose build app && docker compose up -d app
 # Процесс доставки собирается и обновляется отдельно — он переживает рестарт
@@ -459,7 +463,7 @@ docker compose up -d --force-recreate app realtime
 и `emailVerified`.
 
 ```bash
-cd ~/prokat
+cd /opt/inrenta
 npm install --legacy-peer-deps   # npm строже pnpm к peer deps (nodemailer 9 vs @auth/core)
 
 NODE_ENV=production \
@@ -754,7 +758,7 @@ docker compose exec db psql -U app -d app -c "select relname, pg_size_pretty(pg_
 ### Полный сброс БД и пересев
 
 ```bash
-cd ~/prokat
+cd /opt/inrenta
 docker compose stop app
 docker compose exec db psql -U app -d app -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"
 docker compose exec db psql -U app -d app -c "DROP SCHEMA IF EXISTS drizzle CASCADE;"
