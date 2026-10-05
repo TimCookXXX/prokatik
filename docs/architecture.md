@@ -83,7 +83,8 @@ src/app/
 ├── api/          auth, oauth/vk, upload, health, search/suggest,
 │                 geo/{suggest,reverse,client-index}, dev-ручки
 ├── layout.tsx    корневой layout: шрифты, темы, шапка, футер, мобильная навигация
-├── sitemap.ts / robots.ts / manifest.ts
+├── sitemap.ts / robots.ts / manifest.ts / opengraph-image.tsx
+├── indexnow.txt/ ключ IndexNow из окружения (route handler)
 └── not-found.tsx
 ```
 
@@ -364,8 +365,5 @@ layout'е, а тот при клиентской навигации не пер�
   admin-action проверяет роль самостоятельно (`requireAdmin()` в
   `src/server/actions/admin.ts`), то есть данные защищены на уровне мутаций.
   `NEEDS REVIEW`: стоит ли продублировать проверку на самих страницах.
-- **`src/lib/indexnow.ts` не подключён.** Модуль написан и покрыт тестами, но
-  `pingIndexNow()` не вызывается ни из одного места приложения. См.
-  [seo.md](seo.md).
 - **Линтера фактически нет.** Конфигурации ESLint в проекте не существует; см.
   [testing.md](testing.md).

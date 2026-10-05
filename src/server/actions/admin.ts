@@ -15,6 +15,7 @@ import { writeDealNote } from "@/server/deal-note";
 import { slugify } from "@/lib/slugify";
 import { RESERVED_SLUGS } from "@/lib/owner/validation";
 import { invalidateSearchIndex } from "@/server/search-index";
+import { scheduleIndexNow } from "@/server/indexnow";
 import { invalidateCitiesGeo } from "@/server/city";
 import { notify } from "@/server/notifications";
 import { publish } from "@/server/realtime";
@@ -75,6 +76,7 @@ export async function adminSetListingStatus(
       : { ok: false, error: "not_found" };
   }
   invalidateSearchIndex();
+  scheduleIndexNow([listingId]);
   revalidatePath("/admin/listings");
   return { ok: true, data: undefined };
 }
@@ -299,6 +301,8 @@ export async function adminBanUser(userId: string, reason: unknown): Promise<Act
     return { ok: false, error: parsedReason.error.issues[0]?.message ?? "invalid_input" };
   }
 
+  // Погашенные баном объявления — для пинга IndexNow после коммита.
+  let hiddenIds: string[] = [];
   try {
     await getDb().transaction(async (tx) => {
       const res = await tx.update(users)
@@ -353,9 +357,11 @@ export async function adminBanUser(userId: string, reason: unknown): Promise<Act
 
       // Метка отличает погашенное баном от скрытого владельцем — по одному лишь
       // статусу эти случаи неразличимы, и разбан поднял бы лишнее.
-      await tx.update(listings)
+      const hidden = await tx.update(listings)
         .set({ status: "hidden", hiddenByBan: true, updatedAt: now })
-        .where(and(eq(listings.ownerUserId, userId), eq(listings.status, "active")));
+        .where(and(eq(listings.ownerUserId, userId), eq(listings.status, "active")))
+        .returning({ id: listings.id });
+      hiddenIds = hidden.map((r) => r.id);
 
       // Сторона получателя называется здесь, рядом с counterpartId, а не
       // выводится из вида события ниже: вид сторону не задаёт. Входящую заявку
@@ -421,8 +427,10 @@ export async function adminBanUser(userId: string, reason: unknown): Promise<Act
     throw e;
   }
 
-  // Вещи забаненного уходят из подсказок и /search сразу.
+  // Вещи забаненного уходят из подсказок и /search сразу, из поисковиков — по
+  // пингу: транзакция уже закоммичена, робот увидит 404.
   invalidateSearchIndex();
+  scheduleIndexNow(hiddenIds);
   // Бан закрывает живые заявки по обе стороны, а лента у них теперь общая.
   revalidatePath("/admin/users");
   revalidatePath("/cabinet/requests");
@@ -433,6 +441,8 @@ export async function adminBanUser(userId: string, reason: unknown): Promise<Act
 export async function adminUnbanUser(userId: string): Promise<ActionResult> {
   if (!(await requireAdmin())) return { ok: false, error: "forbidden" };
 
+  // Поднятые разбаном объявления — для пинга IndexNow после коммита.
+  let restoredIds: string[] = [];
   try {
     await getDb().transaction(async (tx) => {
       const res = await tx.update(users)
@@ -444,9 +454,11 @@ export async function adminUnbanUser(userId: string): Promise<ActionResult> {
       // Условие по метке, а не по статусу: объявления, которые владелец скрыл
       // сам до бана, должны остаться скрытыми. Отклонённые заявки не
       // воскрешаются — declined терминален.
-      await tx.update(listings)
+      const restored = await tx.update(listings)
         .set({ status: "active", hiddenByBan: false, updatedAt: new Date() })
-        .where(and(eq(listings.ownerUserId, userId), eq(listings.hiddenByBan, true)));
+        .where(and(eq(listings.ownerUserId, userId), eq(listings.hiddenByBan, true)))
+        .returning({ id: listings.id });
+      restoredIds = restored.map((r) => r.id);
     });
   } catch (e) {
     if (e instanceof Error && e.message === "not_found") return { ok: false, error: "not_found" };
@@ -454,6 +466,7 @@ export async function adminUnbanUser(userId: string): Promise<ActionResult> {
   }
 
   invalidateSearchIndex();
+  scheduleIndexNow(restoredIds);
   revalidatePath("/admin/users");
   return { ok: true, data: undefined };
 }

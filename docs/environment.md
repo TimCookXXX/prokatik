@@ -111,8 +111,9 @@ allow-list хостов для `next/image` в `next.config.ts`. docker-compose
 
 Метрика подключается лишь при `NODE_ENV=production` **и** заданном ID.
 
-`INDEXNOW_KEY` валидируется, но в приложении сейчас не используется: см.
-раздел про IndexNow в [seo.md](seo.md).
+`INDEXNOW_KEY` приложение отдаёт по адресу `/indexnow.txt` и шлёт им пинги
+IndexNow при изменении объявлений — только при `NODE_ENV=production`; см.
+[seo.md, «IndexNow»](seo.md#indexnow).
 
 ## Не через `src/lib/env.ts`
 
@@ -171,7 +172,7 @@ docker-моста, а не сети, в которой стоит телефон
 | `STORAGE_*` (dev) | `/api/upload` → 503, фото и свои обложки не загрузить |
 | `STORAGE_*` (prod) | приложение не стартует |
 | `BACKUP_S3_*` | бэкапы не уходят в S3 |
-| `INDEXNOW_KEY` | ничего (модуль не подключён) |
+| `INDEXNOW_KEY` | `/indexnow.txt` → 404, поисковики узнают об объявлениях только из sitemap |
 | `YANDEX_METRIKA_ID` | аналитика выключена |
 
 ## Изменение переменных в проде

@@ -8,7 +8,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // БД мокается построителем, который отвечает на любую цепочку: `returning`
 // — одной строкой (запись прошла), всё остальное — пустым набором (дублей
 // нет, подкатегорий нет, заявок нет). Транзакция исполняет колбэк на нём же.
-const { authMock, invalidate, dbCalls, refs, db } = vi.hoisted(() => {
+const { authMock, invalidate, indexNow, dbCalls, refs, db } = vi.hoisted(() => {
   const dbCalls: string[] = [];
   // Таблица заявок подставляется после импорта схемы: фабрика исполняется раньше.
   const refs = { bookingRequests: null as unknown };
@@ -51,7 +51,10 @@ const { authMock, invalidate, dbCalls, refs, db } = vi.hoisted(() => {
     delete: op("delete"),
     transaction: async (cb: (tx: unknown) => Promise<unknown>) => cb(db),
   };
-  return { authMock: vi.fn(), invalidate: vi.fn(), dbCalls, refs, db };
+  return {
+    authMock: vi.fn(), invalidate: vi.fn(), dbCalls, refs, db,
+    indexNow: { schedule: vi.fn(), before: vi.fn(async () => ["https://example.ru/old"]) },
+  };
 });
 
 vi.mock("@/lib/auth", () => ({ auth: authMock }));
@@ -62,6 +65,12 @@ vi.mock("@/server/realtime", () => ({ publish: vi.fn() }));
 vi.mock("@/server/notifications", () => ({ notify: vi.fn() }));
 vi.mock("@/server/deal-note", () => ({ writeDealNote: vi.fn() }));
 vi.mock("@/server/booking-mail", () => ({ queueBookingMail: vi.fn() }));
+// after() вне запроса падает, поэтому IndexNow — мок; здесь же видно, кого и
+// когда мутации отдают на пинг.
+vi.mock("@/server/indexnow", () => ({
+  scheduleIndexNow: indexNow.schedule,
+  currentListingUrls: indexNow.before,
+}));
 // Адрес проверяется своим тестом (listing-actions, listing-address); здесь он
 // просто проходит.
 vi.mock("@/server/listing-address", () => ({
@@ -135,6 +144,65 @@ describe("invalidateSearchIndex в мутациях админки", () => {
     authMock.mockResolvedValue(owner);
     expect(await adminSetListingStatus("L1", "hidden")).toEqual({ ok: false, error: "forbidden" });
     expect(invalidate).not.toHaveBeenCalled();
+  });
+});
+
+// Пинг IndexNow — по тем же мутациям объявлений, только после успешной записи
+// (у бана и разбана — после коммита транзакции, по строкам из returning).
+describe("scheduleIndexNow в мутациях объявлений", () => {
+  it.each([
+    ["createListing", () => createListing(form), [expect.any(String)]],
+    ["setListingStatus", () => setListingStatus("L1", "hidden"), ["L1"]],
+  ])("%s отдаёт объявление на пинг", async (_name, run, ids) => {
+    authMock.mockResolvedValue(owner);
+    expect(await run()).toMatchObject({ ok: true });
+    expect(indexNow.schedule).toHaveBeenCalledTimes(1);
+    expect(indexNow.schedule).toHaveBeenCalledWith(ids);
+  });
+
+  it("updateListing отдаёт и адрес до записи", async () => {
+    authMock.mockResolvedValue(owner);
+    expect(await updateListing("L1", form)).toMatchObject({ ok: true });
+    expect(indexNow.before).toHaveBeenCalledWith(["L1"]);
+    expect(indexNow.schedule).toHaveBeenCalledWith(["L1"], ["https://example.ru/old"]);
+  });
+
+  it.each([
+    ["adminSetListingStatus", () => adminSetListingStatus("L1", "hidden"), ["L1"]],
+    // Мок БД отвечает на returning одной строкой { id: "x" }.
+    ["adminBanUser", () => adminBanUser("u2", "спам в объявлениях"), ["x"]],
+    ["adminUnbanUser", () => adminUnbanUser("u2"), ["x"]],
+  ])("%s отдаёт объявления на пинг", async (_name, run, ids) => {
+    authMock.mockResolvedValue(admin);
+    expect(await run()).toMatchObject({ ok: true });
+    expect(indexNow.schedule).toHaveBeenCalledTimes(1);
+    expect(indexNow.schedule).toHaveBeenCalledWith(ids);
+  });
+
+  // Транзакция бана уже погасила объявления (returning отдал id), но коммит не
+  // прошёл: пинговать нечего — в базе они остались активными.
+  it.each([
+    ["adminBanUser", () => adminBanUser("u2", "спам в объявлениях")],
+    ["adminUnbanUser", () => adminUnbanUser("u2")],
+  ])("%s: транзакция откатилась — без пинга", async (_name, run) => {
+    authMock.mockResolvedValue(admin);
+    vi.spyOn(db, "transaction").mockImplementationOnce(async (cb: (tx: unknown) => Promise<unknown>) => {
+      await cb(db);
+      throw new Error("could not serialize access");
+    });
+    await expect(run()).rejects.toThrow("could not serialize access");
+    expect(indexNow.schedule).not.toHaveBeenCalled();
+  });
+
+  it("отказ — без пинга", async () => {
+    authMock.mockResolvedValue(owner);
+    expect(await setListingStatus("L1", "evil" as never)).toMatchObject({ ok: false });
+    expect(await adminSetListingStatus("L1", "hidden")).toEqual({ ok: false, error: "forbidden" });
+    expect(await adminBanUser("u2", "спам в объявлениях")).toEqual({ ok: false, error: "forbidden" });
+    authMock.mockResolvedValue(null);
+    expect(await updateListing("L1", form)).toEqual({ ok: false, error: "auth_required" });
+    expect(indexNow.schedule).not.toHaveBeenCalled();
+    expect(indexNow.before).not.toHaveBeenCalled();
   });
 });
 

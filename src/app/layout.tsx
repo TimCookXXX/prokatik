@@ -14,6 +14,7 @@ import "@theme/tokens.css";
 import "@theme/typography.css";
 import { headers } from "next/headers";
 import { resolveViewerCity } from "@/server/city";
+import { getActiveCities } from "@/server/catalog";
 import { CityPreferenceProvider } from "@/components/layout/CityPreference";
 import { RealtimeProvider } from "@/components/realtime/RealtimeProvider";
 import { RealtimeToaster } from "@/components/realtime/RealtimeToaster";
@@ -58,9 +59,15 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   // соседи, и провайдер обязан накрывать обоих. Без этого вкладка «Каталог»
   // после смены города вела бы в старый — ровно на мобайле, где селектор и
   // появился.
-  const [hasSession, viewerCity] = await Promise.all([
+  //
+  // Города для подвала — тот же справочник под cache(), что берут
+  // resolveViewerCity, шапка и таб-бар: лишнего запроса нет. Ловить его отказ
+  // здесь бессмысленно — тот же промис уже ждёт resolveViewerCity рядом, и без
+  // базы layout падает и так.
+  const [hasSession, viewerCity, footerCities] = await Promise.all([
     headers().then((h) => h.get("x-has-session") === "1"),
     resolveViewerCity(),
+    getActiveCities(),
   ]);
 
   return (
@@ -90,7 +97,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           <div className="flex-1 min-h-[calc(100svh-4.5rem)]">{children}</div>
           {/* Отступ под парящий таб-бар: на десктопе --tabbar-h равна нулю. */}
           <div className="pb-[var(--tabbar-h)]">
-            <Footer />
+            <Footer cities={footerCities} />
           </div>
           <MobileNav />
           <RealtimeToaster />

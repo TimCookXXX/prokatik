@@ -405,12 +405,20 @@ async function run(opts: Options): Promise<Row[]> {
     pass(bad.length === 0, "11 sitemap → 200", `${targets.length} адресов`, bad.join("; ") || "все 200");
   }
 
-  // 12. Ключ IndexNow — только печать.
+  // 12. Ключ IndexNow. Ключ сайту не обязателен: 404 — только печать. Если
+  // адрес отвечает 200, это должен быть ключ — hex в text/plain, а не HTML.
   {
     const r = await get("/indexnow.txt");
-    const isKey = r.status === 200 && r.contentType.startsWith("text/plain");
-    add("INFO", "12 indexnow.txt", "/indexnow.txt",
-      isKey ? `200, ключ ${r.body.trim().length} символов` : `${r.status} ${r.contentType} — ключа нет`);
+    if (r.status === 404) {
+      add("INFO", "12 indexnow.txt", "/indexnow.txt", "404 — ключа нет, пинги IndexNow не уходят");
+    } else {
+      const key = r.body.trim();
+      pass(
+        r.status === 200 && r.contentType.startsWith("text/plain") && /^[a-f0-9]{8,128}$/.test(key),
+        "12 indexnow.txt", "/indexnow.txt",
+        `${r.status} ${r.contentType}${r.status === 200 ? `, ключ ${key.length} символов` : ""}`,
+      );
+    }
   }
 
   return rows;

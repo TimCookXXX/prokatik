@@ -326,23 +326,22 @@ dev-стека и сыпать "Failed to find Server Action"):
 
 ## 8. Post-deploy ручные шаги
 
-### 8.1. IndexNow verification file
+### 8.1. IndexNow
 
-> **Сейчас этот шаг ничего не даёт.** Модуль `src/lib/indexnow.ts` написан, но
-> `pingIndexNow()` не вызывается ни из одного места приложения — уведомления в
-> IndexNow не уходят, поисковики узнают о новых объявлениях только из sitemap.
-> Шаг оставлен, потому что ключ и файл понадобятся, как только вызов подключат.
-> См. раздел «Чего сейчас нет» в [seo.md](seo.md).
+Ключ живёт только в `.env` — файла в `public/` и коммита не нужно: его отдаёт
+приложение по адресу `/indexnow.txt`. Как и когда уходят пинги —
+[seo.md, «IndexNow»](seo.md#indexnow).
 
 ```bash
 cd ~/prokat
-echo "<INDEXNOW_KEY>" > "public/<INDEXNOW_KEY>.txt"
-docker compose build app && docker compose build realtime && docker compose up -d app
-curl https://example.ru/<INDEXNOW_KEY>.txt   # вернёт ключ
+# в .env: INDEXNOW_KEY=<openssl rand -hex 16>   (см. 7.1)
+docker compose up -d --force-recreate app     # пересоздание, не restart: env_file
+curl https://example.ru/indexnow.txt          # вернёт ключ; 404 — ключа нет в окружении
 ```
 
-(Файл коммитится в репо с локалки, на VPS только `git pull` — VPS-копия
-репозитория read-only по договорённости.)
+После первой правки объявления в логе должен быть ответ поисковика:
+`docker compose logs app | grep indexnow` — `200` или `202` значит ключ
+принят, `403` — нет (проверить, что `/indexnow.txt` отдаёт тот же ключ).
 
 ### 8.2. Yandex.Metrika
 
@@ -357,6 +356,9 @@ curl https://example.ru/<INDEXNOW_KEY>.txt   # вернёт ключ
 
 1. Верификация HTML-файлом → файл в `public/` → redeploy
 2. Submit sitemap: `https://example.ru/sitemap.xml`
+3. Вебмастер → «Анализ robots.txt»: директивы `Clean-param` приняты без ошибок
+4. С локалки: `pnpm seo:check https://example.ru` — все проверки PASS
+   ([testing.md](testing.md#проверка-seo-живого-сайта))
 
 ### 8.4. UptimeRobot + Telegram
 

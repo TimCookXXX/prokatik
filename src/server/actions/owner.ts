@@ -45,6 +45,7 @@ import { notify } from "@/server/notifications";
 import { publish } from "@/server/realtime";
 import { requestNotify } from "@/lib/realtime/events";
 import { invalidateSearchIndex } from "@/server/search-index";
+import { currentListingUrls, scheduleIndexNow } from "@/server/indexnow";
 import { resolveListingAddress } from "@/server/listing-address";
 
 export type ActionResult<T = void> =
@@ -111,6 +112,7 @@ export async function createListing(input: unknown): Promise<ActionResult<{ list
   // Подсказки и /search идут по индексу в памяти: без сброса новая вещь
   // появилась бы в них только после сверки версии.
   invalidateSearchIndex();
+  scheduleIndexNow([id]);
   revalidatePath("/cabinet/listings");
   return { ok: true, data: { listingId: id } };
 }
@@ -137,6 +139,10 @@ export async function updateListing(listingId: string, input: unknown): Promise<
   const address = await resolveListingAddress(form.address, { cityId: form.cityId, current: currentRows[0] });
   if (!address.ok) return { ok: false, error: address.error };
 
+  // Адрес карточки до записи: смена категории или города (новый адрес) меняет
+  // канонический путь, и старый тоже надо отдать роботу — он получит 308.
+  const urlsBefore = await currentListingUrls([listingId]);
+
   const res = await db.update(listings)
     .set({
       cityId: address.cityId,
@@ -159,6 +165,7 @@ export async function updateListing(listingId: string, input: unknown): Promise<
   if (res.length === 0) return { ok: false, error: "not_found" };
 
   invalidateSearchIndex();
+  scheduleIndexNow([listingId], urlsBefore);
   revalidatePath("/cabinet/listings");
   revalidatePath(`/cabinet/listings/${listingId}`);
   return { ok: true, data: undefined };
@@ -194,6 +201,8 @@ export async function setListingStatus(
 
   // Скрытое объявление должно пропасть из подсказок сразу, а не через 30 с.
   invalidateSearchIndex();
+  // А из поиска — как только робот перезапросит карточку и получит 404.
+  scheduleIndexNow([parsed.data.listingId]);
   revalidatePath("/cabinet/listings");
   return { ok: true, data: undefined };
 }

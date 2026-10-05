@@ -17,6 +17,8 @@ const state = vi.hoisted(() => ({
   updates: [] as Record<string, unknown>[],
   geo: null as GeoIndexData | null,
   geoThrows: false,
+  /** Сколько UPDATE было записано к моменту чтения адреса для IndexNow. */
+  updatesWhenUrlsRead: null as number | null,
 }));
 
 const { authMock, db } = vi.hoisted(() => {
@@ -55,6 +57,16 @@ vi.mock("@/server/realtime", () => ({ publish: vi.fn() }));
 vi.mock("@/server/notifications", () => ({ notify: vi.fn() }));
 vi.mock("@/server/deal-note", () => ({ writeDealNote: vi.fn() }));
 vi.mock("@/server/booking-mail", () => ({ queueBookingMail: vi.fn() }));
+// after() вне запроса падает; адрес до записи — фиксированный, а момент его
+// чтения запоминается, чтобы проверить, что он прочитан ДО UPDATE.
+const indexNow = vi.hoisted(() => ({ schedule: vi.fn() }));
+vi.mock("@/server/indexnow", () => ({
+  scheduleIndexNow: indexNow.schedule,
+  currentListingUrls: async () => {
+    state.updatesWhenUrlsRead = state.updates.length;
+    return ["https://example.ru/krasnodar/cat/perforator-L1"];
+  },
+}));
 
 vi.mock("@/server/geocoder-index", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/server/geocoder-index")>()),
@@ -116,6 +128,8 @@ beforeEach(() => {
   state.updates = [];
   state.geo = { ...FIXTURE, houses: [...FIXTURE.houses] };
   state.geoThrows = false;
+  state.updatesWhenUrlsRead = null;
+  indexNow.schedule.mockClear();
   resetGeocoderEngines();
 });
 
@@ -211,5 +225,33 @@ describe("updateListing: адрес", () => {
     state.current = null;
     expect(await updateListing("L1", form({ address: pick }))).toEqual({ ok: false, error: "not_found" });
     expect(state.updates).toHaveLength(0);
+  });
+});
+
+// Смена адреса может перенести объявление в другой город, а с ним сменить и
+// канонический путь: старый адрес читается до записи и уходит в пинг вместе с
+// новым, чтобы робот получил на нём 308.
+describe("IndexNow в мутациях объявления", () => {
+  it("createListing отдаёт новое объявление на пинг", async () => {
+    expect(await createListing(form({ address: pick }))).toMatchObject({ ok: true });
+    expect(indexNow.schedule).toHaveBeenCalledWith([state.inserts[0]!.id]);
+  });
+
+  it("updateListing читает адрес до UPDATE и передаёт его в пинг", async () => {
+    state.current = stored;
+    expect(await updateListing("L1", form({ address: pickYab }))).toMatchObject({ ok: true });
+    expect(state.updatesWhenUrlsRead).toBe(0);
+    expect(state.updates).toHaveLength(1);
+    expect(indexNow.schedule).toHaveBeenCalledWith(["L1"], ["https://example.ru/krasnodar/cat/perforator-L1"]);
+  });
+
+  it("чужое объявление и отказ по адресу — без пинга и без чтения адреса", async () => {
+    state.current = null;
+    expect(await updateListing("L1", form({ address: pick }))).toEqual({ ok: false, error: "not_found" });
+    state.current = stored;
+    expect(await updateListing("L1", form({ cityId: "yab" }))).toEqual({ ok: false, error: "Укажите адрес" });
+    expect(await createListing(form())).toEqual({ ok: false, error: "Укажите адрес" });
+    expect(state.updatesWhenUrlsRead).toBeNull();
+    expect(indexNow.schedule).not.toHaveBeenCalled();
   });
 });

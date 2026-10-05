@@ -44,7 +44,7 @@ describe("pingIndexNow", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it("production + key + urls — POST на api.indexnow.org с правильным body", async () => {
+  it("production + key + urls — POST на yandex.com/indexnow с ключом по /indexnow.txt", async () => {
     env.NODE_ENV = "production";
     env.INDEXNOW_KEY = "abc12345";
     env.NEXTAUTH_URL = "https://example.ru";
@@ -60,12 +60,12 @@ describe("pingIndexNow", () => {
     await pingIndexNow(["https://example.ru/p/x", "https://example.ru/"]);
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     const [url, init] = fetchSpy.mock.calls[0];
-    expect(url).toBe("https://api.indexnow.org/indexnow");
+    expect(url).toBe("https://yandex.com/indexnow");
     expect((init as RequestInit).method).toBe("POST");
     const body = JSON.parse((init as RequestInit).body as string);
     expect(body.host).toBe("example.ru");
     expect(body.key).toBe("abc12345");
-    expect(body.keyLocation).toBe("https://example.ru/abc12345.txt");
+    expect(body.keyLocation).toBe("https://example.ru/indexnow.txt");
     expect(body.urlList).toEqual(["https://example.ru/p/x", "https://example.ru/"]);
   });
 
@@ -84,5 +84,41 @@ describe("pingIndexNow", () => {
     vi.spyOn(global, "fetch").mockRejectedValue(new Error("network down"));
     await expect(pingIndexNow(["https://example.ru/x"])).resolves.toBeUndefined();
   });
-});
 
+  describe("код ответа — в лог", () => {
+    beforeEach(() => {
+      env.NODE_ENV = "production";
+      env.INDEXNOW_KEY = "abc12345";
+      env.NEXTAUTH_URL = "https://example.ru";
+      env.DOMAIN = "example.ru";
+      env.LETSENCRYPT_EMAIL = "ops@example.ru";
+      env.STORAGE_ENDPOINT = "https://s3.timeweb.cloud";
+      env.STORAGE_BUCKET = "b";
+      env.STORAGE_ACCESS_KEY_ID = "k";
+      env.STORAGE_SECRET_ACCESS_KEY = "s";
+      env.STORAGE_PUBLIC_BASE = "https://images.example.ru";
+      _resetEnvCacheForTests();
+    });
+
+    it.each([200, 202])("%i — принято, info", async (status) => {
+      vi.spyOn(global, "fetch").mockResolvedValue(new Response(null, { status }));
+      const info = vi.spyOn(console, "info").mockImplementation(() => {});
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      await pingIndexNow(["https://example.ru/x"]);
+      expect(info).toHaveBeenCalledWith(expect.stringContaining(String(status)));
+      expect(warn).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      [403, "ключ не принят"],
+      [422, "не с этого хоста"],
+      [429, "слишком много"],
+      [500, "неожиданный ответ"],
+    ])("%i — warn с расшифровкой", async (status, text) => {
+      vi.spyOn(global, "fetch").mockResolvedValue(new Response(null, { status }));
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      await pingIndexNow(["https://example.ru/x"]);
+      expect(warn).toHaveBeenCalledWith(expect.stringMatching(new RegExp(`^\\[indexnow\\] ${status}: .*${text}`)));
+    });
+  });
+});
