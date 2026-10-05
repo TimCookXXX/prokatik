@@ -258,13 +258,13 @@ export async function SearchResults({
             {totalPages > 1 && (
               <nav aria-label="Пагинация" className="mt-6 flex items-center justify-center gap-3 text-sm">
                 {page > 1 && (
-                  <Link href={pageHref(page - 1) as never} className="rounded-sm border border-border px-3 py-1.5 hoverable">
+                  <Link href={pageHref(page - 1) as never} className="tap-target rounded-sm border border-border px-3 py-1.5 hoverable">
                     ← Назад
                   </Link>
                 )}
                 <span className="text-muted-foreground">Страница {page} из {totalPages}</span>
                 {page < totalPages && (
-                  <Link href={pageHref(page + 1) as never} className="rounded-sm border border-border px-3 py-1.5 hoverable">
+                  <Link href={pageHref(page + 1) as never} className="tap-target rounded-sm border border-border px-3 py-1.5 hoverable">
                     Вперёд →
                   </Link>
                 )}

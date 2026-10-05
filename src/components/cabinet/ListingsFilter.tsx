@@ -113,12 +113,13 @@ export function ListingsFilter({
            * колонка становится ячейкой грида без собственных полей — там
            * -mx-4 вытаскивал бы ряд в зазор между меню и колонкой, вразрез с
            * таблицей под ним. Места с md хватает, прокрутка и не нужна. */
-          /* py-1 — место кольцу фокуса: при overflow-x:auto вертикаль тоже
-           * становится auto, и кольцо срезалось бы по высоте чипа. */
+          /* py-1.5 — место кольцу фокуса и зоне нажатия чипа (32px → 44px,
+           * .tap-target): при overflow-x:auto вертикаль тоже становится auto
+           * и срезала бы обе. -mt-0.5 и mb-2.5 возвращают ряду прежний шаг. */
           className={
-            "-mx-4 mb-3 flex gap-2 overflow-x-auto px-4 py-1 "
+            "-mx-4 -mt-0.5 mb-2.5 flex gap-2 overflow-x-auto px-4 py-1.5 "
             + "[scrollbar-width:none] [&::-webkit-scrollbar]:hidden "
-            + "md:mx-0 md:overflow-visible md:px-0"
+            + "md:mx-0 md:mt-0 md:mb-3 md:overflow-visible md:px-0 md:py-1"
           }
         >
           {visible.map(({ id, n }) => (

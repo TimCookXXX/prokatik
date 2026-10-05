@@ -88,7 +88,7 @@ export function Hero({
               // факты за сгиб. С sm — перенос, по центру, с wide — слева.
               <nav
                 aria-label={content.home.popularLabel}
-                className="-mx-4 flex items-center gap-2 overflow-x-auto px-4 [mask-image:linear-gradient(to_left,transparent,black_16px)] [scrollbar-width:none] sm:mx-0 sm:flex-wrap sm:justify-center sm:overflow-visible sm:px-0 sm:[mask-image:none] [&::-webkit-scrollbar]:hidden"
+                className="-mx-4 -my-1.5 flex items-center gap-2 overflow-x-auto px-4 py-1.5 [mask-image:linear-gradient(to_left,transparent,black_16px)] [scrollbar-width:none] sm:mx-0 sm:my-0 sm:flex-wrap sm:justify-center sm:overflow-visible sm:px-0 sm:py-0 sm:[mask-image:none] [&::-webkit-scrollbar]:hidden"
               >
                 <span aria-hidden="true" className="shrink-0 text-sm text-muted-foreground">
                   {content.home.popularLabel}:
@@ -97,7 +97,7 @@ export function Hero({
                   <Link
                     key={q}
                     href={`/search?${new URLSearchParams({ city: city.slug, q })}` as never}
-                    className="hoverable shrink-0 rounded-sm border border-border bg-card px-3 py-1.5 text-sm text-foreground"
+                    className="tap-target hoverable shrink-0 rounded-sm border border-border bg-card px-3 py-1.5 text-sm text-foreground"
                   >
                     {q}
                   </Link>

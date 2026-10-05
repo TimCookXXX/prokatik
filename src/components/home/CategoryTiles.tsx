@@ -52,7 +52,7 @@ export function CategoryTiles({
       })}
       <Link
         href={`/${citySlug}` as never}
-        className="inline-flex shrink-0 items-center gap-1.5 px-2 py-2.5 text-base font-semibold text-accent hover:underline"
+        className="tap-target inline-flex shrink-0 items-center gap-1.5 px-2 py-2.5 text-base font-semibold text-accent hover:underline"
       >
         {content.home.categoriesAll}
         <ArrowRight className="h-4 w-4 shrink-0" aria-hidden="true" />

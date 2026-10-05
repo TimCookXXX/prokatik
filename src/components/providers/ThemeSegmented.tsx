@@ -34,8 +34,8 @@ export function ThemeSegmented() {
       {index >= 0 && (
         <span
           aria-hidden="true"
-          className="absolute inset-y-0.5 left-0.5 w-7 rounded-sm bg-card shadow-sm transition-transform duration-200 ease-out"
-          style={{ transform: `translateX(${index * 28}px)` }}
+          className="absolute inset-y-0.5 left-0.5 w-7 rounded-sm bg-card shadow-sm transition-transform duration-200 ease-out [@media(pointer:coarse)]:w-11"
+          style={{ transform: `translateX(${index * 100}%)` }}
         />
       )}
 
@@ -49,7 +49,11 @@ export function ThemeSegmented() {
           title={label}
           onClick={() => setTheme(value)}
           className={cn(
-            "relative z-10 flex h-7 w-7 items-center justify-center rounded-sm transition-colors",
+            // На тач-экране — в рост пальца: две кнопки вплотную, невидимо
+            // расширить зону нельзя. Плашка выбранного едет на свою ширину
+            // (translateX в процентах) и поэтому совпадает с кнопкой в обоих
+            // размерах.
+            "relative z-10 flex h-7 w-7 items-center justify-center rounded-sm transition-colors [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11",
             current === value ? "text-accent" : "text-muted-foreground hover:text-foreground",
           )}
         >

@@ -27,7 +27,7 @@ export function CategoryFacets({
   const row = (href: string, name: string, count: number | null, active: boolean) => (
     <Link
       href={href as never}
-      className={`flex items-center justify-between gap-2 rounded-sm px-3 py-1.5 text-sm transition-colors ${
+      className={`flex items-center justify-between gap-2 rounded-sm px-3 py-1.5 text-sm [@media(pointer:coarse)]:min-h-11 transition-colors ${
         active
           ? "bg-selected text-selected-foreground"
           : "text-muted-foreground hoverable hover:text-foreground"

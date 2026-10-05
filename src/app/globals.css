@@ -178,6 +178,30 @@ html:has([data-hero-search]) [data-header-search][data-hero-pending]:not(:focus-
 }
 
 @layer components {
+  /* Цель для пальца не меньше 44×44 без изменения вида: невидимый ::after
+   * растягивает зону нажатия до 44px по каждой оси, если сам элемент меньше,
+   * и не трогает больший. Проценты у top/left абсолютного ::after берутся от
+   * самого элемента — поэтому min(0px, (100% − 44px) / 2) и даёт ровно
+   * недостающее поровну с двух сторон.
+   *
+   * Только для грубого указателя: мышь попадает и в мелкое, а на десктопе
+   * расширенные зоны соседей перекрывались бы без нужды.
+   *
+   * Чего класс не умеет: зону режет overflow предка или самого элемента
+   * (truncate), и у соседей ближе 44px зоны перекрываются — там нужна
+   * настоящая высота, а не этот класс. relative здесь, в components, —
+   * утилита absolute/fixed у элемента его перебивает, и ::after тогда
+   * отсчитывается от того же элемента. */
+  @media (pointer: coarse) {
+    .tap-target { position: relative; }
+    .tap-target::after {
+      content: "";
+      position: absolute;
+      inset-block: min(0px, calc((100% - 44px) / 2));
+      inset-inline: min(0px, calc((100% - 44px) / 2));
+    }
+  }
+
   /* Наведение. Накладка рисуется ПОВЕРХ собственной заливки элемента, а не
    * вместо неё: background-image кладётся над background-color.
    *
@@ -697,6 +721,10 @@ html:has([data-hero-search]) [data-header-search][data-hero-pending]:not(:focus-
   --rdp-outside-opacity: 0.4;
   --rdp-day-height: 44px;
   --rdp-day_button-height: 44px;
+  /* Стрелки месяцев — цель для пальца: у кнопок нет заливки, и 44px вместо
+   * 36px по умолчанию видны только чуть сдвинутым к центру шевроном. */
+  --rdp-nav_button-height: 44px;
+  --rdp-nav_button-width: 44px;
   --rdp-day_button-border-radius: var(--radius-lg);
   margin: 0;
 }

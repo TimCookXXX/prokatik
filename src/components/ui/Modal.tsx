@@ -109,7 +109,7 @@ export const ModalContent = React.forwardRef<HTMLDivElement, ContentProps>(
     const closeButton = showClose && (
       <Dialog.Close
         aria-label="Закрыть"
-        className="absolute right-3 top-3 z-10 rounded-sm p-1.5 text-muted-foreground transition-colors hoverable hover:text-foreground"
+        className="tap-target absolute right-3 top-3 z-10 rounded-sm p-1.5 text-muted-foreground transition-colors hoverable hover:text-foreground"
       >
         <X className="h-4 w-4" />
       </Dialog.Close>

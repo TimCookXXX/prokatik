@@ -54,7 +54,7 @@ export async function Header() {
             {/* flex, а не просто shrink-0: знак — inline-flex, и внутри строки
              * он садится на baseline с пустотой под ним, из-за чего ряд
              * центрирует ссылку вместе с этим «хвостом». */}
-            <Link href="/" className="flex shrink-0 items-center" aria-label={content.site.name}>
+            <Link href="/" className="tap-target flex shrink-0 items-center" aria-label={content.site.name}>
               <Logo size={20} word={content.site.name} />
             </Link>
             <span className="hidden h-5 w-px shrink-0 bg-border md:block" aria-hidden="true" />

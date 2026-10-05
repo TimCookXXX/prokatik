@@ -156,7 +156,7 @@ export function ListingCard({
           * специфичности и уронил бы её из фото в поток. */}
         <Link
           href={`/u/${listing.ownerUserId}` as never}
-          className="glass-photo absolute bottom-2 right-2 z-10 inline-flex max-w-[calc(100%-1rem)] items-center gap-1 rounded-sm py-0.5 pl-0.5 pr-2 transition-opacity hover:opacity-90 sm:bottom-2.5 sm:right-2.5 sm:max-w-[calc(100%-1.25rem)] sm:gap-1.5 sm:py-1 sm:pl-1 sm:pr-2.5"
+          className="glass-photo tap-target absolute bottom-2 right-2 z-10 inline-flex max-w-[calc(100%-1rem)] items-center gap-1 rounded-sm py-0.5 pl-0.5 pr-2 transition-opacity hover:opacity-90 sm:bottom-2.5 sm:right-2.5 sm:max-w-[calc(100%-1.25rem)] sm:gap-1.5 sm:py-1 sm:pl-1 sm:pr-2.5"
         >
           {/* Размер аватара — инлайновые width/height от пропа, классом на
             * брейкпоинте его не ужать; поэтому два, как на витрине продавца.

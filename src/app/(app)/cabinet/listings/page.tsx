@@ -101,7 +101,7 @@ export default async function CabinetListingsPage({
             * разместить можно из шапки сайта и из блока над кабинетом, ни на
             * мобиле, где «Сдать» с плюсом постоянно висит в нижней панели. */}
           <div className="mb-4 flex justify-end">
-            <Button asChild size="sm">
+            <Button asChild size="sm" className="tap-target">
               <Link href={"/cabinet/listings/new" as never}>+ Разместить</Link>
             </Button>
           </div>

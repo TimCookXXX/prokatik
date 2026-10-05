@@ -59,7 +59,7 @@ export function CitySelector({ cities }: { cities: CityOption[] }) {
         * сменить нет. */}
       <DropdownMenuTrigger
         aria-label={`Город: ${current?.name ?? content.nav.city}`}
-        className="inline-flex h-9 min-w-0 items-center gap-1 rounded-sm px-2 text-sm text-foreground transition-colors hoverable md:px-3"
+        className="tap-target inline-flex h-9 min-w-0 items-center gap-1 rounded-sm px-2 text-sm text-foreground transition-colors hoverable md:px-3"
       >
         {/* На узком экране имя города режется сильнее: рядом стоят знак и
           * поиск, и длинное название («Петропавловск-Камчатский») съело бы

@@ -7,8 +7,13 @@ const creditLink =
   "underline decoration-dotted underline-offset-2 transition-colors hover:text-accent";
 
 const columnTitle = "font-mono text-2xs uppercase tracking-mono text-muted-foreground";
+// На тач-экране ссылка колонки — строка в рост пальца (44px): соседи стоят
+// на 26px друг от друга, и невидимое расширение зоны перекрылось бы с
+// соседней. Поэтому там нужна настоящая высота, а зазор колонки обнуляется.
 const columnLink =
-  "break-words text-sm leading-none text-foreground/80 transition-colors hover:text-accent";
+  "break-words text-sm leading-none text-foreground/80 transition-colors hover:text-accent "
+  + "[@media(pointer:coarse)]:py-[15px]";
+const column = "flex min-w-0 flex-col gap-3 [@media(pointer:coarse)]:gap-0";
 
 export interface FooterCity {
   slug: string;
@@ -33,7 +38,7 @@ export function Footer({ cities = [] }: { cities?: readonly FooterCity[] }) {
           }`}
         >
           <div className="col-span-2 flex flex-col items-start gap-3 lg:col-span-1">
-            <Link href="/" className="flex items-center" aria-label={content.site.name}>
+            <Link href="/" className="tap-target flex items-center" aria-label={content.site.name}>
               <Logo size={22} />
             </Link>
             <p className="max-w-64 text-xs leading-relaxed text-muted-foreground">
@@ -42,7 +47,7 @@ export function Footer({ cities = [] }: { cities?: readonly FooterCity[] }) {
           </div>
 
           {content.footer.columns.map((col) => (
-            <nav key={col.title} className="flex min-w-0 flex-col gap-3">
+            <nav key={col.title} className={column}>
               <span className={columnTitle}>{col.title}</span>
               {col.links.map((l) => (
                 <Link key={l.href} href={l.href as never} className={columnLink}>
@@ -53,7 +58,7 @@ export function Footer({ cities = [] }: { cities?: readonly FooterCity[] }) {
           ))}
 
           {cities.length > 0 && (
-            <nav aria-label={content.footer.citiesTitle} className="flex min-w-0 flex-col gap-3">
+            <nav aria-label={content.footer.citiesTitle} className={column}>
               <span className={columnTitle}>{content.footer.citiesTitle}</span>
               {cities.map((c) => (
                 <Link key={c.slug} href={`/${c.slug}` as never} className={columnLink}>

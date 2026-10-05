@@ -238,7 +238,7 @@ export function BookingWidget(props: BookingWidgetProps) {
           <button
             type="button"
             onClick={clearDates}
-            className="mx-auto mt-1 block text-xs font-medium text-primary hover:underline"
+            className="tap-target mx-auto mt-1 block text-xs font-medium text-primary hover:underline"
           >
             Очистить даты
           </button>

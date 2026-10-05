@@ -11,6 +11,10 @@ export function parseView(v: string | undefined): ListingView {
   return v === "list" ? "list" : "grid";
 }
 
+// Ниже md переключатель живёт в шторке фильтров, и кнопки там в рост пальца
+// (44px): у соседей вплотную расширять зону невидимо нельзя — она перекрылась
+// бы с соседней.
+//
 // Активный вид помечен охрой — тем же, чем активная категория, выбранный чип и
 // заданный диапазон дат. По закону цвета проекта охра означает состояние
 // («здесь выбрано»), а зелёный — действие.
@@ -23,7 +27,7 @@ export function ViewToggle({
   className?: string;
 }) {
   const item = (active: boolean) =>
-    `flex h-7 w-7 items-center justify-center rounded-sm transition-colors ${
+    `flex h-11 w-11 items-center justify-center rounded-sm transition-colors md:h-7 md:w-7 ${
       active ? "bg-selected text-selected-foreground" : "text-muted-foreground hover:text-foreground"
     }`;
 

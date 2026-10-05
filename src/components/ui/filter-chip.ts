@@ -8,8 +8,10 @@
 // Ховер висит только на невыбранном: у выбранного подсветка спорила бы с
 // заливкой состояния. Гасить её через .hoverable не нужно — класса там просто
 // нет.
+// tap-target — зона нажатия 44px на тач-экране: чип в 32px остаётся тем же
+// на вид (ui/globals.css, .tap-target).
 const BASE =
-  "inline-flex h-8 items-center gap-1.5 rounded-sm border px-3 text-xs font-medium "
+  "tap-target inline-flex h-8 items-center gap-1.5 rounded-sm border px-3 text-xs font-medium "
   + "ring-offset-background transition-[color,background-color,border-color,transform] "
   + "duration-150 ease-out active:scale-[0.97] focus-visible:[outline:none] "
   + "focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 "

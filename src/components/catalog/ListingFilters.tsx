@@ -51,7 +51,7 @@ function Chip({
 }) {
   return (
     <label
-      className="inline-flex cursor-pointer items-center gap-1.5 rounded-sm border border-border
+      className="tap-target inline-flex cursor-pointer items-center gap-1.5 rounded-sm border border-border
         bg-background px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground
         has-[:checked]:border-accent has-[:checked]:bg-selected has-[:checked]:text-selected-foreground
         has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring
@@ -165,7 +165,7 @@ export function FilterForm({
 
       <hr className="border-border" />
 
-      <label className="flex cursor-pointer items-center gap-3">
+      <label className="tap-target flex cursor-pointer items-center gap-3">
         <input
           type="checkbox" name="verified" value="1"
           defaultChecked={state.verifiedOnly ?? false}
@@ -183,7 +183,7 @@ export function FilterForm({
 
       <div className="flex items-center gap-2">
         <Button type="submit" className="flex-1">Показать</Button>
-        <Button asChild variant="ghost" size="sm">
+        <Button asChild variant="ghost" size="sm" className="tap-target">
           <Link href={resetHref as never}>Сбросить</Link>
         </Button>
       </div>

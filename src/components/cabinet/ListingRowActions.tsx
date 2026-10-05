@@ -22,7 +22,7 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { setListingStatus } from "@/server/actions/owner";
 
 const TRIGGER =
-  "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-sm text-muted-foreground "
+  "tap-target inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-sm text-muted-foreground "
   + "transition-colors hoverable hover:text-foreground focus-visible:[outline:none] "
   + "focus-visible:ring-2 focus-visible:ring-ring";
 

@@ -40,7 +40,7 @@ export async function RecentItems({
         </h2>
         <Link
           href={`/${citySlug}` as never}
-          className="shrink-0 text-base font-semibold text-accent hover:underline"
+          className="tap-target shrink-0 text-base font-semibold text-accent hover:underline"
         >
           {content.home.recentAll} →
         </Link>

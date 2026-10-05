@@ -70,7 +70,7 @@ export function SearchScreenTrigger({
   return (
     <button
       {...common}
-      className={cn(field, "flex h-9 w-full min-w-0 items-center gap-2 pl-3 pr-2.5 text-left", className)}
+      className={cn(field, "tap-target flex h-9 w-full min-w-0 items-center gap-2 pl-3 pr-2.5 text-left", className)}
     >
       <Search className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
       <span className={cn("min-w-0 flex-1 truncate text-sm", text ? "text-foreground" : "text-muted-foreground")}>

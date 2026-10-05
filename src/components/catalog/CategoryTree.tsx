@@ -34,7 +34,7 @@ function Row({
       href={href as never}
       // Активная ветка помечена охрой: по закону цвета зелёный означает
       // действие, а «где я сейчас» — состояние, а не кнопка.
-      className={`flex items-center justify-between gap-2 rounded-sm px-3 py-1.5 text-sm transition-colors ${
+      className={`flex items-center justify-between gap-2 rounded-sm px-3 py-1.5 text-sm [@media(pointer:coarse)]:min-h-11 transition-colors ${
         active
           ? "bg-selected text-selected-foreground"
           : bold
@@ -82,7 +82,7 @@ export function CategoryTree({
     <nav aria-label="Категории" className="flex flex-col gap-0.5">
       <Link
         href={link(`/${citySlug}`) as never}
-        className="mb-1 inline-flex items-center gap-1 px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+        className="mb-1 inline-flex items-center gap-1 px-3 py-1.5 text-sm text-muted-foreground [@media(pointer:coarse)]:min-h-11 transition-colors hover:text-foreground"
       >
         <ChevronLeft className="h-4 w-4 shrink-0" aria-hidden="true" />
         Все категории
@@ -113,7 +113,7 @@ export function CategoryTree({
             // клиентского JS, а активная подкатегория из хвоста открывает
             // список сама через open.
             <details open={hidden.some((c) => c.slug === activeSubSlug)}>
-              <summary className="flex cursor-pointer list-none items-center gap-1 rounded-sm px-3 py-1.5 text-sm text-accent transition-colors hoverable [&::-webkit-details-marker]:hidden">
+              <summary className="flex cursor-pointer list-none items-center gap-1 rounded-sm px-3 py-1.5 text-sm [@media(pointer:coarse)]:min-h-11 text-accent transition-colors hoverable [&::-webkit-details-marker]:hidden">
                 Ещё {hidden.length}
                 <ChevronDown className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
               </summary>

@@ -256,7 +256,7 @@ export function AccountShell({
                       else router.push("/cabinet" as never);
                     }}
                     aria-label="Назад"
-                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground md:hidden"
+                    className="tap-target flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground md:hidden"
                   >
                     <ChevronLeft className="h-5 w-5" aria-hidden="true" />
                   </button>
