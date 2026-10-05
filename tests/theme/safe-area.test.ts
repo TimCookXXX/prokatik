@@ -74,3 +74,28 @@ describe("таб-бар", () => {
     expect(tabbar).toContain("pb-[env(safe-area-inset-bottom)]");
   });
 });
+
+describe("полоса брони на карточке вещи", () => {
+  const widget = read("src/components/booking/BookingWidget.tsx");
+
+  // Две нижние панели друг на друге съедали низ экрана: на карточке чужой
+  // вещи остаётся одна — полоса брони.
+  it("прячет таб-бар по маркеру полосы", () => {
+    expect(css).toMatch(/html:has\(\[data-booking-bar\]\) \[data-tabbar\]\s*\{\s*display:\s*none;/);
+  });
+
+  // Высота полосы — кант 1px + строка h-16 (64px) + полоса «домой». Подвал
+  // отступает на неё, а не на высоту спрятанного таб-бара.
+  it("--bottom-bar-h равна высоте полосы, и подвал отступает на неё", () => {
+    expect(css).toMatch(
+      /html:has\(\[data-booking-bar\]\)\s*\{\s*--bottom-bar-h:\s*calc\(65px \+ env\(safe-area-inset-bottom\)\);/,
+    );
+    expect(widget).toMatch(/data-booking-bar[\s\S]*?border-t[\s\S]*?className="[^"]*\bflex h-16\b/);
+    expect(read("src/app/layout.tsx")).toContain("pb-[var(--bottom-bar-h)]");
+  });
+
+  // Полоса больше не верхний ярус таб-бара — снимать ему скругления незачем.
+  it("хака со скруглениями таб-бара больше нет", () => {
+    expect(css).not.toMatch(/\[data-tabbar\]\s*>\s*div/);
+  });
+});

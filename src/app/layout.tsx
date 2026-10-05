@@ -100,8 +100,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             * svh, а не vh: на мобиле vh считается по развёрнутому окну без
             * адресной строки, и футер выглядывал бы снизу. */}
           <div className="flex-1 min-h-[calc(100svh-4.5rem)]">{children}</div>
-          {/* Отступ под таб-бар: на десктопе --tabbar-h равна нулю. */}
-          <div className="pb-[var(--tabbar-h)]">
+          {/* Отступ под нижнюю панель — таб-бар или полосу брони; на десктопе
+            * обе нулевые. */}
+          <div className="pb-[var(--bottom-bar-h)]">
             <Footer cities={footerCities} />
           </div>
           <MobileNav />

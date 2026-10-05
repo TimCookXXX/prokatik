@@ -1,5 +1,5 @@
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, it, expect, vi } from "vitest";
+import { fireEvent, render, screen, within } from "@testing-library/react";
+import { describe, it, expect, vi, afterEach } from "vitest";
 
 // Виджет тянет две ветки, которых в jsdom не бывает: окно входа уходит в
 // next-auth, а форма заявки — в server action, и оба заканчиваются на
@@ -72,7 +72,8 @@ describe("BookingWidget — своё объявление", () => {
   });
 
   // Липкая полоса без кнопки носила бы владельцу его же цену через весь экран,
-  // а таб-бар из-за неё терял бы верхние скругления (globals.css).
+  // а таб-бар под её маркером прячется (globals.css) — владелец остался бы без
+  // навигации.
   it("владельцу не показывает липкую полосу на мобиле", () => {
     const { container } = render(<BookingWidget {...base} isOwn handoverPickup handoverDelivery />);
     expect(container.querySelector("[data-booking-bar]")).toBeNull();
@@ -154,5 +155,77 @@ describe("BookingWidget — выбор дат", () => {
 
     fireEvent.click(day("2026-09-10"));
     expect(Object.fromEntries(query())).toEqual({ ...where, from: "2026-09-04", to: "2026-09-10" });
+  });
+});
+
+describe("BookingWidget — кнопка нижней панели", () => {
+  const bar = () => document.querySelector<HTMLElement>("[data-booking-bar]")!;
+  const barButton = () => within(bar()).getByRole("button");
+  const calendar = () => document.querySelector("[data-day]")!.closest(".surface")!;
+
+  afterEach(() => vi.restoreAllMocks());
+
+  // Серая неактивная «Выберите даты» внизу экрана не говорила, куда идти, а
+  // календарь от неё далеко. Пока дат нет, кнопка ведёт к нему.
+  it("без дат ведёт к календарю на странице", () => {
+    window.history.replaceState(null, "", base.pathname);
+    const scroll = vi.spyOn(Element.prototype, "scrollIntoView");
+    render(<BookingWidget {...base} handoverPickup handoverDelivery={false} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Очистить даты" }));
+    expect(barButton()).toHaveTextContent("Выбрать даты");
+    expect(barButton()).toBeEnabled();
+
+    fireEvent.click(barButton());
+    expect(scroll).toHaveBeenCalledTimes(1);
+    expect(scroll.mock.contexts[0]).toBe(calendar());
+    // Форма заявки не открылась: к брони кнопка не вела.
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  // Выбран только «Забрать» — бронировать ещё нечего, ровно как без дат.
+  it("с одной выбранной датой тоже ведёт к календарю", () => {
+    window.history.replaceState(null, "", base.pathname);
+    render(<BookingWidget {...base} handoverPickup handoverDelivery={false} />);
+    const day = (d: string) => document.querySelector<HTMLButtonElement>(`[data-day="${d}"] button`)!;
+    fireEvent.click(screen.getByRole("button", { name: "Очистить даты" }));
+    fireEvent.click(day("2026-09-10"));
+    expect(barButton()).toHaveTextContent("Выбрать даты");
+  });
+
+  // Даты заняты — в виджете бронь недоступна, а полоса зовёт их поменять.
+  it("при занятых датах зовёт их изменить", () => {
+    window.history.replaceState(null, "", base.pathname);
+    const scroll = vi.spyOn(Element.prototype, "scrollIntoView");
+    render(
+      <BookingWidget
+        {...base}
+        availability={{ "2026-09-04": { bookedQty: 1, blockedQty: 0 } }}
+        handoverPickup
+        handoverDelivery={false}
+      />,
+    );
+    expect(barButton()).toHaveTextContent("Изменить даты");
+    expect(barButton()).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Забронировать" })).toBeDisabled();
+
+    fireEvent.click(barButton());
+    expect(scroll.mock.contexts[0]).toBe(calendar());
+  });
+
+  it("с выбранными свободными датами бронирует", () => {
+    window.history.replaceState(null, "", base.pathname);
+    render(<BookingWidget {...base} handoverPickup handoverDelivery={false} />);
+    expect(barButton()).toHaveTextContent("Забронировать");
+    expect(barButton()).toBeEnabled();
+  });
+
+  // Полоса — нижняя панель вместо таб-бара: во всю ширину, вплотную к низу,
+  // непрозрачная и с отступом под полосу «домой».
+  it("стоит вплотную к нижней кромке", () => {
+    render(<BookingWidget {...base} handoverPickup handoverDelivery={false} />);
+    expect(bar()).toHaveClass("fixed", "inset-x-0", "bottom-0", "bg-card", "border-t");
+    expect(bar().className).toContain("pb-[env(safe-area-inset-bottom)]");
+    expect(bar().querySelector(".glass")).toBeNull();
   });
 });

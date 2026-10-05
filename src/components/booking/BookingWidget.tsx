@@ -28,6 +28,9 @@ import {
   depositValue, formatHandover, formatPrice, type DepositType,
 } from "@/lib/catalog/format";
 import { HandoverIcon } from "@/components/catalog/HandoverIcon";
+import { content } from "@theme/content";
+
+const t = content.booking;
 
 export interface BookingWidgetProps {
   listingId: string;
@@ -122,6 +125,15 @@ export function BookingWidget(props: BookingWidgetProps) {
   const hasConflict = conflicts.length > 0;
   const bookDisabled = !hasComplete || hasConflict;
 
+  // Календарь занятости — на самой странице, в виджете. Кнопка полосы на мобиле
+  // ведёт к нему, пока бронировать нечего: второй календарь в шторке спорил бы
+  // с этим за выбор. scroll-mt у цели держит её под липкой шапкой.
+  const calendarRef = useRef<HTMLDivElement>(null);
+  const toCalendar = () => {
+    const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    calendarRef.current?.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
+  };
+
   const onBook = () => {
     if (bookDisabled) return;
     if (props.isAuthed) {
@@ -143,10 +155,19 @@ export function BookingWidget(props: BookingWidgetProps) {
       </p>
     ) : (
       <Button className={extra} onClick={onBook} disabled={bookDisabled}>
-        {hasComplete ? "Забронировать" : "Выберите даты"}
+        {hasComplete ? t.book : "Выберите даты"}
       </Button>
     )
   );
+
+  // Кнопка полосы на мобиле не бывает мёртвой: календарь от неё далеко, и
+  // серая «Выберите даты» внизу экрана не говорила, куда идти. Пока дат нет
+  // или они заняты, она ведёт к календарю; бронирует — когда есть что.
+  const barAction = !hasComplete
+    ? <Button className="shrink-0" onClick={toCalendar}>{t.pickDates}</Button>
+    : hasConflict
+      ? <Button className="shrink-0" onClick={toCalendar}>{t.changeDates}</Button>
+      : <Button className="shrink-0" onClick={onBook}>{t.book}</Button>;
 
   // Владельцу подсказка про занятые даты не адресована: выбирать ему нечего,
   // а занятость он и так видит в календаре выше.
@@ -173,7 +194,10 @@ export function BookingWidget(props: BookingWidgetProps) {
 
   return (
     <>
-      <div className="surface p-4 sm:p-5">
+      <div
+        ref={calendarRef}
+        className="surface scroll-mt-[calc(var(--header-total)+0.75rem)] p-4 sm:p-5"
+      >
         <BookingCalendar
           from={sel.from}
           to={sel.to}
@@ -278,18 +302,19 @@ export function BookingWidget(props: BookingWidgetProps) {
         </span>
       </div>
 
-      {/* Mobile: прилипшая к низу кнопка */}
-      {/* Верхний ярус той же карточки, что и таб-бар: полоса садится вплотную на
-       * него и скругляется только сверху — снизу их стык держит волосяная
-       * линия. Навигация на карточке товара остаётся доступной.
+      {/* Mobile: нижняя панель действий вместо таб-бара. Две панели друг на
+       * друге съедали низ экрана, поэтому на карточке чужой вещи таб-бар
+       * скрыт — его прячет globals.css по маркеру data-booking-bar, там же
+       * --bottom-bar-h под подвал. Высота панели — ровно эта переменная:
+       * кант 1px + строка h-16 + полоса «домой»; меняете одно — правьте и
+       * другое.
        * Владельцу полосы нет вовсе: без кнопки она весь экран носила бы его же
-       * цену. Таб-бар возвращает себе верхние скругления сам — их снимает
-       * селектор body:has([data-booking-bar]) в globals.css. */}
+       * цену, и таб-бар у него остаётся. */}
       {!props.isOwn && <div
         data-booking-bar
-        className="fixed inset-x-0 bottom-[var(--tabbar-h)] z-40 pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] md:hidden"
+        className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-card pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] md:hidden"
       >
-        <div className="glass mx-auto flex max-w-[420px] items-center justify-between gap-3 rounded-t-lg border-b-0 px-4 py-2.5">
+        <div className="mx-auto flex h-16 max-w-[480px] items-center justify-between gap-3 px-4">
           <span className="min-w-0">
             <span className="block font-mark text-base font-bold">
               {estimate !== null
@@ -302,7 +327,7 @@ export function BookingWidget(props: BookingWidgetProps) {
               </span>
             )}
           </span>
-          {bookSlot("shrink-0")}
+          {barAction}
         </div>
       </div>}
 
