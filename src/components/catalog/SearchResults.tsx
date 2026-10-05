@@ -193,7 +193,7 @@ export async function SearchResults({
           * даты не трогает. Спрячь ленту на нуле результатов — и выбранные
           * даты стало бы нечем убрать, кроме правки адреса. */}
         <ResultsToolbar
-          categoryLabel={activeRoot?.name ?? "Все разделы"}
+          categoryLabel={activeRoot?.name ?? content.search.allCategories}
           categoryNav={categoryNav}
           filterForm={
             <FilterForm basePath="/search" state={filterState} hidden={filterHidden} priceBounds={priceBounds} />

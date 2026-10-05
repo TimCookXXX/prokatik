@@ -8,6 +8,7 @@ import { eachDate, freeQty, type AvailabilityMap } from "@/lib/catalog/availabil
 import { DISTANCE_TITLE, distanceLabel } from "@/lib/geo/distance";
 import { Avatar } from "@/components/ui/Avatar";
 import { cardFrame } from "@/components/ui/card-frame";
+import { cn } from "@/lib/utils";
 import { HandoverIcon } from "@/components/catalog/HandoverIcon";
 
 const HANDOVER_ICON = "h-[15px] w-[15px] shrink-0 text-accent";
@@ -191,14 +192,19 @@ export function ListingCard({
           * Ма…», а карточки в ряду обязаны быть одной высоты — короткое
           * название в одну строку сдвинуло бы цену вверх только в своей
           * колонке. min-h — две строки leading-snug (1.375) в em, поэтому
-          * верна на обоих кеглях.
+          * верна на обоих кеглях. Только в сетке: строка списка стоит одна в
+          * ряду, ровнять ей не с кем, и резерв под вторую строку был бы
+          * пустой дырой под коротким названием.
           *
           * after:inset-0 растягивает эту ссылку на всю карточку. Подсветка
           * названия висит на group от <article>, а не на hover самой ссылки:
           * ховер от псевдоэлемента до h3 не доходит — тот потомок, а не
           * предок. */}
         <Link href={href as never} className="block min-w-0 after:absolute after:inset-0">
-          <h3 className="line-clamp-2 min-h-[2.75em] break-words text-sm font-semibold leading-snug text-foreground transition-colors group-hover:text-accent sm:text-base">
+          <h3 className={cn(
+            "line-clamp-2 break-words text-sm font-semibold leading-snug text-foreground transition-colors group-hover:text-accent sm:text-base",
+            !list && "min-h-[2.75em]",
+          )}>
             {listing.title}
           </h3>
         </Link>

@@ -26,12 +26,12 @@ describe("ResultsToolbar", () => {
   it("держит «Категория · Фильтры (n) · Даты · Сортировка» одним рядом, по одному", () => {
     render(<ResultsToolbar {...props} />);
     const bar = screen.getByRole("group", { name: "Управление выдачей" });
-    const buttons = within(bar).getAllByRole("button");
-    expect(buttons.map((b) => b.getAttribute("aria-label") ?? b.textContent)).toEqual([
-      "Категория: Электроинструменты",
-      "Фильтры, выбрано: 1",
-      "Любые даты",
-      "Сначалановые",
+    const button = (name: string | RegExp) => within(bar).getByRole("button", { name });
+    expect(within(bar).getAllByRole("button")).toEqual([
+      button("Категория: Электроинструменты"),
+      button("Фильтры, выбрано: 1"),
+      button("Любые даты"),
+      button("Сначала новые"),
     ]);
     // Переключатель вида в ряду один — на мобиле он скрыт и живёт в шторке.
     expect(within(bar).getAllByRole("link", { name: "Сеткой" })).toHaveLength(1);

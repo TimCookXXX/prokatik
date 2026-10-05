@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { ChevronDown } from "lucide-react";
+import { content } from "@theme/content";
 import { cn } from "@/lib/utils";
 import { filterChip, toolbarChip, toolbarChipDesktop } from "@/components/ui/filter-chip";
 import {
@@ -29,14 +30,19 @@ export function SortMenu({
 }) {
   const active = options.find((o) => o.value === current) ?? options[0];
   if (!active) return null;
+  const prefix = content.catalogToolbar.sortPrefix;
+  const value = active.label.startsWith(`${prefix} `) ? active.label.slice(prefix.length + 1) : active.label;
 
   return (
     <DropdownMenu modal={false}>
       {/* Чип ленты выдачи: рост и кегль — общие с соседями (toolbarChip),
         * с md — прежняя кнопка панели (toolbarChipDesktop). */}
       <DropdownMenuTrigger className={cn(filterChip(false), toolbarChip, toolbarChipDesktop(false), "font-normal text-foreground")}>
-        <span className="hidden shrink-0 text-muted-foreground sm:inline">Сначала</span>
-        <span className="truncate font-medium">{active.label.replace(/^Сначала /, "")}</span>
+        {/* Пробел между подписями — для имени кнопки: соседние строчные
+          * элементы склеиваются в «Сначалановые». Вёрстку он не трогает:
+          * у flex-контейнера пробельные узлы между детьми не рисуются. */}
+        <span className="hidden shrink-0 text-muted-foreground sm:inline">{prefix}</span>{" "}
+        <span className="truncate font-medium">{value}</span>
         <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">

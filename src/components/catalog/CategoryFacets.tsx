@@ -6,6 +6,7 @@
 // сохраняют запрос и остальные фильтры и лишь сужают выдачу.
 
 import Link from "next/link";
+import { content } from "@theme/content";
 
 export interface CategoryFacet {
   slug: string;
@@ -43,7 +44,7 @@ export function CategoryFacets({
 
   return (
     <nav aria-label="Разделы" className="flex flex-col gap-0.5">
-      {row(allHref, "Все разделы", null, !activeSlug)}
+      {row(allHref, content.search.allCategories, null, !activeSlug)}
       {facets.map((f) => (
         <span key={f.slug}>{row(f.href, f.name, f.count, f.slug === activeSlug)}</span>
       ))}
