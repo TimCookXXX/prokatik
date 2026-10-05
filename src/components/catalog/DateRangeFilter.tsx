@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 // Свой useRouter у toploader: программный переход тоже запускает полосу
 // загрузки. Без loading.tsx в каталоге другого отклика у перехода нет.
 import { useRouter } from "nextjs-toploader/app";
@@ -42,6 +42,7 @@ export function DateRangeFilter({
   const desktop = useIsDesktop();
   const [popOpen, setPopOpen] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
+  const chipRef = useRef<HTMLButtonElement>(null);
 
   // Закрываем при прокрутке страницы. Radix держит поповер приклеенным к
   // кнопке, поэтому при скролле он уезжает вверх и наползает на липкий хедер:
@@ -91,9 +92,15 @@ export function DateRangeFilter({
     <>
       <Popover open={desktop && popOpen} onOpenChange={onOpenChange}>
         <PopoverTrigger asChild>
+          {/* Ниже md чип открывает шторку, а не поповер, и Radix о ней не
+            * знает: его aria-expanded так и остался бы false при открытой
+            * шторке. Здесь открытость говорит сам чип; aria-controls Radix
+            * ставит только открытому поповеру, а он в этом режиме закрыт. */}
           <button
+            ref={chipRef}
             type="button"
             className={cn(filterChip(active), toolbarChip)}
+            {...(!desktop && { "aria-haspopup": "dialog" as const, "aria-expanded": sheetOpen })}
           >
             <CalendarDays className="h-4 w-4 shrink-0" aria-hidden="true" />
             {label}
@@ -131,7 +138,16 @@ export function DateRangeFilter({
       {/* Шторка открывается только жестом — Modal это требует: режим окна он
         * меряет в JS, и открытым с сервера его рендерить нельзя. */}
       <Modal open={sheetOpen} onOpenChange={setSheetOpen}>
-        <ModalContent aria-describedby={undefined}>
+        {/* Шторку открывает не её собственный Trigger, а чип поповера, и
+          * Radix некуда вернуть фокус при закрытии — он падал на body. Вернуть
+          * его на чип приходится вручную, как у «Когда» (WhenField). */}
+        <ModalContent
+          aria-describedby={undefined}
+          onCloseAutoFocus={(e) => {
+            e.preventDefault();
+            chipRef.current?.focus();
+          }}
+        >
           <ModalTitle className="mb-3 text-lg font-bold">{t.title}</ModalTitle>
           <DateRangeCalendar
             months={1}

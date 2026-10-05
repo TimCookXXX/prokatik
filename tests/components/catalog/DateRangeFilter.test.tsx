@@ -18,6 +18,18 @@ function setDesktop(on: boolean) {
     removeEventListener: () => {},
   }) });
 }
+/**
+ * Доиграть анимацию закрытия шторки. Radix держит окно смонтированным до
+ * animationend, а фокус возвращает только при размонтировании. AnimationEvent
+ * в jsdom нет, и fireEvent шлёт событие без animationName — Radix его не
+ * узнаёт; пустое имя он принимает за текущую анимацию.
+ */
+function finishAnimation(el: Element) {
+  const ev = new Event("animationend");
+  Object.defineProperty(ev, "animationName", { value: "" });
+  el.dispatchEvent(ev);
+}
+
 afterEach(() => {
   delete (window as { matchMedia?: unknown }).matchMedia;
 });
@@ -178,5 +190,33 @@ describe("DateRangeFilter — шторка ниже md", () => {
     fireEvent.click(reset);
     expect(push).not.toHaveBeenCalled();
     expect(document.querySelector(`[data-day="2026-09-05"]`)).not.toHaveAttribute("aria-selected");
+  });
+
+  // Шторку открывает чип поповера, а не её собственный Trigger: Radix некуда
+  // было вернуть фокус, и он падал на body — клавиатура теряла место в ленте.
+  it("закрываясь, возвращает фокус на чип", async () => {
+    render(<DateRangeFilter resetHref="/kazan" today="2026-09-01" />);
+    const chip = screen.getByRole("button", { name: /даты/ });
+    fireEvent.click(chip);
+    const sheet = screen.getByRole("dialog");
+    fireEvent.click(within(sheet).getByRole("button", { name: "Закрыть" }));
+    finishAnimation(sheet);
+    await waitFor(() => expect(sheet).not.toBeInTheDocument());
+    expect(chip).toHaveFocus();
+  });
+
+  // Radix о шторке не знает: чип говорил «свёрнуто» при открытом окне.
+  it("чип сообщает, что шторка открыта", async () => {
+    render(<DateRangeFilter resetHref="/kazan" today="2026-09-01" />);
+    const chip = screen.getByRole("button", { name: /даты/ });
+    expect(chip).toHaveAttribute("aria-haspopup", "dialog");
+    expect(chip).toHaveAttribute("aria-expanded", "false");
+
+    fireEvent.click(chip);
+    expect(chip).toHaveAttribute("aria-expanded", "true");
+    expect(chip).not.toHaveAttribute("aria-controls");
+
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Закрыть" }));
+    await waitFor(() => expect(chip).toHaveAttribute("aria-expanded", "false"));
   });
 });
