@@ -64,3 +64,8 @@ export function listingsCountLabel(n: number): string {
 export function ownersCountLabel(n: number): string {
   return `${n} ${ruPlural(n, "продавец", "продавца", "продавцов")}`;
 }
+
+// После «от» — родительный падеж: «от 1 продавца», «от 3 продавцов».
+export function ownersFromLabel(n: number): string {
+  return `от ${n} ${ruPlural(n, "продавца", "продавцов", "продавцов")}`;
+}

@@ -16,7 +16,7 @@ import {
 } from "@/lib/catalog/filters";
 import { singleCityScope, type CityScope } from "@/lib/catalog/city-scope";
 import { todayStr, addDaysStr } from "@/lib/catalog/dates";
-import { formatPrice, listingsCountLabel, ownersCountLabel } from "@/lib/catalog/format";
+import { formatPrice, listingsCountLabel, ownersFromLabel } from "@/lib/catalog/format";
 import { buildAvailabilityByListing } from "@/lib/catalog/availability";
 import { ListingCard } from "@/components/catalog/ListingCard";
 import { FilterForm, ListingFilters, type FilterState } from "@/components/catalog/ListingFilters";
@@ -137,7 +137,7 @@ export async function CategoryListing({
       {/* Вводный блок — только из данных */}
       {stats.listingCount > 0 && (
         <p className="text-sm text-muted-foreground">
-          {listingsCountLabel(stats.listingCount)} от {ownersCountLabel(stats.ownerCount)}
+          {listingsCountLabel(stats.listingCount)} {ownersFromLabel(stats.ownerCount)}
           {stats.minPriceDay !== null && (
             <>
               , цены от {formatPrice(stats.minPriceDay)}

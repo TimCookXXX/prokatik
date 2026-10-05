@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { depositValue, formatDeposit, formatHandover, formatHandoverShort } from "@/lib/catalog/format";
+import { depositValue, formatDeposit, formatHandover, formatHandoverShort, ownersFromLabel } from "@/lib/catalog/format";
 
 describe("formatHandover()", () => {
   it("оба способа — выбор остаётся за людьми", () => {
@@ -88,5 +88,14 @@ describe("depositValue()", () => {
       depositValue("none", null), depositValue("document", null),
       depositValue("money", 3000), depositValue("money", null),
     ]) expect(v.toLowerCase()).not.toContain("залог");
+  });
+});
+
+describe("ownersFromLabel()", () => {
+  it("после «от» — родительный падеж", () => {
+    expect(ownersFromLabel(1)).toBe("от 1 продавца");
+    expect(ownersFromLabel(3)).toBe("от 3 продавцов");
+    expect(ownersFromLabel(11)).toBe("от 11 продавцов");
+    expect(ownersFromLabel(21)).toBe("от 21 продавца");
   });
 });
