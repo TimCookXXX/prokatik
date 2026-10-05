@@ -3,6 +3,7 @@
 
 import Link from "next/link";
 import { LayoutGrid, List } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 export type ListingView = "grid" | "list";
 
@@ -14,11 +15,12 @@ export function parseView(v: string | undefined): ListingView {
 // заданный диапазон дат. По закону цвета проекта охра означает состояние
 // («здесь выбрано»), а зелёный — действие.
 export function ViewToggle({
-  view, gridHref, listHref,
+  view, gridHref, listHref, className,
 }: {
   view: ListingView;
   gridHref: string;
   listHref: string;
+  className?: string;
 }) {
   const item = (active: boolean) =>
     `flex h-7 w-7 items-center justify-center rounded-sm transition-colors ${
@@ -26,7 +28,7 @@ export function ViewToggle({
     }`;
 
   return (
-    <div className="flex shrink-0 items-center gap-0.5 rounded-sm border border-border bg-background p-0.5">
+    <div className={cn("flex shrink-0 items-center gap-0.5 rounded-sm border border-border bg-background p-0.5", className)}>
       <Link href={gridHref as never} className={item(view === "grid")} aria-label="Сеткой"
         aria-current={view === "grid" ? "true" : undefined}>
         <LayoutGrid className="h-4 w-4" aria-hidden="true" />

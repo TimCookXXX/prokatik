@@ -1,15 +1,20 @@
 "use client";
 
-import { ChevronRight } from "lucide-react";
+import { ChevronDown } from "lucide-react";
+import { content } from "@theme/content";
+import { cn } from "@/lib/utils";
+import { filterChip, toolbarChip } from "@/components/ui/filter-chip";
 import { Modal, ModalContent, ModalTitle, ModalTrigger } from "@/components/ui/Modal";
 
-// Мобильный выбор категории: кнопка с текущим разделом открывает лист снизу с
-// деревом (children). Десктоп показывает дерево в боковой панели и эту обёртку
-// не использует. Окно — общий примитив Modal, тот же, что у фильтров и входа.
+const t = content.catalogToolbar;
+
+// Мобильный выбор категории: чип с текущим разделом в ленте выдачи открывает
+// лист снизу с деревом (children). Десктоп показывает дерево в боковой панели
+// и эту обёртку не использует. Окно — общий примитив Modal.
 export function CategorySheet({
   label, children,
 }: {
-  /** Текущий раздел — он же подпись на кнопке. */
+  /** Текущий раздел — он же подпись на чипе. */
   label: string;
   children: React.ReactNode;
 }) {
@@ -18,17 +23,15 @@ export function CategorySheet({
       <ModalTrigger asChild>
         <button
           type="button"
-          className="surface flex w-full items-center justify-between gap-3 px-4 py-3 text-left text-sm"
+          aria-label={`${t.category}: ${label}`}
+          className={cn(filterChip(false), toolbarChip, "max-w-[12rem] text-foreground")}
         >
-          <span className="shrink-0 text-muted-foreground">Категория</span>
-          <span className="flex min-w-0 items-center gap-1">
-            <span className="truncate font-medium text-foreground">{label}</span>
-            <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-          </span>
+          <span className="truncate">{label}</span>
+          <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
         </button>
       </ModalTrigger>
       <ModalContent aria-describedby={undefined}>
-        <ModalTitle className="mb-3 text-lg font-bold">Категории</ModalTitle>
+        <ModalTitle className="mb-3 text-lg font-bold">{t.categoriesTitle}</ModalTitle>
         {children}
       </ModalContent>
     </Modal>

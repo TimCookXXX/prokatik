@@ -19,11 +19,11 @@ import { todayStr, addDaysStr } from "@/lib/catalog/dates";
 import { formatPrice, listingsCountLabel, ownersCountLabel } from "@/lib/catalog/format";
 import { buildAvailabilityByListing } from "@/lib/catalog/availability";
 import { ListingCard } from "@/components/catalog/ListingCard";
-import { ListingFilters, type FilterState } from "@/components/catalog/ListingFilters";
+import { FilterForm, ListingFilters, type FilterState } from "@/components/catalog/ListingFilters";
+import { ResultsToolbar } from "@/components/catalog/ResultsToolbar";
+import { activeFilterCount } from "@/lib/catalog/filter-count";
 import { CategoryTree } from "@/components/catalog/CategoryTree";
-import { SortMenu } from "@/components/catalog/SortMenu";
-import { DateRangeFilter } from "@/components/catalog/DateRangeFilter";
-import { ViewToggle, parseView } from "@/components/catalog/ViewToggle";
+import { parseView } from "@/components/catalog/ViewToggle";
 
 export type { CategorySearchParams } from "@/lib/catalog/filters";
 
@@ -36,7 +36,7 @@ export async function CategoryListing({
   basePath: string;        // текущая страница (для формы фильтров и пагинации)
   activeRootSlug?: string; // корень текущей страницы; на витрине города его нет
   activeSubSlug?: string;
-  activeLabel: string;     // подпись на мобильной кнопке выбора раздела
+  activeLabel: string;     // подпись на мобильном чипе выбора раздела
   searchParams: CategorySearchParams;
   /**
    * Города выдачи и точка «Где» (getCityScope): с точкой — весь регион, и
@@ -82,6 +82,21 @@ export async function CategoryListing({
     deposit: filters.deposit, handover: filters.handover,
     verifiedOnly: filters.verifiedOnly, sort: filters.sort,
   };
+
+  const filterHidden = {
+    ...Object.fromEntries(carry),
+    view: searchParams.view ?? "",
+    sort: searchParams.sort ?? "",
+  };
+  const categoryNav = (
+    <CategoryTree
+      tree={tree}
+      citySlug={city.slug}
+      activeRootSlug={activeRootSlug}
+      activeSubSlug={activeSubSlug}
+      carryQuery={carryQuery}
+    />
+  );
 
   const page = filters.page ?? 1;
   const totalPages = Math.max(1, Math.ceil(total / DEFAULT_PAGE_SIZE));
@@ -136,48 +151,38 @@ export async function CategoryListing({
       )}
 
       <div className="flex flex-col gap-5 md:flex-row">
-        {/* Панель липнет под хедером: отступ считается от его полного
-          * следа (--header-total), а не забитым числом — высота хедера уже
-          * менялась, и 80px тут держались случайно. */}
-        <aside className="md:sticky md:top-[calc(var(--header-total)+1rem)] md:h-fit md:w-64 md:shrink-0 md:self-start">
+        {/* Боковая панель — с md; на телефоне раздел и фильтры открываются из
+          * ленты над выдачей (ResultsToolbar). Панель липнет под хедером:
+          * отступ считается от его полного следа (--header-total), а не
+          * забитым числом — высота хедера уже менялась. */}
+        <aside className="hidden md:sticky md:top-[calc(var(--header-total)+1rem)] md:block md:h-fit md:w-64 md:shrink-0 md:self-start">
           <ListingFilters
             basePath={basePath}
             state={filterState}
-            hidden={{
-              ...Object.fromEntries(carry),
-              view: searchParams.view ?? "",
-              sort: searchParams.sort ?? "",
-            }}
+            hidden={filterHidden}
             priceBounds={priceBounds}
-            categoryLabel={activeLabel}
-            categoryNav={
-              <CategoryTree
-                tree={tree}
-                citySlug={city.slug}
-                activeRootSlug={activeRootSlug}
-                activeSubSlug={activeSubSlug}
-                carryQuery={carryQuery}
-              />
-            }
+            categoryNav={categoryNav}
           />
         </aside>
 
         <div className="flex min-w-0 flex-1 flex-col gap-4">
-          {/* Шапка выдачи: даты слева, сортировка и вид справа. Все ссылки
-            * строятся от текущих параметров, чтобы переключение одного не
-            * сбрасывало остальные и не тащило номер страницы. */}
-          <div className="surface flex items-center justify-between gap-2 p-1.5">
-            <DateRangeFilter
-              from={filters.availableFrom}
-              to={filters.availableTo}
-              resetHref={datesResetHref}
-              today={today}
-            />
-            <div className="flex items-center gap-2">
-              <SortMenu options={sortOptions} current={filters.sort} />
-              <ViewToggle view={view} gridHref={gridHref} listHref={listHref} />
-            </div>
-          </div>
+          {/* Все ссылки ленты строятся от текущих параметров, чтобы
+            * переключение одного не сбрасывало остальные и не тащило номер
+            * страницы. */}
+          <ResultsToolbar
+            categoryLabel={activeLabel}
+            categoryNav={categoryNav}
+            filterForm={
+              <FilterForm basePath={basePath} state={filterState} hidden={filterHidden} priceBounds={priceBounds} />
+            }
+            filterCount={activeFilterCount(filterState)}
+            dates={{ from: filters.availableFrom, to: filters.availableTo, resetHref: datesResetHref, today }}
+            sortOptions={sortOptions}
+            sort={filters.sort}
+            view={view}
+            gridHref={gridHref}
+            listHref={listHref}
+          />
 
           {items.length === 0 ? (
             <EmptyState>По этим условиям позиций не нашлось.</EmptyState>

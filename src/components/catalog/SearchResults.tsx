@@ -26,11 +26,11 @@ import { singleCityScope, type CityScope } from "@/lib/catalog/city-scope";
 import { todayStr, addDaysStr } from "@/lib/catalog/dates";
 import { buildAvailabilityByListing } from "@/lib/catalog/availability";
 import { ListingCard } from "@/components/catalog/ListingCard";
-import { ListingFilters, type FilterState } from "@/components/catalog/ListingFilters";
-import { SortMenu } from "@/components/catalog/SortMenu";
+import { FilterForm, ListingFilters, type FilterState } from "@/components/catalog/ListingFilters";
+import { ResultsToolbar } from "@/components/catalog/ResultsToolbar";
+import { activeFilterCount } from "@/lib/catalog/filter-count";
 import { CategoryFacets } from "@/components/catalog/CategoryFacets";
-import { DateRangeFilter } from "@/components/catalog/DateRangeFilter";
-import { ViewToggle, parseView } from "@/components/catalog/ViewToggle";
+import { parseView } from "@/components/catalog/ViewToggle";
 
 export async function SearchResults({
   city, q, searchParams, scope = singleCityScope(city.id),
@@ -131,6 +131,18 @@ export async function SearchResults({
     verifiedOnly: filters.verifiedOnly, sort: filters.sort,
   };
 
+  const filterHidden = {
+    ...Object.fromEntries(carry),
+    q,
+    city: city.slug,
+    category: searchParams.category ?? "",
+    view: searchParams.view ?? "",
+    sort: searchParams.sort ?? "",
+  };
+  const categoryNav = (
+    <CategoryFacets facets={categoryFacets} allHref={allCategoriesHref} activeSlug={activeRoot?.slug} />
+  );
+
   // Сужена ли выдача хоть чем-нибудь, кроме запроса, — от этого зависит текст
   // пустого состояния. Считаем по разобранным фильтрам, а не по filterParams:
   // туда входят вид и сортировка, а они выдачу не сужают и «условиями» не
@@ -163,47 +175,37 @@ export async function SearchResults({
 
   return (
     <div className="flex flex-col gap-5 md:flex-row">
-      <aside className="md:sticky md:top-[calc(var(--header-total)+1rem)] md:h-fit md:w-64 md:shrink-0 md:self-start">
+      {/* Боковая панель — с md; на телефоне раздел и фильтры открываются из
+        * ленты над выдачей (ResultsToolbar). */}
+      <aside className="hidden md:sticky md:top-[calc(var(--header-total)+1rem)] md:block md:h-fit md:w-64 md:shrink-0 md:self-start">
         <ListingFilters
           basePath="/search"
           state={filterState}
           priceBounds={priceBounds}
-          hidden={{
-            ...Object.fromEntries(carry),
-            q,
-            city: city.slug,
-            category: searchParams.category ?? "",
-            view: searchParams.view ?? "",
-            sort: searchParams.sort ?? "",
-          }}
-          categoryLabel={activeRoot?.name ?? "Все разделы"}
-          categoryNav={
-            <CategoryFacets
-              facets={categoryFacets}
-              allHref={allCategoriesHref}
-              activeSlug={activeRoot?.slug}
-            />
-          }
+          hidden={filterHidden}
+          categoryNav={categoryNav}
         />
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col gap-4">
-        {/* Панель видна всегда, в том числе на пустой выдаче: единственный
-          * способ снять фильтр дат — этот календарь, а «Сбросить» в фильтрах
-          * даты не трогает. Спрячь панель на нуле результатов — и выбранные
+        {/* Лента видна всегда, в том числе на пустой выдаче: единственный
+          * способ снять фильтр дат — её календарь, а «Сбросить» в фильтрах
+          * даты не трогает. Спрячь ленту на нуле результатов — и выбранные
           * даты стало бы нечем убрать, кроме правки адреса. */}
-        <div className="surface flex items-center justify-between gap-2 p-1.5">
-          <DateRangeFilter
-            from={filters.availableFrom}
-            to={filters.availableTo}
-            resetHref={datesResetHref}
-            today={today}
-          />
-          <div className="flex items-center gap-2">
-            <SortMenu options={sortOptions} current={filters.sort} />
-            <ViewToggle view={view} gridHref={gridHref} listHref={listHref} />
-          </div>
-        </div>
+        <ResultsToolbar
+          categoryLabel={activeRoot?.name ?? "Все разделы"}
+          categoryNav={categoryNav}
+          filterForm={
+            <FilterForm basePath="/search" state={filterState} hidden={filterHidden} priceBounds={priceBounds} />
+          }
+          filterCount={activeFilterCount(filterState)}
+          dates={{ from: filters.availableFrom, to: filters.availableTo, resetHref: datesResetHref, today }}
+          sortOptions={sortOptions}
+          sort={filters.sort}
+          view={view}
+          gridHref={gridHref}
+          listHref={listHref}
+        />
         {ranked?.ids && ranked.dropped.length > 0 && (
           <p role="status" className="rounded-lg border border-border px-3 py-2 text-sm text-muted-foreground">
             {content.search.subsetNotice(q, ranked.usedQuery)}

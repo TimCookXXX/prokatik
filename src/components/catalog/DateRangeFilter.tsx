@@ -9,6 +9,8 @@ import { content } from "@theme/content";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/Popover";
 import { Modal, ModalContent, ModalTitle } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/button";
+import { filterChip, toolbarChip } from "@/components/ui/filter-chip";
+import { cn } from "@/lib/utils";
 import { useIsDesktop } from "@/components/ui/use-desktop";
 import { shortRangeLabel } from "@/lib/catalog/dates";
 import type { RangePick } from "@/lib/booking/range-pick";
@@ -91,11 +93,7 @@ export function DateRangeFilter({
         <PopoverTrigger asChild>
           <button
             type="button"
-            className={`inline-flex h-8 items-center gap-2 whitespace-nowrap rounded-sm border px-3 text-sm transition-colors ${
-              active
-                ? "border-selected bg-selected text-selected-foreground"
-                : "border-border bg-background text-muted-foreground hover:text-foreground"
-            }`}
+            className={cn(filterChip(active), toolbarChip)}
           >
             <CalendarDays className="h-4 w-4 shrink-0" aria-hidden="true" />
             {label}

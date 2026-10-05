@@ -3,15 +3,14 @@
 // checkbox с sr-only вводом, поэтому выбор переживает отключённый JS, а
 // применяется он кнопкой «Показать N», а не на каждый клик.
 //
-// На мобиле форма прячется в bottom-sheet (FiltersSheet), выбор раздела — в
-// отдельную шторку (CategorySheet).
+// С md форма и навигация по разделам стоят боковой панелью (ListingFilters).
+// На мобиле та же форма (FilterForm) открывается из чипа «Фильтры» в ленте
+// выдачи (ResultsToolbar), раздел — из чипа «Категория».
 
 import Link from "next/link";
 import { Banknote, FileText, Ban } from "lucide-react";
 import { HandoverIcon } from "@/components/catalog/HandoverIcon";
 import { Button } from "@/components/ui/button";
-import { FiltersSheet } from "@/components/catalog/FiltersSheet";
-import { CategorySheet } from "@/components/catalog/CategorySheet";
 import { PriceRange } from "@/components/catalog/PriceRange";
 
 export interface FilterState {
@@ -68,7 +67,7 @@ function Chip({
   );
 }
 
-function FormInner({
+export function FilterForm({
   basePath, state, hidden, priceBounds,
 }: {
   basePath: string;
@@ -192,8 +191,9 @@ function FormInner({
   );
 }
 
+/** Боковая панель с md: навигация по разделам и форма фильтров под ней. */
 export function ListingFilters({
-  basePath, state, hidden, categoryNav, categoryLabel, priceBounds,
+  basePath, state, hidden, categoryNav, priceBounds,
 }: {
   basePath: string;
   state: FilterState;
@@ -202,40 +202,18 @@ export function ListingFilters({
   // Навигация по разделам: в каталоге это дерево категорий, на /search —
   // фасеты с числом находок. Разная разметка, одно и то же место в панели.
   categoryNav?: React.ReactNode;
-  // Текущий раздел — подпись на мобильной кнопке, открывающей дерево.
-  categoryLabel?: string;
   priceBounds?: { min: number; max: number };
 }) {
-  const form = (
-    <FormInner
-      basePath={basePath}
-      state={state}
-      hidden={hidden}
-      priceBounds={priceBounds}
-    />
-  );
-
   return (
-    <div className="flex flex-col gap-3">
-      {/* Mobile: раздел и фильтры — две отдельные шторки. Держать дерево
-        * категорий внутри формы фильтров нельзя: выбор раздела это переход по
-        * ссылке, а не поле, и он бы терял несохранённый ввод формы. */}
-      <div className="flex flex-col gap-3 md:hidden">
-        {categoryNav && categoryLabel && (
-          <CategorySheet label={categoryLabel}>{categoryNav}</CategorySheet>
-        )}
-        <FiltersSheet>{form}</FiltersSheet>
-      </div>
-
-      {/* Desktop: единая плавающая панель — дерево категорий и фильтры под ним. */}
-      <div className="surface hidden flex-col md:flex">
-        {categoryNav && (
-          <>
-            <div className="p-2">{categoryNav}</div>
-            <hr className="border-border" />
-          </>
-        )}
-        <div className="p-4">{form}</div>
+    <div className="surface flex flex-col">
+      {categoryNav && (
+        <>
+          <div className="p-2">{categoryNav}</div>
+          <hr className="border-border" />
+        </>
+      )}
+      <div className="p-4">
+        <FilterForm basePath={basePath} state={state} hidden={hidden} priceBounds={priceBounds} />
       </div>
     </div>
   );

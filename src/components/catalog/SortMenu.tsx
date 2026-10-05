@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { ChevronDown } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { filterChip, toolbarChip } from "@/components/ui/filter-chip";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -30,7 +32,8 @@ export function SortMenu({
 
   return (
     <DropdownMenu modal={false}>
-      <DropdownMenuTrigger className="inline-flex h-8 min-w-0 items-center gap-1.5 rounded-sm border border-border bg-background px-3 text-sm text-foreground transition-colors hoverable">
+      {/* Чип ленты выдачи: рост и кегль — общие с соседями (toolbarChip). */}
+      <DropdownMenuTrigger className={cn(filterChip(false), toolbarChip, "font-normal text-foreground")}>
         <span className="hidden shrink-0 text-muted-foreground sm:inline">Сначала</span>
         <span className="truncate font-medium">{active.label.replace(/^Сначала /, "")}</span>
         <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
