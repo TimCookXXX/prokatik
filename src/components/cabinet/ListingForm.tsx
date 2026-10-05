@@ -557,6 +557,7 @@ function AddressField({
         track={track}
       />
       {legacy && <p id={hintId} className="text-xs text-muted-foreground">{legacy}</p>}
+      {!address.value && !legacy && <p className="text-xs text-muted-foreground">{A.why}</p>}
       {errorLine}
       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
         <p className="text-xs text-muted-foreground" aria-live="polite">{catalog}</p>
