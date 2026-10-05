@@ -34,3 +34,13 @@ export const filterChipCount = "text-2xs tabular-nums";
  * базового: в ленте чип несёт значение («Сначала дешевле», «8–11 окт»), а не
  * короткое имя вида. Склеивать через cn — он снимает базовый h-8. */
 export const toolbarChip = "h-11 shrink-0 text-sm md:h-8";
+
+/* С md чипы дат и сортировки — прежние кнопки десктопной панели над выдачей:
+ * на фоне страницы, обычного начертания, без нажатия масштабом. Классы под
+ * md:, а не отдельная строка: телефонная лента остаётся на общем чипе.
+ * Фон — только невыбранному, иначе он перекрыл бы заливку состояния. */
+export function toolbarChipDesktop(active: boolean): string {
+  return active
+    ? "md:font-normal md:active:scale-100"
+    : "md:bg-background md:font-normal md:active:scale-100";
+}

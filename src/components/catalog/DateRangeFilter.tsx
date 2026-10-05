@@ -9,7 +9,7 @@ import { content } from "@theme/content";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/Popover";
 import { Modal, ModalContent, ModalTitle } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/button";
-import { filterChip, toolbarChip } from "@/components/ui/filter-chip";
+import { filterChip, toolbarChip, toolbarChipDesktop } from "@/components/ui/filter-chip";
 import { cn } from "@/lib/utils";
 import { useIsDesktop } from "@/components/ui/use-desktop";
 import { shortRangeLabel } from "@/lib/catalog/dates";
@@ -99,7 +99,13 @@ export function DateRangeFilter({
           <button
             ref={chipRef}
             type="button"
-            className={cn(filterChip(active), toolbarChip)}
+            // С md — прежняя кнопка дат, с прежним зазором до значка. Накладка
+            // ховера (.hoverable) остаётся: это общий язык наведения
+            // (tokens.schema.md, «Состояния»), и у соседней сортировки она была.
+            className={cn(
+              filterChip(active), toolbarChip, toolbarChipDesktop(active),
+              "whitespace-nowrap md:gap-2",
+            )}
             {...(!desktop && { "aria-haspopup": "dialog" as const, "aria-expanded": sheetOpen })}
           >
             <CalendarDays className="h-4 w-4 shrink-0" aria-hidden="true" />
