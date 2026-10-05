@@ -1,5 +1,5 @@
-import { render, screen, fireEvent } from "@testing-library/react";
-import { describe, it, expect, vi } from "vitest";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const push = vi.fn();
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
@@ -10,7 +10,21 @@ import { addDaysStr } from "@/lib/catalog/dates";
 const open = () => fireEvent.click(screen.getByRole("button", { name: /даты|–/ }));
 const day = (d: string) => document.querySelector<HTMLButtonElement>(`[data-day="${d}"] button`);
 
+/** Ширина окна для Modal и фильтра: с md — поповер, ниже — шторка. */
+function setDesktop(on: boolean) {
+  Object.defineProperty(window, "matchMedia", { configurable: true, writable: true, value: (q: string) => ({
+    matches: on && q === "(min-width: 768px)",
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  }) });
+}
+afterEach(() => {
+  delete (window as { matchMedia?: unknown }).matchMedia;
+});
+
 describe("DateRangeFilter", () => {
+  beforeEach(() => setDesktop(true));
+
   it("без дат показывает «Любые даты»", () => {
     render(<DateRangeFilter resetHref="/kazan" today="2026-08-29" />);
     expect(screen.getByText("Любые даты")).toBeInTheDocument();
@@ -108,5 +122,61 @@ describe("DateRangeFilter", () => {
     open();
     expect(day("2026-08-28")).toBeDisabled();
     expect(day("2026-08-29")).not.toBeDisabled();
+  });
+});
+
+describe("DateRangeFilter — шторка ниже md", () => {
+  beforeEach(() => {
+    setDesktop(false);
+    push.mockClear();
+  });
+
+  // Поповер шириной в месяц на телефоне вылезал за кромку экрана.
+  it("открывает календарь в шторке, а не в поповере", () => {
+    render(<DateRangeFilter resetHref="/kazan" today="2026-09-01" />);
+    open();
+    const sheet = screen.getByRole("dialog", { name: "Когда нужно" });
+    expect(within(sheet).getByRole("grid")).toBeInTheDocument();
+    // Ширина поповера шторке не нужна: месяц тянется на её ширину.
+    expect(sheet.querySelector(".rdp-theme")).not.toHaveClass("w-[19rem]");
+  });
+
+  it("«Показать» в подвале уводит на выбранный период и закрывает шторку", async () => {
+    window.history.replaceState(null, "", "/kazan?page=2");
+    render(<DateRangeFilter resetHref="/kazan" today="2026-09-01" />);
+    open();
+    const sheet = screen.getByRole("dialog");
+    expect(within(sheet).getByRole("button", { name: "Показать" })).toBeDisabled();
+
+    fireEvent.click(day("2026-09-05")!);
+    fireEvent.click(day("2026-09-07")!);
+    fireEvent.click(within(sheet).getByRole("button", { name: "Показать" }));
+    expect(push).toHaveBeenCalledWith("/kazan?from=2026-09-05&to=2026-09-07");
+    // vaul доигрывает анимацию закрытия, поэтому — по состоянию, а не по DOM.
+    await waitFor(() => expect(sheet).toHaveAttribute("data-state", "closed"));
+    window.history.replaceState(null, "", "/");
+  });
+
+  // Применённые даты «Сбросить» снимает переходом на адрес без них.
+  it("«Сбросить» снимает применённые даты", () => {
+    render(<DateRangeFilter from="2026-09-05" to="2026-09-07" resetHref="/kazan?sort=new" today="2026-09-01" />);
+    open();
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Сбросить" }));
+    expect(push).toHaveBeenCalledWith("/kazan?sort=new");
+  });
+
+  // Без применённых дат сбрасывать в адресе нечего — очищается выбор.
+  it("«Сбросить» без применённых дат очищает выбор, не уходя со страницы", () => {
+    render(<DateRangeFilter resetHref="/kazan" today="2026-09-01" />);
+    open();
+    const sheet = screen.getByRole("dialog");
+    const reset = within(sheet).getByRole("button", { name: "Сбросить" });
+    expect(reset).toBeDisabled();
+
+    fireEvent.click(day("2026-09-05")!);
+    expect(reset).toBeEnabled();
+    fireEvent.click(reset);
+    expect(push).not.toHaveBeenCalled();
+    expect(document.querySelector(`[data-day="2026-09-05"]`)).not.toHaveAttribute("aria-selected");
   });
 });
