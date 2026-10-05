@@ -39,7 +39,7 @@ export function Hero({
         * Одна колонка: заголовок → подзаголовок → поиск → чипы → факты. На
         * телефоне по центру, с wide — слева, справа остаётся иллюстрация
         * (фильтр там прозрачнее). Точка wide — общая для секций главной. */}
-      <div className="relative z-10 flex max-w-[960px] flex-col gap-6 p-4 text-center sm:p-6 wide:gap-7 wide:p-11 wide:text-left">
+      <div className="relative z-10 mx-auto flex w-full max-w-[960px] flex-col gap-6 p-4 text-center sm:p-6 wide:gap-7 wide:p-11">
         <div className="min-w-0">
           <h1 className="font-display text-hero font-extrabold leading-[1.02] tracking-mark text-foreground">
             {/* Слово меняется каждые пару секунд, поэтому доступное имя
@@ -71,7 +71,7 @@ export function Hero({
           {/* 18 пунктов — кегль макета, нарисованного на 1440. На телефоне это
             * абзац в четыре строки крупнее основного текста сайта, поэтому там
             * обычные 15. */}
-          <p className="mx-auto mt-6 max-w-[40ch] text-base leading-body text-foreground/[0.72] sm:text-xl wide:mx-0">
+          <p className="mx-auto mt-6 max-w-[40ch] text-base leading-body text-foreground/[0.72] sm:text-xl">
             {content.home.heroSubtitle}
           </p>
         </div>
@@ -88,7 +88,7 @@ export function Hero({
               // факты за сгиб. С sm — перенос, по центру, с wide — слева.
               <nav
                 aria-label={content.home.popularLabel}
-                className="-mx-4 flex items-center gap-2 overflow-x-auto px-4 [mask-image:linear-gradient(to_left,transparent,black_16px)] [scrollbar-width:none] sm:mx-0 sm:flex-wrap sm:justify-center sm:overflow-visible sm:px-0 sm:[mask-image:none] wide:justify-start [&::-webkit-scrollbar]:hidden"
+                className="-mx-4 flex items-center gap-2 overflow-x-auto px-4 [mask-image:linear-gradient(to_left,transparent,black_16px)] [scrollbar-width:none] sm:mx-0 sm:flex-wrap sm:justify-center sm:overflow-visible sm:px-0 sm:[mask-image:none] [&::-webkit-scrollbar]:hidden"
               >
                 <span aria-hidden="true" className="shrink-0 text-sm text-muted-foreground">
                   {content.home.popularLabel}:
@@ -106,7 +106,7 @@ export function Hero({
             )}
           </div>
         ) : (
-          <div className="flex justify-center wide:justify-start">
+          <div className="flex justify-center">
             <Button asChild className="h-12 px-6 text-base font-semibold">
               <Link href="/search">{content.home.heroCatalog}</Link>
             </Button>
@@ -115,7 +115,7 @@ export function Hero({
 
         {/* Факты строкой: иконка и заголовок. На телефоне 2×2 без прокрутки,
           * с sm — в один ряд. Охра — предмет и его свойства (закон цвета). */}
-        <ul className="grid grid-cols-2 gap-x-3 gap-y-2.5 text-left sm:flex sm:flex-wrap sm:justify-center sm:gap-x-6 wide:justify-start">
+        <ul className="grid grid-cols-2 gap-x-3 gap-y-2.5 text-left sm:flex sm:flex-wrap sm:justify-center sm:gap-x-6">
           {content.home.heroFacts.map((fact) => {
             const Icon = FACT_ICONS[fact.icon];
             return (
