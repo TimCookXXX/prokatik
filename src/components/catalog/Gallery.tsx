@@ -101,7 +101,7 @@ export function Gallery({ photos, title }: { photos: Photo[]; title: string }) {
           <button
             type="button"
             onClick={() => setLightbox(false)}
-            className="absolute right-4 top-[max(1rem,env(safe-area-inset-top))] z-10 rounded-full bg-white/10 p-3 text-white hover:bg-white/20"
+            className="absolute right-[max(1rem,env(safe-area-inset-right))] top-[max(1rem,env(safe-area-inset-top))] z-10 rounded-full bg-white/10 p-3 text-white hover:bg-white/20"
             aria-label="Закрыть"
           >
             <X className="h-6 w-6" />
@@ -126,7 +126,7 @@ export function Gallery({ photos, title }: { photos: Photo[]; title: string }) {
               <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); go(-1); }}
-                className="absolute left-3 top-1/2 z-10 -translate-y-1/2 rounded-full bg-white/10 p-3 text-white hover:bg-white/20"
+                className="absolute left-[max(0.75rem,env(safe-area-inset-left))] top-1/2 z-10 -translate-y-1/2 rounded-full bg-white/10 p-3 text-white hover:bg-white/20"
                 aria-label="Предыдущее фото"
               >
                 <ChevronLeft className="h-7 w-7" />
@@ -134,7 +134,7 @@ export function Gallery({ photos, title }: { photos: Photo[]; title: string }) {
               <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); go(1); }}
-                className="absolute right-3 top-1/2 z-10 -translate-y-1/2 rounded-full bg-white/10 p-3 text-white hover:bg-white/20"
+                className="absolute right-[max(0.75rem,env(safe-area-inset-right))] top-1/2 z-10 -translate-y-1/2 rounded-full bg-white/10 p-3 text-white hover:bg-white/20"
                 aria-label="Следующее фото"
               >
                 <ChevronRight className="h-7 w-7" />

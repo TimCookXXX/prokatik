@@ -213,6 +213,22 @@ describe("BookingWidget — кнопка нижней панели", () => {
     expect(scroll.mock.contexts[0]).toBe(calendar());
   });
 
+  // Прокрутка без фокуса оставляла клавиатуру и скринридер у кнопки внизу
+  // экрана: до календаря пришлось бы идти через всю страницу.
+  it("переносит фокус на календарь", () => {
+    window.history.replaceState(null, "", base.pathname);
+    const focus = vi.spyOn(HTMLElement.prototype, "focus");
+    render(<BookingWidget {...base} handoverPickup handoverDelivery={false} />);
+    fireEvent.click(screen.getByRole("button", { name: "Очистить даты" }));
+
+    barButton().focus();
+    fireEvent.click(barButton());
+    expect(document.activeElement).toBe(calendar());
+    expect(calendar()).toHaveAccessibleName("Даты аренды");
+    // Плавную прокрутку ведёт scrollIntoView — фокус её не перебивает.
+    expect(focus).toHaveBeenLastCalledWith({ preventScroll: true });
+  });
+
   it("с выбранными свободными датами бронирует", () => {
     window.history.replaceState(null, "", base.pathname);
     render(<BookingWidget {...base} handoverPickup handoverDelivery={false} />);

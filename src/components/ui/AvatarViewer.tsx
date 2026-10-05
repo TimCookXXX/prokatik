@@ -96,7 +96,7 @@ export function AvatarViewer({
             ref={closeRef}
             type="button"
             onClick={() => setOpen(false)}
-            className="absolute right-4 top-[max(1rem,env(safe-area-inset-top))] z-10 rounded-full bg-white/10 p-3 text-white hover:bg-white/20"
+            className="absolute right-[max(1rem,env(safe-area-inset-right))] top-[max(1rem,env(safe-area-inset-top))] z-10 rounded-full bg-white/10 p-3 text-white hover:bg-white/20"
             aria-label="Закрыть"
           >
             <X className="h-6 w-6" />

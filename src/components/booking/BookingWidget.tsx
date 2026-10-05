@@ -128,10 +128,16 @@ export function BookingWidget(props: BookingWidgetProps) {
   // Календарь занятости — на самой странице, в виджете. Кнопка полосы на мобиле
   // ведёт к нему, пока бронировать нечего: второй календарь в шторке спорил бы
   // с этим за выбор. scroll-mt у цели держит её под липкой шапкой.
+  // Фокус переезжает следом: иначе он остаётся на кнопке внизу экрана, и с
+  // клавиатуры или скринридера до календаря пришлось бы идти через всю
+  // страницу. preventScroll — прокрутку уже ведёт scrollIntoView, плавно.
   const calendarRef = useRef<HTMLDivElement>(null);
   const toCalendar = () => {
+    const el = calendarRef.current;
+    if (!el) return;
     const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-    calendarRef.current?.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
+    el.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
+    el.focus({ preventScroll: true });
   };
 
   const onBook = () => {
@@ -155,7 +161,7 @@ export function BookingWidget(props: BookingWidgetProps) {
       </p>
     ) : (
       <Button className={extra} onClick={onBook} disabled={bookDisabled}>
-        {hasComplete ? t.book : "Выберите даты"}
+        {hasComplete ? t.book : t.pickDates}
       </Button>
     )
   );
@@ -196,7 +202,10 @@ export function BookingWidget(props: BookingWidgetProps) {
     <>
       <div
         ref={calendarRef}
-        className="surface scroll-mt-[calc(var(--header-total)+0.75rem)] p-4 sm:p-5"
+        tabIndex={-1}
+        role="group"
+        aria-label={t.calendar}
+        className="surface scroll-mt-[calc(var(--header-total)+0.75rem)] p-4 focus-visible:[outline:none] focus-visible:ring-2 focus-visible:ring-ring sm:p-5"
       >
         <BookingCalendar
           from={sel.from}
@@ -309,10 +318,12 @@ export function BookingWidget(props: BookingWidgetProps) {
        * кант 1px + строка h-16 + полоса «домой»; меняете одно — правьте и
        * другое.
        * Владельцу полосы нет вовсе: без кнопки она весь экран носила бы его же
-       * цену, и таб-бар у него остаётся. */}
+       * цену, и таб-бар у него остаётся.
+       * z-[41] — на ступень выше таб-бара (z-40, он позже в DOM): где :has()
+       * не поддержан, таб-бар не прячется и иначе лёг бы поверх кнопки. */}
       {!props.isOwn && <div
         data-booking-bar
-        className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-card pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] md:hidden"
+        className="fixed inset-x-0 bottom-0 z-[41] border-t border-border bg-card pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] md:hidden"
       >
         <div className="mx-auto flex h-16 max-w-[480px] items-center justify-between gap-3 px-4">
           <span className="min-w-0">

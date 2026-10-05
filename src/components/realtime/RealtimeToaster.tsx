@@ -11,13 +11,25 @@
 import { Toaster } from "sonner";
 import { WEBVISOR_PRIVATE } from "@/components/analytics/webvisor";
 
+// Отступы от кромок экрана — с системными инсетами (viewportFit: "cover" в
+// layout): иначе в веб-приложении на экране «Домой» всплывашка встаёт под
+// чёлку, а у телефона на боку — под её выступ сбоку. Строки уходят в
+// CSS-переменные sonner как есть, поэтому env() и max() здесь работают.
+const EDGE = 16;
+const inset = (side: "top" | "right" | "left") => `max(${EDGE}px, env(safe-area-inset-${side}))`;
+const OFFSET = { top: inset("top"), right: inset("right"), left: inset("left"), bottom: EDGE };
+
 export function RealtimeToaster() {
   return (
     <Toaster
+      // Справа сверху на десктопе. На мобиле (до 600px) sonner растягивает
+      // стопку во всю ширину и держит её у верхней кромки — нижний край с
+      // таб-баром и полосой брони она не задевает. Ширину он считает как
+      // 100% минус левый отступ дважды, поэтому левый и правый — одной
+      // формулы: в портрете они равны.
       position="top-right"
-      // Справа сверху на десктопе, но на мобиле снизу правый угол занят
-      // таб-баром — сдвигаем поднятием: offset учитывает --tabbar-h.
-      offset={16}
+      offset={OFFSET}
+      mobileOffset={OFFSET}
       // Не трогаем richColors: цвета у нас свои, токенами.
       toastOptions={{
         classNames: {
