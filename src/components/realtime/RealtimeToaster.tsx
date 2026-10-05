@@ -9,6 +9,7 @@
 // неё разъехалась бы с нашей на переключении.
 
 import { Toaster } from "sonner";
+import { WEBVISOR_PRIVATE } from "@/components/analytics/webvisor";
 
 export function RealtimeToaster() {
   return (
@@ -20,7 +21,8 @@ export function RealtimeToaster() {
       // Не трогаем richColors: цвета у нас свои, токенами.
       toastOptions={{
         classNames: {
-          toast: "surface !bg-card !text-foreground !border-border",
+          // Всплывашки пересказывают сообщения и заявки — Вебвизор их не пишет.
+          toast: `surface !bg-card !text-foreground !border-border ${WEBVISOR_PRIVATE}`,
           title: "!font-medium",
           description: "!text-muted-foreground",
           actionButton: "!bg-accent !text-accent-foreground",

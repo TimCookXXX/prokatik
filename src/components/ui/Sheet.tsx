@@ -24,6 +24,7 @@ import { Drawer } from "vaul";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useIsDesktop } from "@/components/ui/use-desktop";
+import { WEBVISOR_PRIVATE } from "@/components/analytics/webvisor";
 
 export function Sheet({
   open, onOpenChange, label, children,
@@ -55,6 +56,9 @@ export function Sheet({
           aria-describedby={undefined}
           className={cn(
             "fixed z-50 flex flex-col border-border bg-card focus:[outline:none]",
+            // Шторка — подробности строки личного списка (заявки с телефоном и
+            // комментарием); портал выносит её из обёртки личной зоны.
+            WEBVISOR_PRIVATE,
             right
               ? "inset-y-0 right-0 w-[min(26rem,92vw)] border-l"
               : "inset-x-0 bottom-0 max-h-[88dvh] rounded-t-lg border-t",
