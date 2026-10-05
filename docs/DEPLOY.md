@@ -299,7 +299,8 @@ docker compose logs caddy | grep -i "certificate obtained"
 
 ```bash
 curl -I https://example.ru
-# HTTP/2 200 + strict-transport-security + x-frame-options: DENY
+# HTTP/2 200 + strict-transport-security. x-frame-options нет: встраивание
+# ограничивает frame-ancestors в CSP (пускает только интерфейс Метрики).
 # content-security-policy: в img-src обязан стоять адрес из STORAGE_PUBLIC_BASE,
 # в connect-src — wss://example.ru, есть worker-src 'self'. Одинокий `/` вместо
 # адреса = переменная не доехала до контейнера caddy.
@@ -347,7 +348,10 @@ curl https://example.ru/<INDEXNOW_KEY>.txt   # вернёт ключ
 
 1. metrica.yandex.ru → создать счётчик → ID в `.env` (`YANDEX_METRIKA_ID=`)
 2. `docker compose up -d --force-recreate app realtime` (пересоздание, не restart!)
-3. Network в DevTools: грузится `mc.yandex.ru/metrika/tag.js`
+3. Network в DevTools: грузится `mc.yandex.ru/metrika/tag.js?id=<ID>`
+4. Что и как пишет Метрика (Вебвизор, переходы, скрытые личные разделы,
+   `token`, CSP) — [seo.md, «Аналитика»](seo.md#аналитика). После правки
+   `Caddyfile` — `docker compose up -d --force-recreate caddy`.
 
 ### 8.3. Yandex Webmaster / Google Search Console
 

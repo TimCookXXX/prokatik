@@ -10,6 +10,7 @@ import { Modal, ModalContent, ModalTitle, ModalTrigger } from "@/components/ui/M
 import { AvatarCropper, decodeImage, type DecodedImage } from "@/components/account/AvatarCropper";
 import { updateAvatar } from "@/server/actions/profile";
 import { cn } from "@/lib/utils";
+import { WEBVISOR_PRIVATE } from "@/components/analytics/webvisor";
 
 /* Смена аватарки. Живёт в двух местах: кнопка-камера на самой аватарке в шапке
  * кабинета открывает Modal (на мобиле — лист снизу), а на экране настроек тот
@@ -188,7 +189,7 @@ export function AvatarPickerButton({
       </ModalTrigger>
       <ModalContent
         aria-describedby={undefined}
-        className="md:max-w-md"
+        className={cn("md:max-w-md", WEBVISOR_PRIVATE)}
         showClose={!busy}
         // Пока идёт загрузка, лист нельзя утянуть жестом: отказ в onOpenChange
         // оставил бы его повисшим на полпути — vaul не возвращает лист на

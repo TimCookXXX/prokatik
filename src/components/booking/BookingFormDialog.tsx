@@ -14,6 +14,7 @@ import { createBookingRequest } from "@/server/actions/booking";
 import type { BookingSelection } from "@/lib/booking/params";
 import { rentalDaysCount } from "@/lib/booking/params";
 import { field } from "@/components/ui/field";
+import { WEBVISOR_NO_KEYS } from "@/components/analytics/webvisor";
 import { formatDayMonth } from "@/lib/catalog/dates";
 import { formatPrice } from "@/lib/catalog/format";
 
@@ -114,7 +115,7 @@ export function BookingFormDialog({
                 {estimate !== null ? ` · ≈ ${formatPrice(estimate)}` : ""}
               </ModalDescription>
 
-              <form onSubmit={submit} className="mt-5 flex flex-col gap-3">
+              <form onSubmit={submit} className={`mt-5 flex flex-col gap-3 ${WEBVISOR_NO_KEYS}`}>
                 <label className="flex flex-col gap-1 text-sm">
                   Телефон для связи
                   <input

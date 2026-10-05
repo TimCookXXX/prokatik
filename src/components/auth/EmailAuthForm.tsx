@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import type { Route } from "next";
 import { Button } from "@/components/ui/button";
 import { field } from "@/components/ui/field";
+import { WEBVISOR_NO_KEYS } from "@/components/analytics/webvisor";
 import { PasswordInput } from "@/components/ui/PasswordInput";
 import {
   checkEmailDomain, login, register, requestReset, resendVerificationEmail,
@@ -127,7 +128,7 @@ export function EmailAuthForm({
   }
 
   return (
-    <form onSubmit={submit} className="flex flex-col gap-3">
+    <form onSubmit={submit} className={`flex flex-col gap-3 ${WEBVISOR_NO_KEYS}`}>
       <label className="flex flex-col gap-1 text-sm">
         Почта
         <input

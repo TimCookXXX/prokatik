@@ -4,6 +4,7 @@ import { useState, useId } from "react";
 import { Modal, ModalClose, ModalContent, ModalDescription, ModalTitle, ModalTrigger } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/button";
 import { field } from "@/components/ui/field";
+import { WEBVISOR_PRIVATE } from "@/components/analytics/webvisor";
 
 type Props = {
   trigger: React.ReactNode;
@@ -46,7 +47,9 @@ export function ConfirmDialog({
   return (
     <Modal open={open} onOpenChange={(v) => { setOpen(v); if (!v) { setInput(""); setError(null); } }}>
       <ModalTrigger asChild>{trigger}</ModalTrigger>
-      <ModalContent className="md:w-[min(90vw,420px)]">
+      {/* Подтверждения живут в кабинете и называют заявки и людей; портал
+        * выносит окно из обёртки личной зоны. */}
+      <ModalContent className={`md:w-[min(90vw,420px)] ${WEBVISOR_PRIVATE}`}>
           <ModalTitle className="font-display text-lg mb-2">{title}</ModalTitle>
           <ModalDescription className="text-sm text-muted-foreground mb-4">
             {description}

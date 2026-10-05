@@ -62,9 +62,20 @@ www.{$DOMAIN} {
 	# данных фетчем на чужой хост.
 	#
 	# Внешние источники взяты из кода, а не на глаз:
-	#   mc.yandex.ru — tag.js и noscript-пиксель Метрики; frame-src нужен её
-	#     скрытому iframe. Метрика поднимается только в production с заданным
+	#   Метрика с Вебвизором — адреса из справки Метрики
+	#     (yandex.ru/support/metrica/ru/code/install-counter-csp): tag.js,
+	#     noscript-пиксель, отправка данных (https и wss), служебные iframe и
+	#     blob-воркеры (frame-src, child-src). Из источников взято подмножество:
+	#     mc.yandex.ru и mc.yandex.com, mc.webvisor.com/.org, yastatic.net;
+	#     региональные mc.yandex.<kz|by|uz|…> не перечислены намеренно.
+	#     Метрика поднимается только в production с заданным
 	#     YANDEX_METRIKA_ID, но заголовок общий.
+	#   frame-ancestors — полный список хостов интерфейса Метрики из той же
+	#     справки: без него не открываются записи Вебвизора и карта кликов.
+	#     Встраивать сайт в iframe не может больше никто, включая сам сайт
+	#     ('self' не нужен). Заголовка X-Frame-Options нет намеренно:
+	#     frame-ancestors его заменяет, а X-Frame-Options умеет только DENY и
+	#     SAMEORIGIN — оба запретили бы показ в интерфейсе Метрики.
 	#   wss://{$DOMAIN} — сокет realtime, это handle /ws выше.
 	#   {$STORAGE_PUBLIC_BASE} — плитка «своё фото» в выборе обложки
 	#     (CoverPicker) рисуется прямым <img> с домена хранилища. Всё остальное
@@ -77,19 +88,20 @@ www.{$DOMAIN} {
 	#     точно, а не префиксом, поэтому один только `.../bucket` разрешил бы
 	#     ровно этот адрес и ни одной картинки внутри. Вариант со слэшем даёт
 	#     префикс; вариант без — страхует значение, уже пришедшее со слэшем.
-	#   worker-src 'self' — воркер подсказок адресов (src/components/search/
-	#     geo-worker.ts). Turbopack собирает его чанком со своего домена
-	#     (/_next/static/chunks/turbopack-worker-*.js), не blob:, — blob: не
-	#     разрешаем. Без воркера поле собирает мини-индекс в главном потоке.
+	#   worker-src 'self' blob: https://mc.yandex.ru — 'self' для воркера
+	#     подсказок адресов (src/components/search/geo-worker.ts: Turbopack
+	#     собирает его чанком со своего домена, /_next/static/chunks/
+	#     turbopack-worker-*.js), blob: и mc.yandex.ru — для воркера Вебвизора.
+	#     При заданном worker-src браузер не смотрит в child-src для воркеров,
+	#     поэтому адреса Метрики нужны и здесь.
 	# Одной строкой намеренно: перенос внутри значения заголовка недопустим.
-	header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' https://mc.yandex.ru; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://mc.yandex.ru {$STORAGE_PUBLIC_BASE} {$STORAGE_PUBLIC_BASE}/; connect-src 'self' wss://{$DOMAIN} https://mc.yandex.ru; frame-src https://mc.yandex.ru; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; upgrade-insecure-requests"
+	header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' https://mc.yandex.ru https://mc.yandex.com https://mc.webvisor.com https://mc.webvisor.org https://yastatic.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://mc.yandex.ru https://mc.yandex.com https://mc.webvisor.com https://mc.webvisor.org {$STORAGE_PUBLIC_BASE} {$STORAGE_PUBLIC_BASE}/; connect-src 'self' wss://{$DOMAIN} https://mc.yandex.ru https://mc.yandex.com https://mc.webvisor.com https://mc.webvisor.org wss://mc.yandex.ru wss://mc.yandex.com wss://mc.webvisor.com wss://mc.webvisor.org; frame-src blob: https://mc.yandex.ru https://mc.yandex.com https://mc.webvisor.com https://mc.webvisor.org; child-src blob: https://mc.yandex.ru; worker-src 'self' blob: https://mc.yandex.ru; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors metrika.yandex.ru analytics.yandex.by analytics.yandex.com analytics.yandex.com.tr analytics.yandex.kz analytics.yandex.ru metr.yandex.by metr.yandex.com metr.yandex.com.tr metr.yandex.kz metr.yandex.ru metrica.ya.ru metrica.yandex metrica.yandex.by metrica.yandex.com metrica.yandex.com.tr metrica.yandex.kz metrica.yandex.ru metrika.ya.ru metrika.yandex metrika.yandex.by metrika.yandex.com metrika.yandex.com.tr metrika.yandex.kz metrika.yandex.uz; upgrade-insecure-requests"
 
 	header {
 		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
 		X-Content-Type-Options nosniff
 		Referrer-Policy strict-origin-when-cross-origin
 		Permissions-Policy "interest-cohort=()"
-		X-Frame-Options DENY
 		-Server
 	}
 }

@@ -15,6 +15,7 @@ import { Avatar } from "@/components/ui/Avatar";
 import { LiveDot, LiveCount, type LiveScope } from "@/components/realtime/LiveDot";
 import { ThemeSegmented } from "@/components/providers/ThemeSegmented";
 import { content } from "@theme/content";
+import { WEBVISOR_PRIVATE } from "@/components/analytics/webvisor";
 
 type Props = {
   email: string | null;
@@ -91,7 +92,8 @@ export function UserMenu({ email, name, image, isAdmin = false }: Props) {
 
       <DropdownMenuContent
         align="end"
-        className="min-w-[220px]"
+        // Имя и почта владельца аккаунта — не для записей Вебвизора.
+        className={`min-w-[220px] ${WEBVISOR_PRIVATE}`}
         onMouseEnter={openNow}
         onMouseLeave={closeSoon}
         // Radix при закрытии возвращает фокус на триггер. Для меню по наведению
