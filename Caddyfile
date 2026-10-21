@@ -34,7 +34,17 @@ www.{$DOMAIN} {
 		path /_next/static/*
 		path /og/*
 	}
-	header @static Cache-Control "public, max-age=31536000, immutable"
+	# defer — заменить заголовок ответа app, а не дописать к нему свой. Без
+	# defer Caddy ставит заголовок сразу, а reverse_proxy потом ДОБАВЛЯЕТ к нему
+	# заголовок Next: ответ уходил с двумя Cache-Control, и браузер склеивал их
+	# в один список. Здесь они совпадали, у иконок ниже — противоречили.
+	# Блоком с defer, а не префиксом `>`: `>` есть только с Caddy 2.7, а
+	# поддиректива defer — с 2.0, и образ caddy:2-alpine на сервере может
+	# оказаться старым.
+	header @static {
+		Cache-Control "public, max-age=31536000, immutable"
+		defer
+	}
 
 	# Иконки живут отдельно от @static и БЕЗ immutable, потому что заменяются:
 	# они собираются из theme/brand/*.svg через `pnpm build:icons`.
@@ -46,13 +56,18 @@ www.{$DOMAIN} {
 	# запрашиваются только по хешированному адресу, для них immutable был бы
 	# безопасен — они здесь ради одного правила на все иконки, а не потому, что
 	# без хеша. Сутки: перевыкладка расходится за день при мизерном трафике.
+	# Next отдаёт иконки с `max-age=0`; без defer (см. @static) этот второй
+	# заголовок спорил с сутками кеша.
 	@icons {
 		path /favicon.ico
 		path /icon.svg
 		path /apple-icon.png
 		path /icons/*
 	}
-	header @icons Cache-Control "public, max-age=86400"
+	header @icons {
+		Cache-Control "public, max-age=86400"
+		defer
+	}
 
 	# CSP — второй контур вокруг пользовательского контента. Инлайн-скрипт он не
 	# остановит: 'unsafe-inline' обязателен, пока Next вставляет RSC-данные
