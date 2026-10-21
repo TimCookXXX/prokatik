@@ -16,7 +16,7 @@
 |---|---|---|---|
 | `DATABASE_URL` | строка подключения к Postgres | приложение, миграции, seed | должна начинаться с `postgres://` или `postgresql://` |
 | `NEXTAUTH_URL` | публичный адрес сайта | auth, письма, sitemap, canonical, выбор `secure` для cookie | валидный URL |
-| `NEXTAUTH_SECRET` | подпись Auth.js | Auth.js | минимум 32 символа |
+| `NEXTAUTH_SECRET` | подпись Auth.js; от него же (HKDF) — ключ подписи данных страницы для своей статистики (`src/lib/analytics/token.ts`) | Auth.js; страницы поиска и объявления и роут `/api/analytics` | минимум 32 символа |
 
 `NEXTAUTH_URL` влияет больше, чем кажется: от его схемы (`http`/`https`)
 зависит имя session-cookie и флаг `secure`, а от значения — базовый адрес в

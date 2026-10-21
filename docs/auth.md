@@ -196,8 +196,9 @@ OAuth-аккаунт.
 
 **Админка**: `assertAdmin()` (редирект на `/` при `role !== "admin"`) стоит в
 `src/app/(app)/admin/layout.tsx` и в начале каждого чтения
-`src/server/admin.ts`, а каждый admin-action проверяет роль через собственный
-`requireAdmin()` и возвращает `forbidden`. Одного layout'а мало: при переходах
+`src/server/admin.ts` и `src/server/analytics-admin.ts`, а каждый admin-action
+(`src/server/actions/admin.ts`, `src/server/actions/analytics-admin.ts`)
+проверяет роль через собственный `requireAdmin()` и возвращает `forbidden`. Одного layout'а мало: при переходах
 внутри сегмента Next его не перерисовывает (комментарий в
 `src/lib/auth/guard.ts`), поэтому данные защищает само чтение.
 
@@ -206,7 +207,8 @@ OAuth-аккаунт.
 ## Открытые редиректы
 
 Любой адрес возврата (`callbackUrl`, `next`, `from`) проходит через
-`safeCallback()` в `src/lib/auth/session.ts`. Функция пропускает только
+`safeCallback()` в `src/lib/auth/safe-callback.ts` (его же отдаёт
+`src/lib/auth/session.ts`). Функция пропускает только
 собственные пути и отдельно ловит обратный слэш и управляющие символы **до**
 `new URL`, потому что `/\evil.com` штатный парсер разворачивает на чужой домен.
 Дефис и пробел в чёрный список не входят: дефис есть в каждом слаге товара.

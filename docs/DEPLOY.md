@@ -150,7 +150,13 @@ pnpm check-storage      # значения берутся из .env
 ### 5.2. Бакет для бэкапов (Cold)
 
 1. Создать → тип **Cold**
-2. Lifecycle: удаление объектов старше 30 дней (если доступно в тарифе)
+2. Lifecycle: удаление объектов старше `BACKUP_RETENTION_DAYS` дней
+   (`src/lib/analytics/limits.ts`). **Обязательно, а не по возможности:**
+   политика конфиденциальности обещает, что удалённое из базы — аккаунт,
+   отказ от учёта, статистика по сроку — остаётся в резервных копиях не дольше
+   этого срока, и подставляет в текст ту же константу. Нет правила в тарифе —
+   менять текст политики, а не молчать. Проверить: в панели Timeweb у бакета
+   есть правило lifecycle, а самый старый `db/backup-*.sql.gz` не старше срока.
 3. В `.env`: `BACKUP_S3_*` (endpoint тот же, bucket — UUID cold-бакета)
 
 ## 6. OAuth-приложения
@@ -327,6 +333,11 @@ dev-стека и сыпать "Failed to find Server Action"):
   поле адреса в форме объявления: первые три задевают Метрику и `wss://`,
   обложка — единственную картинку, которая грузится прямо с домена хранилища,
   мимо next/image, поле адреса — воркер подсказок (`worker-src`)
+- Своя статистика посещений: пройти главную → поиск → объявление, затем в
+  `/admin/visitors` с переключателем «С ботами и своими заходами» (браузер
+  админа помечен своим) видна лента этого браузера, а в `/admin/searches` —
+  запрос. `/privacy` → «Не учитывать меня на этом устройстве» удаляет её, и
+  новые заходы не пишутся
 
 ## 8. Post-deploy ручные шаги
 
@@ -773,6 +784,56 @@ exist` — app после сброса не поднялся и миграции
 
 Если менялся `STORAGE_PUBLIC_BASE` — нужен ещё и rebuild (он запечён в билд) и
 пересоздание `caddy` (адрес стоит в `img-src` политики CSP).
+
+### Удаление аккаунта по запросу
+
+Политика обещает удалить аккаунт по письму (`deleteBody` в `theme/content.ts`).
+Кнопки для этого нет — удаление делается SQL. Сначала убедиться, что это тот
+аккаунт, и выписать ключи его файлов (после удаления их уже не найти):
+
+```bash
+docker compose exec db psql -U app -d app -c "
+select id, email, name, role, created_at,
+  (select count(*) from listings l where l.owner_user_id = users.id)      as объявлений,
+  (select count(*) from booking_requests b where b.customer_user_id = users.id
+                                            or b.owner_user_id = users.id) as заявок,
+  (select count(*) from visitors v where v.user_id = users.id)            as браузеров
+from users where email = 'person@example.ru';"
+docker compose exec db psql -U app -d app -c "
+select key from uploads where user_id = (select id from users where email = 'person@example.ru');"
+```
+
+Потом удалить одной строкой. Каскад уносит входы и сессии, объявления с их
+заявками и переписками, заявки и переписки человека по чужим вещам,
+уведомления, реестр загрузок, а также его браузеры и события своей статистики
+(`visitors`, `visitor_events`). В журнале сделок `events` строки остаются без
+автора (`user_id` → `NULL`):
+
+```bash
+docker compose exec db psql -U app -d app -c "
+delete from users where email = 'person@example.ru';"
+```
+
+Чего каскад не делает:
+
+- **Файлы в бакете остаются** — из хранилища не удаляется ничего
+  ([BACKLOG.md](BACKLOG.md#уборка-файлы-и-архив-никто-не-удаляет)). Фото и
+  обложку убирать руками по выписанным ключам.
+- **Резервные копии** держат удалённое до `BACKUP_RETENTION_DAYS` — так и
+  сказано в политике (см. «Бакет для бэкапов»).
+- **История гостя до входа** с аккаунтом не связана и с ним не уходит. По
+  письму её можно найти, только если человек пришлёт ClientID Метрики (кука
+  `_ym_uid` его браузера):
+
+  ```bash
+  docker compose exec db psql -U app -d app -c "
+  delete from visitors where user_id is null and (ym_client_id = '<ClientID>'
+    or id in (select visitor_id from visitor_events
+              where type = 'ym_client' and props->>'cid' = '<ClientID>'));"
+  ```
+
+  Проще ему нажать «Не учитывать меня на этом устройстве» на `/privacy` в том
+  браузере — это удаляет историю браузера сразу.
 
 ### Логи
 
