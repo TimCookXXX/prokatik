@@ -1,11 +1,13 @@
 // Сводка кабинета: одна страница вместо обхода пяти разделов.
 
 import { and, desc, eq, gt, gte, inArray, lte, or, sql } from "drizzle-orm";
-import { alias } from "drizzle-orm/pg-core";
+import { QueryBuilder, alias } from "drizzle-orm/pg-core";
 import { getDb } from "@/lib/db";
-import { availability, bookingRequests, categories, chatThreads, cities, events, listings, users } from "@db/schema";
+import {
+  availability, bookingRequests, categories, chatThreads, cities, listings, users, visitorEvents, visitors,
+} from "@db/schema";
 import { expireStaleRequests } from "@/server/actions/booking";
-import { todayStr, addDaysStr } from "@/lib/catalog/dates";
+import { APP_TIME_ZONE, todayStr, addDaysStr } from "@/lib/catalog/dates";
 import type { BookingStatus } from "@/lib/catalog/booking-status";
 import {
   disclosedPhone, requestSide, type RequestSide,
@@ -79,6 +81,24 @@ export function cabinetRequestsWhere(userId: string, opts: CabinetRequestsOption
       : inArray(bookingRequests.status, [...opts.statuses]));
   }
   return and(...conds);
+}
+
+/* Условие плитки «просмотров за неделю» — отдельной функцией, как у ленты
+ * заявок: его свойства держит тест. Просмотр — событие view_listing своей
+ * статистики (его пишет маяк страницы объявления, свою вещь владелец не
+ * «просматривает»), только по вещам этого человека, без ботов и за срок.
+ * Таблица visitors должна быть в запросе: признак бота — у браузера. */
+export function cabinetViewsWhere(userId: string, since: Date) {
+  const myListings = new QueryBuilder()
+    .select({ id: listings.id })
+    .from(listings)
+    .where(eq(listings.ownerUserId, userId));
+  return and(
+    eq(visitorEvents.type, "view_listing"),
+    gte(visitorEvents.createdAt, since),
+    eq(visitors.isBot, false),
+    inArray(visitorEvents.listingId, myListings),
+  );
 }
 
 /* Заявки, где я любая из сторон. Заменяет две прежние выборки — владельца и
@@ -245,14 +265,16 @@ export async function getCabinetSummary(userId: string): Promise<CabinetSummary>
      * снимка вещи, залога и суммы в нём не было вовсе. */
     getCabinetRequests(userId, { statuses: ["new", "confirmed"] }),
 
+    /* Просмотр — один браузер, одна вещь, один московский день: перезагрузки
+     * и возвраты в тот же день одним человеком плитку не накручивают. */
     db
-      .select({ cnt: sql<number>`count(*)::int` })
-      .from(events)
-      .where(and(
-        eq(events.event, "view_listing"),
-        gte(events.createdAt, weekAgo),
-        inArray(events.entityId, myListings),
-      )),
+      .select({
+        cnt: sql<number>`count(distinct (${visitorEvents.visitorId}, ${visitorEvents.listingId},
+          (${visitorEvents.createdAt} at time zone 'UTC' at time zone ${APP_TIME_ZONE})::date))::int`,
+      })
+      .from(visitorEvents)
+      .innerJoin(visitors, eq(visitors.id, visitorEvents.visitorId))
+      .where(cabinetViewsWhere(userId, weekAgo)),
 
     db
       .select({ cnt: sql<number>`count(*)::int` })

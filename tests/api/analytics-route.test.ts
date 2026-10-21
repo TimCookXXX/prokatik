@@ -33,7 +33,8 @@ import { POST } from "@/app/api/analytics/route";
 import { auth } from "@/lib/auth";
 import { pruneVisitorData, readVisitor, writeVisitorBatch, type VisitorWrite } from "@/server/visitor-analytics";
 import { _resetForTests } from "@/lib/rate-limit";
-import { TRACK_BODY_MAX_BYTES } from "@/lib/analytics/limits";
+import { TRACK_BODY_MAX_BYTES, TRACK_TOKEN_TTL_HOURS } from "@/lib/analytics/limits";
+import { signPageData, type PageData } from "@/lib/analytics/token";
 
 const VID = "0f8fad5b-d9cb-469f-a165-70867728950e";
 const ORIGIN = "http://localhost:3000";
@@ -329,6 +330,79 @@ describe("POST /api/analytics: ClientID Метрики", () => {
     signedIn("u1");
     await send({ body: { events: [...PAGEVIEW.events, ...YM.events] }, cookie: SESSION });
     expect(lastWrite().ymClientId).toBeNull();
+    expect(lastWrite().events.map((e) => e.type)).toEqual(["pageview"]);
+  });
+});
+
+describe("POST /api/analytics: подписанные данные страницы", () => {
+  const LISTING: PageData = { k: "listing", listingId: "01JABCDEFGHJKMNPQRSTVWXYZ0", dates: true, where: false };
+  const SEARCH: PageData = {
+    k: "search", q: "перфоратор макита hr9999", usedQuery: "перфоратор макита", total: 3, matched: 3,
+    reason: null, partial: true, cityIds: ["c1"], dates: false, where: true, category: "tools",
+    filters: false, sort: "relevance", page: 1,
+  };
+  const one = (type: string, token: string, path = "/search?q=x&city=krasnodar") => ({ events: [{ type, path, token }] });
+
+  beforeEach(() => {
+    state.stored = { userId: null, isInternal: false, ymClientId: null, hasEvents: true };
+  });
+
+  it("показ выдачи: q и total — колонками, посчитанное — в props", async () => {
+    await send({ body: one("search", signPageData(SEARCH)) });
+    expect(lastWrite().events).toEqual([expect.objectContaining({
+      type: "search", path: "/search?q=x&city=krasnodar", q: "перфоратор макита hr9999", total: 3,
+      props: {
+        matched: 3, partial: true, usedQuery: "перфоратор макита", cityIds: ["c1"],
+        dates: false, where: true, category: "tools", filters: false, sort: "relevance", page: 1,
+      },
+    })]);
+  });
+
+  it("пустая выдача — причина; пустой запрос — q пустой", async () => {
+    await send({ body: one("search", signPageData({ ...SEARCH, q: "", usedQuery: null, partial: false, total: 0, reason: "empty_city" })) });
+    const [event] = lastWrite().events;
+    expect(event.q).toBeNull();
+    expect(event.total).toBe(0);
+    expect(event.props).toMatchObject({ reason: "empty_city" });
+    expect(event.props).not.toHaveProperty("partial");
+  });
+
+  it("просмотр объявления — id из токена", async () => {
+    await send({ body: one("view_listing", signPageData(LISTING), "/krasnodar/tools/drill-01JABCDEFGHJKMNPQRSTVWXYZ0") });
+    expect(lastWrite().events).toEqual([expect.objectContaining({
+      type: "view_listing", listingId: LISTING.listingId, props: { dates: true, where: false },
+    })]);
+  });
+
+  it("«Забронировать»: объявление из токена, «в аккаунте» — по сессии, а не по слову браузера", async () => {
+    await send({ body: one("booking_click", signPageData(LISTING), "/krasnodar/tools/x") });
+    expect(lastWrite().events[0]).toMatchObject({ type: "booking_click", listingId: LISTING.listingId, props: { authed: false } });
+
+    state.stored = { userId: "u1", isInternal: false, ymClientId: null, hasEvents: true };
+    signedIn("u1");
+    await send({ body: one("booking_click", signPageData(LISTING), "/krasnodar/tools/x"), cookie: SESSION });
+    expect(lastWrite().events[0]).toMatchObject({ props: { authed: true } });
+  });
+
+  it.each<[string, () => { events: unknown[] }]>([
+    ["подделанный токен", () => {
+      const [, mac] = signPageData(SEARCH).split(".");
+      const body = Buffer.from(JSON.stringify({ ...SEARCH, total: 0, reason: "no_match", ts: Math.floor(Date.now() / 1000) })).toString("base64url");
+      return one("search", `${body}.${mac}`);
+    }],
+    ["токен объявления у поиска", () => one("search", signPageData(LISTING))],
+    ["токен выдачи у просмотра", () => one("view_listing", signPageData(SEARCH))],
+    ["просроченный", () => one("view_listing", signPageData(LISTING, Date.now() - (TRACK_TOKEN_TTL_HOURS + 1) * 3600_000))],
+  ])("%s — событие отбрасывается", async (_name, body) => {
+    await send({ body: body() });
+    expect(writeVisitorBatch).not.toHaveBeenCalled();
+  });
+
+  it("в пачке отбрасывается только событие с плохой подписью", async () => {
+    await send({ body: { events: [
+      { type: "pageview", path: "/search?q=x" },
+      { type: "search", path: "/search?q=x", token: "bad.token" },
+    ] } });
     expect(lastWrite().events.map((e) => e.type)).toEqual(["pageview"]);
   });
 });

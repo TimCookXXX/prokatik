@@ -41,10 +41,8 @@ import { auth } from "@/lib/auth";
 import { getEnv } from "@/lib/env";
 import { getUserPhone } from "@/server/booking";
 import { findThreadByListing } from "@/server/chat";
-import { getDb } from "@/lib/db";
-import { events } from "@db/schema";
-import { newId } from "@/lib/id";
-import { GoalOnMount } from "@/components/analytics/GoalOnMount";
+import { signPageData } from "@/lib/analytics/token";
+import { TrackOnMount } from "@/components/analytics/TrackOnMount";
 
 export const dynamic = "force-dynamic";
 
@@ -256,18 +254,18 @@ async function ListingPage({
     ? parsedSelection
     : { ...parsedSelection, from: firstFree, to: firstFree };
 
-  // view_listing — сырьё для статистики. Ошибка записи не должна ронять страницу.
-  try {
-    await getDb().insert(events).values({
-      id: newId(),
-      entityType: "listing",
-      entityId: listing.id,
-      event: "view_listing",
-      userId: session?.user?.id ?? null,
-    });
-  } catch (e) {
-    console.error("[events] view_listing insert failed:", e);
-  }
+  // Показ чужого объявления — событие своей статистики и плитки «просмотров
+  // за неделю» в кабинете владельца. Пишет его роут сбора по маяку после
+  // гидрации, а не рендер: так боты без JS, prefetch и перерисовка после
+  // заявки просмотром не становятся. Сервер подписывает, какое объявление
+  // показано; тот же токен несёт «Забронировать». Своё объявление — не интерес
+  // покупателя: токена нет.
+  const trackToken = isOwn ? undefined : signPageData({
+    k: "listing",
+    listingId: listing.id,
+    dates: Boolean(searchParams.from && searchParams.to),
+    where: near !== null,
+  });
 
   // Ссылки на раздел — канонические: подкатегория под своим корнем.
   const categoryHref = categoryPath(city.slug, category, root);
@@ -319,8 +317,7 @@ async function ListingPage({
         crumbs.map((c) => ({ name: c.label, url: c.href })),
         siteUrl(),
       )} />
-      {/* Свой просмотр владельца — не интерес покупателя. */}
-      {!isOwn && <GoalOnMount goal="listing_view" showKey={listing.id} />}
+      {trackToken && <TrackOnMount event="view_listing" token={trackToken} showKey={listing.id} />}
       <Breadcrumbs items={visibleCrumbs} />
       {/* «Поделиться» — справа от названия: рядом с тем, чем делятся, и на
         * телефоне, и на десктопе. Делится канонический адрес без дат и «Где». */}
@@ -429,6 +426,7 @@ async function ListingPage({
             isAuthed={isAuthed}
             isOwn={isOwn}
             authProps={authProps}
+            trackToken={trackToken}
           />
         </aside>
       </div>

@@ -11,7 +11,8 @@
 // него, порядок пачки сохраняется.
 //
 // Порядок проверок — от дешёвых к дорогим: отказ от учёта, размер тела, свой
-// ли сайт прислал, бот, id браузера, лимиты, схема. База и auth() — последними.
+// ли сайт прислал, бот, id браузера, лимиты, схема, подписи данных страницы.
+// База и auth() — последними.
 
 import { NextResponse, after, type NextRequest } from "next/server";
 import { auth } from "@/lib/auth";
@@ -28,7 +29,8 @@ import { deviceOf } from "@/lib/analytics/device";
 import { decideLink } from "@/lib/analytics/link";
 import { batchSchema, type Batch } from "@/lib/analytics/payload";
 import { TRACK_BODY_MAX_BYTES } from "@/lib/analytics/limits";
-import { entryOf, sanitizePath } from "@/lib/analytics/sanitize";
+import { entryOf, sanitizePath, sanitizeQuery } from "@/lib/analytics/sanitize";
+import { verifyPageData, type SearchPageData, type SignedPageData } from "@/lib/analytics/token";
 import { classifySource, type Source } from "@/lib/analytics/source";
 import { visitorEventsCap } from "@/lib/analytics/daily-cap";
 import { createNoSessionCache } from "@/lib/analytics/no-session-cache";
@@ -68,7 +70,38 @@ interface Built {
   cid: string | null;
 }
 
-/** События пачки → строки к записи. Путь и вход чистятся здесь, на сервере. */
+/** Подписанные данные события; чужая подпись, срок или вид страницы — null. */
+function pageData<K extends SignedPageData["k"]>(token: string, k: K): Extract<SignedPageData, { k: K }> | null {
+  const data = verifyPageData(token);
+  return data && data.k === k ? (data as Extract<SignedPageData, { k: K }>) : null;
+}
+
+/** Показ выдачи: q и total — колонками, остальное посчитанное — в props. */
+function searchDraft(path: string, data: SearchPageData): Draft {
+  return {
+    type: "search",
+    path,
+    q: sanitizeQuery(data.q) || null,
+    total: data.total,
+    props: {
+      matched: data.matched,
+      ...(data.reason ? { reason: data.reason } : {}),
+      ...(data.partial ? { partial: true, usedQuery: data.usedQuery } : {}),
+      cityIds: data.cityIds,
+      dates: data.dates,
+      where: data.where,
+      ...(data.category ? { category: data.category } : {}),
+      filters: data.filters,
+      sort: data.sort,
+      page: data.page,
+    },
+  };
+}
+
+/**
+ * События пачки → строки к записи. Путь и вход чистятся здесь, на сервере;
+ * событие с данными страницы без валидной подписи отбрасывается.
+ */
 function buildEvents(batch: Batch): Built {
   const drafts: Draft[] = [];
   let source: Source | null = null;
@@ -81,17 +114,40 @@ function buildEvents(batch: Batch): Built {
     const path = sanitizePath(ev.path);
     // Адрес админки или чужой — события нет.
     if (path === null) continue;
-    const props: Record<string, unknown> = {};
-    if (ev.doc) {
-      const entry = entryOf(ev.path, ev.ref);
-      const src = classifySource(entry, siteHost());
-      props.doc = true;
-      props.src = src;
-      if (entry.ref) props.ref = entry.ref;
-      if (Object.keys(entry.utm).length > 0) props.utm = entry.utm;
-      source ??= src;
+    switch (ev.type) {
+      case "pageview": {
+        const props: Record<string, unknown> = {};
+        if (ev.doc) {
+          const entry = entryOf(ev.path, ev.ref);
+          const src = classifySource(entry, siteHost());
+          props.doc = true;
+          props.src = src;
+          if (entry.ref) props.ref = entry.ref;
+          if (Object.keys(entry.utm).length > 0) props.utm = entry.utm;
+          source ??= src;
+        }
+        drafts.push({ type: "pageview", path, props });
+        break;
+      }
+      case "search": {
+        const data = pageData(ev.token, "search");
+        if (data) drafts.push(searchDraft(path, data));
+        break;
+      }
+      case "view_listing": {
+        const data = pageData(ev.token, "listing");
+        if (data) {
+          drafts.push({ type: "view_listing", path, listingId: data.listingId, props: { dates: data.dates, where: data.where } });
+        }
+        break;
+      }
+      case "booking_click": {
+        // «В аккаунте ли» — по сессии, когда она прочитана (POST ниже).
+        const data = pageData(ev.token, "listing");
+        if (data) drafts.push({ type: "booking_click", path, listingId: data.listingId, props: {} });
+        break;
+      }
     }
-    drafts.push({ type: "pageview", path, props });
   }
   return { drafts, source, cid };
 }
@@ -165,7 +221,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const final: Draft[] = [
     ...(loginHere ? [{ type: "login" }] : []),
-    ...drafts,
+    ...drafts.map((d) => (d.type === "booking_click" ? { ...d, props: { authed: userId !== null } } : d)),
     ...(newCid ? [{ type: "ym_client", props: { cid: newCid } }] : []),
   ];
   const previousEvents: Draft[] = decision.kind === "switch" && decision.guestLogin ? [{ type: "login" }] : [];

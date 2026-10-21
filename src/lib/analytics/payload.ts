@@ -4,7 +4,7 @@
 // Что событие значит, решает сервер: путь и referrer чистит sanitize.ts.
 
 import { z } from "zod";
-import { TRACK_BATCH_MAX, TRACK_RAW_PATH_MAX } from "./limits";
+import { TRACK_BATCH_MAX, TRACK_RAW_PATH_MAX, TRACK_TOKEN_MAX } from "./limits";
 
 /** Адрес страницы, как его видит браузер: путь и query. Чистит сервер. */
 const rawPath = z.string().min(1).max(TRACK_RAW_PATH_MAX);
@@ -24,7 +24,19 @@ const ymClient = z.object({
   cid: z.string().regex(/^\d{1,32}$/),
 }).strict();
 
-export const clientEventSchema = z.discriminatedUnion("type", [pageview, ymClient]);
+/** Подписанные данные страницы (lib/analytics/token.ts); проверяет роут. */
+const token = z.string().min(1).max(TRACK_TOKEN_MAX);
+
+/** Показ выдачи /search: что искали и что нашлось — в токене. */
+const search = z.object({ type: z.literal("search"), path: rawPath, token }).strict();
+
+/** Показ чужого объявления: какое — в токене. */
+const viewListing = z.object({ type: z.literal("view_listing"), path: rawPath, token }).strict();
+
+/** «Забронировать»: объявление — из токена страницы, «в аккаунте ли» знает роут. */
+const bookingClick = z.object({ type: z.literal("booking_click"), path: rawPath, token }).strict();
+
+export const clientEventSchema = z.discriminatedUnion("type", [pageview, ymClient, search, viewListing, bookingClick]);
 
 export const batchSchema = z.object({
   events: z.array(clientEventSchema).min(1).max(TRACK_BATCH_MAX),

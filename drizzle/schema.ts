@@ -291,8 +291,8 @@ export const bookingRequests = pgTable("booking_requests", {
 
 // events — журнал сделок: submit_request, cancel_request, request_declined.
 // Поведение посетителей — страницы, поиски, просмотры — живёт отдельно, в
-// visitors и visitor_events. view_listing сюда пока пишет страница объявления
-// при рендере; новые просмотры идут в visitor_events, старые строки остаются.
+// visitors и visitor_events. Старые строки view_listing, которые страница
+// объявления писала сюда при рендере, остались и больше ничем не читаются.
 export const events = pgTable("events", {
   id: text("id").primaryKey(),
   entityType: varchar("entity_type", { length: 40 }).notNull(),

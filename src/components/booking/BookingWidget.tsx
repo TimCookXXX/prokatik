@@ -29,7 +29,7 @@ import {
 } from "@/lib/catalog/format";
 import { HandoverIcon } from "@/components/catalog/HandoverIcon";
 import { content } from "@theme/content";
-import { reachGoal } from "@/components/analytics/goals";
+import { track } from "@/components/analytics/track";
 
 const t = content.booking;
 
@@ -60,6 +60,11 @@ export interface BookingWidgetProps {
   /** Своё объявление — бронировать нечего. */
   isOwn: boolean;
   authProps: AuthPanelProps;
+  /**
+   * Подписанные данные страницы объявления (lib/analytics/token.ts): с ними
+   * «Забронировать» — событие своей статистики. Без них — только цель Метрики.
+   */
+  trackToken?: string;
 }
 
 export function BookingWidget(props: BookingWidgetProps) {
@@ -143,7 +148,7 @@ export function BookingWidget(props: BookingWidgetProps) {
 
   const onBook = () => {
     if (bookDisabled) return;
-    reachGoal("booking_click", { authed: props.isAuthed });
+    track("booking_click", { token: props.trackToken, authed: props.isAuthed });
     if (props.isAuthed) {
       setFormOpen(true);
     } else {

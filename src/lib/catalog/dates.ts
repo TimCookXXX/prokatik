@@ -13,7 +13,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 // Одна зона на весь сервис, включая города восточнее Москвы —
 // docs/decisions/0013-single-business-timezone.md.
-const APP_TIME_ZONE = "Europe/Moscow";
+export const APP_TIME_ZONE = "Europe/Moscow";
 
 // Форматтер ленивый: модуль тянут и клиентские компоненты (BookingWidget,
 // DateRangeFilter) — ради строковых хелперов, а конструктор на верхнем уровне

@@ -33,7 +33,8 @@ vi.mock("@/server/catalog", () => catalog);
 vi.mock("@/server/city", () => city);
 vi.mock("@/lib/auth", () => ({ auth: vi.fn(async () => null) }));
 vi.mock("@/lib/auth/panel-props", () => ({ authPanelProps: () => ({}) }));
-vi.mock("@/lib/db", () => ({ getDb: () => ({ insert: () => ({ values: async () => {} }) }) }));
+const db = vi.hoisted(() => ({ getDb: vi.fn() }));
+vi.mock("@/lib/db", () => db);
 vi.mock("@/server/booking", () => ({ getUserPhone: vi.fn() }));
 vi.mock("@/server/chat", () => ({ findThreadByListing: vi.fn() }));
 vi.mock("next/navigation", () => ({
@@ -42,7 +43,8 @@ vi.mock("next/navigation", () => ({
 }));
 
 const { default: CitySubPage, generateMetadata } = await import("@/app/(public)/[city]/[seg]/[sub]/page");
-const { GoalOnMount } = await import("@/components/analytics/GoalOnMount");
+const { TrackOnMount } = await import("@/components/analytics/TrackOnMount");
+const { verifyPageData } = await import("@/lib/analytics/token");
 const { auth } = await import("@/lib/auth");
 
 const props = (city: string, sp: Record<string, string> = {}) => ({
@@ -275,33 +277,56 @@ describe("listing metadata and share", () => {
   });
 });
 
-// Цель «Открыл объявление» — интерес покупателя: на странице своего объявления
-// владельца её нет. Само срабатывание один раз — в тестах GoalOnMount.
-describe("/{city}/{cat}/{slug}-{id}: цель listing_view", () => {
+// Показ объявления — событие своей статистики (и цель «Открыл объявление»):
+// интерес покупателя, поэтому на странице своего объявления владельца его нет.
+// Пишет его маяк после гидрации по подписанному токену, а не рендер страницы.
+// Само срабатывание один раз — в тестах TrackOnMount.
+describe("/{city}/{cat}/{slug}-{id}: событие view_listing", () => {
   type El = { type: unknown; props: Record<string, unknown> };
-  const goals = (node: unknown): El[] => {
-    if (Array.isArray(node)) return node.flatMap(goals);
+  const find = (node: unknown, type: unknown): El[] => {
+    if (Array.isArray(node)) return node.flatMap((n) => find(n, type));
     if (!node || typeof node !== "object" || !("props" in node)) return [];
     const el = node as El;
-    return [...(el.type === GoalOnMount ? [el] : []), ...goals(el.props.children)];
+    return [...(el.type === type ? [el] : []), ...find(el.props.children, type)];
   };
-  const listingTree = async () => {
-    const el = await CitySubPage(props("krasnodar"));
+  const listingTree = async (sp: Record<string, string> = {}) => {
+    const el = await CitySubPage(props("krasnodar", sp));
     return (el.type as (p: unknown) => Promise<unknown>)(el.props);
   };
 
   beforeEach(() => {
     city.getCityScope.mockResolvedValue({ region: false, nearby: false, cityIds: [krasnodar.id], near: null });
+    db.getDb.mockClear();
   });
 
-  it("гостю — одна цель с ключом объявления, без параметров", async () => {
-    const found = goals(await listingTree());
+  it("гостю — одно событие с ключом объявления и подписанным id", async () => {
+    const found = find(await listingTree({ from: "2026-10-10", to: "2026-10-12" }), TrackOnMount);
     expect(found).toHaveLength(1);
-    expect(found[0].props).toEqual({ goal: "listing_view", showKey: LISTING_ID });
+    expect(found[0].props).toMatchObject({ event: "view_listing", showKey: LISTING_ID });
+    expect(verifyPageData(found[0].props.token as string)).toMatchObject({
+      k: "listing", listingId: LISTING_ID, dates: true, where: false,
+    });
   });
 
-  it("владельцу на своём объявлении — нет", async () => {
+  it("тот же токен — у «Забронировать»", async () => {
+    const tree = await listingTree();
+    const [shown] = find(tree, TrackOnMount);
+    const widget = find(tree, (await import("@/components/booking/BookingWidget")).BookingWidget)[0];
+    expect(widget.props.trackToken).toBe(shown.props.token);
+  });
+
+  it("владельцу на своём объявлении — нет ни события, ни токена у брони", async () => {
     vi.mocked(auth).mockResolvedValueOnce({ user: { id: "U1", role: "user", bannedAt: null } } as never);
-    expect(goals(await listingTree())).toEqual([]);
+    const tree = await listingTree();
+    expect(find(tree, TrackOnMount)).toEqual([]);
+    const widget = find(tree, (await import("@/components/booking/BookingWidget")).BookingWidget)[0];
+    expect(widget.props.trackToken).toBeUndefined();
+  });
+
+  // Прежняя запись events.view_listing при каждом рендере считала ботов,
+  // prefetch и перерисовку после заявки. Рендер в базу больше не пишет.
+  it("рендер страницы в базу не пишет", async () => {
+    await listingTree();
+    expect(db.getDb).not.toHaveBeenCalled();
   });
 });

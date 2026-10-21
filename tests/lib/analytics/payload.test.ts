@@ -3,7 +3,7 @@
 // пачки отклоняют её целиком.
 import { describe, expect, it } from "vitest";
 import { batchSchema } from "@/lib/analytics/payload";
-import { TRACK_BATCH_MAX, TRACK_RAW_PATH_MAX } from "@/lib/analytics/limits";
+import { TRACK_BATCH_MAX, TRACK_RAW_PATH_MAX, TRACK_TOKEN_MAX } from "@/lib/analytics/limits";
 
 const ok = (body: unknown) => batchSchema.safeParse(body).success;
 
@@ -33,6 +33,18 @@ describe("batchSchema", () => {
     expect(ok({ events: [] })).toBe(false);
     expect(ok({ events: Array.from({ length: TRACK_BATCH_MAX + 1 }, () => ({ type: "pageview", path: "/" })) }))
       .toBe(false);
+  });
+
+  it("события страницы — с токеном и адресом", () => {
+    for (const type of ["search", "view_listing", "booking_click"]) {
+      expect(ok({ events: [{ type, path: "/search?q=a", token: "abc.def" }] })).toBe(true);
+      expect(ok({ events: [{ type, path: "/search?q=a" }] })).toBe(false);
+      expect(ok({ events: [{ type, path: "/", token: "a".repeat(TRACK_TOKEN_MAX + 1) }] })).toBe(false);
+    }
+    // Посчитанное шлёт только сервер — в токене; рядом с ним ничего не принимается.
+    expect(ok({ events: [{ type: "search", path: "/search", token: "t", total: 0 }] })).toBe(false);
+    expect(ok({ events: [{ type: "booking_click", path: "/", token: "t", authed: true }] })).toBe(false);
+    expect(ok({ events: [{ type: "view_listing", path: "/", token: "t", listingId: "x" }] })).toBe(false);
   });
 
   it("ClientID — только цифры", () => {

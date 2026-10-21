@@ -1,7 +1,12 @@
 // Трекер своей статистики: пачка на следующем тике, просмотр первым, пачки
 // по одной, остаток на pagehide; молчит после отказа, во фрейме и в админке.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { TRACK_ENDPOINT, TRACK_QUEUE_LIMIT, _resetTrackForTests, track } from "@/components/analytics/track";
+
+const reachGoal = vi.hoisted(() => vi.fn());
+vi.mock("@/components/analytics/goals", () => ({ reachGoal }));
+import {
+  FIRST_PAGEVIEW_WAIT_MS, TRACK_ENDPOINT, TRACK_QUEUE_LIMIT, _resetTrackForTests, track,
+} from "@/components/analytics/track";
 import { TRACK_BATCH_MAX } from "@/lib/analytics/limits";
 
 type Sent = { url: string; init: RequestInit; body: { events: { type: string; path?: string }[]; bot?: true } };
@@ -13,6 +18,7 @@ let holdResponses: boolean;
 beforeEach(() => {
   vi.useFakeTimers();
   _resetTrackForTests();
+  reachGoal.mockClear();
   sent = [];
   release = [];
   holdResponses = false;
@@ -34,6 +40,11 @@ afterEach(() => {
 // Таймер тика, ответ fetch и таймер следующей пачки — несколько оборотов.
 const flush = async () => {
   for (let i = 0; i < 3; i++) await vi.advanceTimersByTimeAsync(1);
+};
+// События без просмотра страницы ждут его до FIRST_PAGEVIEW_WAIT_MS.
+const flushAfterWait = async () => {
+  await vi.advanceTimersByTimeAsync(FIRST_PAGEVIEW_WAIT_MS);
+  await flush();
 };
 
 describe("track", () => {
@@ -112,6 +123,41 @@ describe("track", () => {
     expect(sent[0].body).not.toHaveProperty("bot");
   });
 
+  // Трекер просмотра в layout'е гидратируется позже страницы: её события ждут
+  // его, и лента начинается с просмотра со входом.
+  it("события первой страницы ждут её просмотр и уходят после него", async () => {
+    track("view_listing", { token: "T" });
+    await flush();
+    expect(sent).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(FIRST_PAGEVIEW_WAIT_MS / 2);
+    track("pageview", { path: "/krasnodar", doc: true });
+    await flush();
+    expect(sent).toHaveLength(1);
+    expect(sent[0].body.events.map((e) => e.type)).toEqual(["pageview", "view_listing"]);
+  });
+
+  it("просмотр так и не пришёл — события уходят после ожидания", async () => {
+    track("view_listing", { token: "T" });
+    await vi.advanceTimersByTimeAsync(FIRST_PAGEVIEW_WAIT_MS - 10);
+    expect(sent).toHaveLength(0);
+    await flushAfterWait();
+    expect(sent).toHaveLength(1);
+  });
+
+  it("после первого просмотра события не ждут", async () => {
+    track("pageview", { path: "/" });
+    await flush();
+    track("view_listing", { token: "T" });
+    await flush();
+    expect(sent).toHaveLength(2);
+  });
+
+  it("pagehide во время ожидания — уходит сразу", () => {
+    track("view_listing", { token: "T" });
+    window.dispatchEvent(new Event("pagehide"));
+    expect(sent).toHaveLength(1);
+  });
+
   it("сбой сети не ломает следующие пачки", async () => {
     vi.mocked(fetch).mockRejectedValueOnce(new Error("offline"));
     track("pageview", { path: "/a" });
@@ -148,5 +194,64 @@ describe("track молчит", () => {
     } finally {
       Object.defineProperty(window, "top", top);
     }
+  });
+});
+
+// Одно место вызова на оба счёта: событие своей статистики и цель Метрики.
+describe("track: события страницы и цели", () => {
+  it("показ выдачи: токен и текущий адрес; zero на сервер не уходит", async () => {
+    window.history.replaceState(null, "", "/search?q=a&city=krasnodar");
+    track("search", { token: "TOKEN", zero: "no_match" });
+    await flushAfterWait();
+    expect(sent[0].body.events).toEqual([{ type: "search", path: "/search?q=a&city=krasnodar", token: "TOKEN" }]);
+    expect(reachGoal).toHaveBeenCalledWith("search_zero", { reason: "no_match" });
+  });
+
+  it("выдача не пуста или нашлась по части слов — цели нет", () => {
+    track("search", { token: "T" });
+    expect(reachGoal).not.toHaveBeenCalled();
+  });
+
+  it("goal: false — только событие", async () => {
+    track("search", { token: "T", zero: "filtered" }, { goal: false });
+    await flushAfterWait();
+    expect(sent).toHaveLength(1);
+    expect(reachGoal).not.toHaveBeenCalled();
+  });
+
+  it("показ объявления — цель listing_view", async () => {
+    track("view_listing", { token: "T" });
+    await flushAfterWait();
+    expect(sent[0].body.events[0]).toMatchObject({ type: "view_listing", token: "T" });
+    expect(reachGoal).toHaveBeenCalledWith("listing_view");
+  });
+
+  it("«Забронировать»: цель с authed, на сервер — только токен", async () => {
+    track("booking_click", { token: "T", authed: false });
+    await flushAfterWait();
+    expect(sent[0].body.events).toEqual([{ type: "booking_click", path: "/krasnodar", token: "T" }]);
+    expect(reachGoal).toHaveBeenCalledWith("booking_click", { authed: false });
+  });
+
+  it("«Забронировать» без токена — только цель", async () => {
+    track("booking_click", { authed: true });
+    await flushAfterWait();
+    expect(fetch).not.toHaveBeenCalled();
+    expect(reachGoal).toHaveBeenCalledWith("booking_click", { authed: true });
+  });
+
+  // Свои правила у очереди целей (goals.ts): админку и отказ она решает сама.
+  it("после отказа событие молчит, цель решает своя очередь", async () => {
+    document.cookie = "noanalytics=1; path=/";
+    track("view_listing", { token: "T" });
+    await flushAfterWait();
+    expect(fetch).not.toHaveBeenCalled();
+    expect(reachGoal).toHaveBeenCalledWith("listing_view");
+  });
+
+  it("просмотр страницы и ClientID целей не дают", () => {
+    track("pageview", { path: "/" });
+    track("ym_client", { cid: "1" });
+    expect(reachGoal).not.toHaveBeenCalled();
   });
 });

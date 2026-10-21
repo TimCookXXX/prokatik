@@ -32,7 +32,9 @@ import { activeFilterCount } from "@/lib/catalog/filter-count";
 import { CategoryFacets } from "@/components/catalog/CategoryFacets";
 import { parseView } from "@/components/catalog/ViewToggle";
 import { zeroReason } from "@/lib/search/zero-reason";
-import { GoalOnMount } from "@/components/analytics/GoalOnMount";
+import { sanitizeQuery } from "@/lib/analytics/sanitize";
+import { showKeyOf, signPageData } from "@/lib/analytics/token";
+import { TrackOnMount } from "@/components/analytics/TrackOnMount";
 
 export async function SearchResults({
   city, q, searchParams, scope = singleCityScope(city.id),
@@ -167,20 +169,52 @@ export async function SearchResults({
     return { ...o, href: `/search?${params.toString()}` };
   });
 
-  // Пустая выдача — цель Метрики с причиной, только на первой странице:
-  // страница за концом списка (старая ссылка, робот) — не неудачный поиск.
-  // Новый показ — новые условия выдачи (запрос, город, фильтры, даты, «Где»);
-  // вид и сортировка пустую выдачу непустой не делают, и их смена — тот же
-  // показ. Ключ остаётся в странице и в Метрику не уходит.
-  const zeroShowKey = (() => {
+  // Показ выдачи — событие своей статистики: что искали и что нашлось,
+  // подписанное сервером (lib/analytics/token.ts). Новый показ — новые
+  // условия: запрос, город, фильтры, даты, «Где», сортировка, страница; вид
+  // карточек показом не считается. Ключи остаются в странице, на сервер уходит
+  // только токен.
+  //
+  // Пустая выдача — ещё и цель Метрики «ничего не нашёл» с причиной, только на
+  // первой странице: страница за концом списка (старая ссылка, робот) — не
+  // неудачный поиск. Её показ — без сортировки: смена сортировки пустую выдачу
+  // непустой не делает. Нашлось по части слов (subsetNotice) — это не ноль:
+  // человек видит похожее, и выдача не пуста.
+  const conditions = (() => {
     const params = filterParams(searchParams, { today });
     params.delete("view");
-    params.delete("sort");
     params.set("q", q);
     params.set("city", city.slug);
     params.sort();
+    return params;
+  })();
+  const zeroShowKey = (() => {
+    const params = new URLSearchParams(conditions);
+    params.delete("sort");
     return params.toString();
   })();
+  const reason = items.length === 0 ? zeroReason({ q, ranked, page, narrowed: hasFilters }) : null;
+  const partial = Boolean(ranked?.ids && ranked.dropped.length > 0);
+  const searchToken = signPageData({
+    k: "search",
+    q: sanitizeQuery(q),
+    usedQuery: partial && ranked ? sanitizeQuery(ranked.usedQuery) : null,
+    total,
+    matched: ranked?.ids ? ranked.ids.length : null,
+    reason,
+    partial,
+    cityIds: scope.cityIds,
+    dates: Boolean(filters.availableFrom && filters.availableTo),
+    where: scope.near !== null,
+    category: activeRoot?.slug ?? null,
+    filters: Boolean(
+      filters.priceMin !== undefined || filters.priceMax !== undefined
+      || filters.deposit || filters.handover || filters.verifiedOnly,
+    ),
+    sort: filters.sort ?? defaultSort(sortCtx),
+    page,
+  });
+  const searchShowKey = showKeyOf([conditions.toString(), page]);
 
   const pageHref = (p: number) => {
     const params = filterParams(searchParams, { today });
@@ -228,13 +262,13 @@ export async function SearchResults({
             {content.search.subsetNotice(q, ranked.usedQuery)}
           </p>
         )}
-        {items.length === 0 && page === 1 && (
-          <GoalOnMount
-            goal="search_zero"
-            params={{ reason: zeroReason({ q, ranked, page, narrowed: hasFilters }) }}
-            showKey={zeroShowKey}
-          />
-        )}
+        <TrackOnMount
+          event="search"
+          token={searchToken}
+          showKey={searchShowKey}
+          goalKey={zeroShowKey}
+          zero={page === 1 && reason ? reason : undefined}
+        />
         {items.length === 0 ? (
           // Пусто по разным причинам, и валить их в одну фразу нельзя: «в
           // городе ничего нет» — прямая ложь, когда выдачу обнулил фильтр или

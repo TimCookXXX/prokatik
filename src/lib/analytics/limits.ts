@@ -31,3 +31,13 @@ export const TRACK_BODY_MAX_BYTES = 8 * 1024;
 
 /** Длина адреса и referrer'а, как их шлёт браузер; трекер режет до неё сам. */
 export const TRACK_RAW_PATH_MAX = 1000;
+
+/**
+ * Сколько часов действует подписанный токен страницы (lib/analytics/token.ts).
+ * Сутки, а не минуты: «Забронировать» шлётся с токеном открытой страницы, а
+ * вкладку держат открытой долго.
+ */
+export const TRACK_TOKEN_TTL_HOURS = 24;
+
+/** Длина подписанного токена страницы в пачке. */
+export const TRACK_TOKEN_MAX = 3000;

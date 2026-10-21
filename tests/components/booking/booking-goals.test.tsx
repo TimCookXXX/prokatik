@@ -8,6 +8,12 @@ const createBookingRequest = vi.hoisted(() => vi.fn());
 vi.mock("@/server/actions/booking", () => ({ createBookingRequest }));
 const reachGoal = vi.hoisted(() => vi.fn());
 vi.mock("@/components/analytics/goals", () => ({ reachGoal }));
+// Настоящий track (он и шлёт цель), но с записью вызовов.
+vi.mock("@/components/analytics/track", async (orig) => {
+  const real = await orig<typeof import("@/components/analytics/track")>();
+  return { ...real, track: vi.fn(real.track) };
+});
+const { track } = await import("@/components/analytics/track");
 
 const { BookingWidget } = await import("@/components/booking/BookingWidget");
 const { BookingFormDialog } = await import("@/components/booking/BookingFormDialog");
@@ -36,6 +42,8 @@ const base = {
 
 beforeEach(() => {
   reachGoal.mockClear();
+  vi.mocked(track).mockClear();
+  vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 204 })));
   createBookingRequest.mockReset();
   createBookingRequest.mockResolvedValue({ ok: true, data: undefined });
   window.history.replaceState(null, "", base.pathname);
@@ -88,5 +96,22 @@ describe("цель booking_sent", () => {
     await waitFor(() => expect(createBookingRequest).toHaveBeenCalled());
     await screen.findByRole("alert");
     expect(goals("booking_sent")).toEqual([]);
+  });
+});
+
+// «Забронировать» — и событие своей статистики: объявление в подписанном
+// токене страницы, «в аккаунте ли» сервер знает сам.
+describe("событие booking_click", () => {
+  it("с токеном страницы — событие с ним", () => {
+    render(<BookingWidget {...base} trackToken="TOKEN" />);
+    fireEvent.click(screen.getAllByRole("button", { name: "Забронировать" })[0]);
+    expect(track).toHaveBeenCalledWith("booking_click", { token: "TOKEN", authed: true });
+  });
+
+  it("без токена — только цель", () => {
+    render(<BookingWidget {...base} />);
+    fireEvent.click(screen.getAllByRole("button", { name: "Забронировать" })[0]);
+    expect(track).toHaveBeenCalledWith("booking_click", { token: undefined, authed: true });
+    expect(goals("booking_click")).toHaveLength(1);
   });
 });
