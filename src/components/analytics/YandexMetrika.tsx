@@ -29,16 +29,29 @@ export function withoutToken(href: string): string {
   }
 }
 
+// Админка в Метрику не попадает: ни визитом, ни записью Вебвизора, ни адресом
+// страницы. Решение принимается один раз на загрузку документа — в
+// инлайн-сниппете по пути, с которого документ открыт. Поэтому вход в админку
+// из публичной части — обычная ссылка с полной загрузкой, а не клиентский
+// переход: иначе админку записал бы счётчик, поднятый публичной страницей.
+export const METRIKA_SKIPPED_PATH = /^\/admin(?:\/|$)/;
+
+export function isMetrikaSkipped(pathname: string): boolean {
+  return METRIKA_SKIPPED_PATH.test(pathname);
+}
+
 // Код счётчика. Вебвизор включается опцией init `webvisor`, а не только
-// галочкой в настройках счётчика: без неё записей визитов нет.
+// галочкой в настройках счётчика: без неё записей визитов нет. На путях
+// METRIKA_SKIPPED_PATH сниппет не грузит tag.js и не заводит window.ym.
 export function metrikaInitSnippet(id: number): string {
   return `
-    (function(m,e,t,r,i,k,a){m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};
-    m[i].l=1*new Date();
-    for (var j = 0; j < document.scripts.length; j++) {if (document.scripts[j].src === r) { return; }}
-    k=e.createElement(t),a=e.getElementsByTagName(t)[0],k.async=1,k.src=r,a.parentNode.insertBefore(k,a)})
-    (window, document, "script", "https://mc.yandex.ru/metrika/tag.js?id=${id}", "ym");
     (function(){
+      if (${METRIKA_SKIPPED_PATH}.test(location.pathname)) return;
+      (function(m,e,t,r,i,k,a){m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};
+      m[i].l=1*new Date();
+      for (var j = 0; j < document.scripts.length; j++) {if (document.scripts[j].src === r) { return; }}
+      k=e.createElement(t),a=e.getElementsByTagName(t)[0],k.async=1,k.src=r,a.parentNode.insertBefore(k,a)})
+      (window, document, "script", "https://mc.yandex.ru/metrika/tag.js?id=${id}", "ym");
       function clean(s){try{var u=new URL(s);if(!u.searchParams.has("token"))return s;u.searchParams.delete("token");return u.href}catch(e){return s}}
       ym(${id}, "init", { ssr: true, webvisor: true, clickmap: true, trackLinks: true, accurateTrackBounce: true, referrer: clean(document.referrer), url: clean(location.href) });
     })();
@@ -99,6 +112,8 @@ export function MetrikaPageHits({ id }: { id: number }) {
   const prev = useRef<{ view: string; href: string } | null>(null);
 
   useEffect(() => {
+    // Адрес админки не уходит ни хитом, ни источником следующего перехода.
+    if (isMetrikaSkipped(pathname)) return;
     const href = withoutToken(`${window.location.origin}${pathname}${search ? `?${search}` : ""}`);
     const last = prev.current;
     if (last && last.view !== view) {

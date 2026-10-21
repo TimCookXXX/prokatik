@@ -127,12 +127,15 @@ export function UserMenu({ email, name, image, isAdmin = false }: Props) {
 
         {isAdmin && (
           <DropdownMenuItem asChild className="gap-2.5">
-            <Link href={"/admin" as never}>
+            {/* Обычная ссылка, не Link: в админке Метрика не поднимается, а
+              * решает это загрузка документа (isMetrikaSkipped). Клиентский
+              * переход оставил бы работать счётчик публичной страницы. */}
+            <a href="/admin">
               <span className="flex w-6 shrink-0 justify-center">
                 <ShieldCheck className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
               </span>
               Админка
-            </Link>
+            </a>
           </DropdownMenuItem>
         )}
 

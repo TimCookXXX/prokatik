@@ -9,7 +9,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 import {
-  MetrikaPageHits, YandexMetrika, metrikaInitSnippet, withoutToken, pageViewKey,
+  MetrikaPageHits, YandexMetrika, metrikaInitSnippet, withoutToken, pageViewKey, isMetrikaSkipped,
 } from "@/components/analytics/YandexMetrika";
 
 const origin = window.location.origin;
@@ -65,6 +65,34 @@ describe("metrikaInitSnippet", () => {
     const opts = runInit();
     expect(opts.url).toBe(`${origin}/reset?x=1`);
     expect(String(opts.url)).not.toContain("secret");
+  });
+
+  it.each(["/admin", "/admin/users", "/admin/listings?x=1"])(
+    "на %s не грузит tag.js, не делает init и не заводит ym",
+    (path) => {
+      window.history.replaceState(null, "", path);
+      delete (window as unknown as Record<string, unknown>).ym;
+      delete (globalThis as unknown as Record<string, unknown>).ym;
+      const before = document.querySelectorAll('script[src*="mc.yandex.ru"]').length;
+      new Function(metrikaInitSnippet(42))();
+      expect(window.ym).toBeUndefined();
+      expect(document.querySelectorAll('script[src*="mc.yandex.ru"]').length).toBe(before);
+    },
+  );
+
+  it("на публичной странице с «admin» в адресе работает как обычно", () => {
+    window.history.replaceState(null, "", "/krasnodar/administrator");
+    expect(runInit().webvisor).toBe(true);
+  });
+});
+
+describe("isMetrikaSkipped", () => {
+  it("пропускает только раздел /admin", () => {
+    expect(isMetrikaSkipped("/admin")).toBe(true);
+    expect(isMetrikaSkipped("/admin/users")).toBe(true);
+    expect(isMetrikaSkipped("/administrator")).toBe(false);
+    expect(isMetrikaSkipped("/krasnodar/admin")).toBe(false);
+    expect(isMetrikaSkipped("/")).toBe(false);
   });
 });
 
@@ -136,6 +164,17 @@ describe("<MetrikaPageHits>", () => {
     expect(new URL(href as string).searchParams.get("q")).toBe("перфоратор");
     // Источник — адрес с уже выбранными фильтрами, а не адрес входа.
     expect(new URL((opts as { referer: string }).referer).searchParams.get("view")).toBe("grid");
+  });
+
+  it("не шлёт hit по адресам админки и не делает их источником", () => {
+    nav.pathname = "/krasnodar";
+    const go = mount();
+    go("/admin", "");
+    go("/admin/users", "");
+    expect(ym).not.toHaveBeenCalled();
+    go("/krasnodar/instrumenty", "");
+    expect(ym).toHaveBeenCalledTimes(1);
+    expect(ym).toHaveBeenCalledWith(42, "hit", `${origin}/krasnodar/instrumenty`, { referer: `${origin}/krasnodar` });
   });
 
   it("не отдаёт токен ни в адресе hit, ни в источнике", () => {
