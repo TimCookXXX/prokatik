@@ -5,7 +5,7 @@ import { content } from "@theme/content";
 import { assertAdmin } from "@/lib/auth/assert-admin";
 import { adminVisitorCard, CARD_EVENTS_MAX } from "@/server/analytics-admin";
 import { adminSetVisitorInternal } from "@/server/actions/analytics-admin";
-import { analyticsHref } from "@/lib/analytics/admin-filters";
+import { analyticsHref, cursorParam, parseVisitorListFilters } from "@/lib/analytics/admin-filters";
 import {
   describeDevice, describeSignIn, describeSource, momentLabel, visitorLabel,
 } from "@/lib/analytics/describe";
@@ -28,18 +28,31 @@ function Fact({ label, children }: { label: string; children: React.ReactNode })
   );
 }
 
-export default async function AdminVisitorPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function AdminVisitorPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   await assertAdmin();
   const { id } = await params;
   const card = await adminVisitorCard(id);
   if (!card) notFound();
+  // Назад — на ту же страницу списка: период, фильтр и курсор пришли сюда
+  // параметрами списка; адрес собирается заново из разобранных zod'ом фильтров.
+  const list = parseVisitorListFilters(await searchParams);
+  const backHref = analyticsHref("/admin/visitors", {
+    period: list.period, all: list.all, user: list.user, find: list.findText || undefined,
+    ...(list.cursor ? { [list.cursor.dir]: cursorParam(list.cursor.at, list.cursor.id) } : {}),
+  }) as Route;
 
   const now = new Date();
   const { visitor, user } = card;
 
   return (
     <section aria-label={visitorLabel({ id: visitor.id, userName: user?.name, userEmail: user?.email })} className="flex flex-col gap-4">
-      <Link href="/admin/visitors" className="text-sm text-muted-foreground underline underline-offset-2 hoverable hover:text-foreground">
+      <Link href={backHref} className="text-sm text-muted-foreground underline underline-offset-2 hoverable hover:text-foreground">
         {t.back}
       </Link>
 
@@ -52,7 +65,7 @@ export default async function AdminVisitorPage({ params }: { params: Promise<{ i
         </div>
         <code className="break-all font-mono text-xs text-muted-foreground">{visitor.id}</code>
 
-        <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <dl className="grid grid-cols-2 gap-3 lg:grid-cols-3">
           <Fact label={t.firstSeen}>{momentLabel(visitor.firstSeenAt, now)}</Fact>
           <Fact label={t.lastSeen}>{momentLabel(visitor.lastSeenAt, now)}</Fact>
           <Fact label={t.days}>{visitor.days}</Fact>

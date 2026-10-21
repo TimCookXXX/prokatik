@@ -74,7 +74,7 @@ describe("describeEvent", () => {
     expect(describeEvent(ev("login", { userId: "u1" }), dir, { signup: "Яндекс ID" }))
       .toBe("Зарегистрировался и вошёл: Яндекс ID");
     expect(describeEvent(ev("login", { userId: "u1" }), dir, { signup: "" })).toBe("Зарегистрировался и вошёл");
-    expect(describeEvent(ev("login"), dir)).toMatch(/^Вошёл в аккаунт — дальше история/);
+    expect(describeEvent(ev("login"), dir)).toMatch(/^Вошёл или зарегистрировался — дальше история/);
   });
 
   // Строку завели, когда сессия уже была (выкат, «Учитывать снова»): входа в
@@ -89,7 +89,7 @@ describe("describeEvent", () => {
   it("показ страницы, ClientID и незнакомый тип", () => {
     expect(describeEvent(ev("pageview", { path: "/krasnodar/instrumenty?sort=new" }), dir))
       .toBe("Открыл раздел «Инструменты» · Краснодар");
-    expect(describeEvent(ev("ym_client", { props: { cid: "123" } }), dir)).toBe("ClientID Метрики: 123");
+    expect(describeEvent(ev("ym_client", { props: { cid: "123" } }), dir)).toBe("ClientID Метрики в этом визите: 123");
     expect(describeEvent(ev("weird"), dir)).toBe("Событие weird");
   });
 });

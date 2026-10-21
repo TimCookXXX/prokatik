@@ -31,7 +31,11 @@ function Item({ item, phrase }: { item: VisitItem; phrase: string }) {
 export function VisitorTimeline({ card, now }: { card: VisitorCard; now: Date }) {
   // Лента с начала строки — её первый визит продолжает вход или выход.
   const rowStart = card.truncated ? null : card.visitor.firstSource;
-  const { visits, elsewhere } = attachActions(splitVisits(card.events, undefined, rowStart), card.actions);
+  // Нынешний ClientID — в шапке карточки; в ленте — только прежние значения:
+  // по ним в Метрике находятся старые записи Вебвизора.
+  const current = card.visitor.ymClientId;
+  const events = card.events.filter((e) => !(e.type === "ym_client" && e.props.cid === current));
+  const { visits, elsewhere } = attachActions(splitVisits(events, undefined, rowStart), card.actions);
   const signupMethod = card.user ? describeSignIn(card.user.providers, card.user.hasPassword) : "";
 
   return (

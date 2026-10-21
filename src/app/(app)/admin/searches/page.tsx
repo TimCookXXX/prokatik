@@ -24,10 +24,11 @@ const TOP: StatColumn<SearchStats["top"][number]>[] = [
   { key: "lastTotal", label: t.lastTotal, numeric: true, cell: (r) => r.lastTotal ?? "—" },
 ];
 
+// Сколько людей — сразу за запросом: ради этого числа таблицу и открывают.
 const ZERO: StatColumn<SearchStats["zero"][number]>[] = [
   { key: "q", label: t.query, cell: (r) => query(r.q) },
-  { key: "reason", label: t.reason, cell: (r) => describeReason(r.reason) },
   ...numbers<SearchStats["zero"][number]>(),
+  { key: "reason", label: t.reason, cell: (r) => describeReason(r.reason) },
 ];
 
 const PARTIAL: StatColumn<SearchStats["partial"][number]>[] = [

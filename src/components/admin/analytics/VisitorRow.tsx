@@ -1,6 +1,7 @@
 // Гость в списке: кто (имя аккаунта или «Гость 7F3K»), бейджи, первый и
 // последний заход, в сколько разных дней приходил, откуда пришёл впервые,
-// устройство, сколько поисков и просмотров. Вся карточка — ссылка на ленту.
+// устройство, сколько поисков и просмотров. Вся карточка — ссылка на ленту;
+// `listQuery` — параметры списка, чтобы карточка вернула на ту же страницу.
 
 import Link from "next/link";
 import type { Route } from "next";
@@ -11,11 +12,11 @@ import { VisitorBadges } from "./VisitorBadges";
 
 const t = content.adminAnalytics.list;
 
-export function VisitorRow({ row, now }: { row: VisitorListRow; now: Date }) {
+export function VisitorRow({ row, now, listQuery = "" }: { row: VisitorListRow; now: Date; listQuery?: string }) {
   return (
     <li>
       <Link
-        href={`/admin/visitors/${row.id}` as Route}
+        href={`/admin/visitors/${row.id}${listQuery}` as Route}
         className="flex flex-col gap-1 rounded-lg border border-border bg-card px-4 py-3 hoverable"
       >
         <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
