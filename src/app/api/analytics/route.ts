@@ -90,7 +90,8 @@ function searchDraft(path: string, data: SearchPageData): Draft {
     props: {
       matched: data.matched,
       ...(data.reason ? { reason: data.reason } : {}),
-      ...(data.partial ? { partial: true, usedQuery: data.usedQuery } : {}),
+      // По части слов — часть того же текста: маскируется так же, как q.
+      ...(data.partial ? { partial: true, usedQuery: data.usedQuery ? sanitizeQuery(data.usedQuery) || null : null } : {}),
       cityIds: data.cityIds,
       dates: data.dates,
       where: data.where,

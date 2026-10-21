@@ -174,23 +174,28 @@ describe("sessionTokenLive", () => {
 });
 
 describe("pruneVisitorData", () => {
-  it("удаляет события старше срока и браузеры без активности", async () => {
+  // Старые просмотры в журнале сделок писались при рендере с аккаунтом
+  // смотревшего; политика называет для просмотров тот же срок.
+  it("удаляет события старше срока, старые events.view_listing и браузеры без активности", async () => {
     await pruneVisitorData(AT);
     expect(texts()).toEqual([
       expect.stringMatching(/^delete from "visitor_events" where "visitor_events"."created_at" < \$1/),
+      expect.stringMatching(/^delete from "events" where \("events"."event" = \$1 and "events"."created_at" < \$2\)/),
       expect.stringMatching(/^delete from "visitors" where "visitors"."last_seen_at" < \$1/),
     ]);
     const day = 24 * 60 * 60 * 1000;
-    expect(db.queries[0].params).toEqual([new Date(AT.getTime() - EVENT_RETENTION_DAYS * day).toISOString()]);
-    expect(db.queries[1].params).toEqual([new Date(AT.getTime() - VISITOR_RETENTION_DAYS * day).toISOString()]);
+    const eventsBefore = new Date(AT.getTime() - EVENT_RETENTION_DAYS * day).toISOString();
+    expect(db.queries[0].params).toEqual([eventsBefore]);
+    expect(db.queries[1].params).toEqual(["view_listing", eventsBefore]);
+    expect(db.queries[2].params).toEqual([new Date(AT.getTime() - VISITOR_RETENTION_DAYS * day).toISOString()]);
   });
 
   it("раз в сутки на процесс", async () => {
     await pruneVisitorData(AT);
     await pruneVisitorData(new Date(AT.getTime() + 23 * 60 * 60 * 1000));
-    expect(texts()).toHaveLength(2);
+    expect(texts()).toHaveLength(3);
     await pruneVisitorData(new Date(AT.getTime() + 24 * 60 * 60 * 1000));
-    expect(texts()).toHaveLength(4);
+    expect(texts()).toHaveLength(6);
   });
 
   // Роут сбора и админка — разные бандлы со своей копией модуля.
@@ -199,12 +204,12 @@ describe("pruneVisitorData", () => {
     vi.resetModules();
     const copy = await import("@/server/visitor-analytics");
     await copy.pruneVisitorData(new Date(AT.getTime() + 60 * 60 * 1000));
-    expect(texts()).toHaveLength(2);
+    expect(texts()).toHaveLength(3);
   });
 
   it("одновременный вызов ждёт идущую чистку, а не запускает вторую", async () => {
     await Promise.all([pruneVisitorData(AT), pruneVisitorData(AT)]);
-    expect(texts()).toHaveLength(2);
+    expect(texts()).toHaveLength(3);
   });
 
   it("сбой — повтор через час, а не через сутки; в лог только код", async () => {
@@ -217,7 +222,7 @@ describe("pruneVisitorData", () => {
     await pruneVisitorData(new Date(AT.getTime() + 30 * 60 * 1000));
     expect(texts()).toHaveLength(0);
     await pruneVisitorData(new Date(AT.getTime() + 60 * 60 * 1000));
-    expect(texts()).toHaveLength(2);
+    expect(texts()).toHaveLength(3);
     log.mockRestore();
   });
 });

@@ -74,6 +74,14 @@ describe("/privacy", () => {
     expect(text).toContain("содержимое переписки");
   });
 
+  // Хиты Метрики идут с адресом страницы целиком (BACKLOG, «Хиты Метрики без
+  // точки «Где»»): политика не обещает, что текст поиска до неё не доходит.
+  it("говорит, что адрес страницы в Метрике несёт текст поиска и «Где»", async () => {
+    const text = render(await PrivacyPage()).container.textContent ?? "";
+    expect(text).toContain("Адрес страницы поиска и каталога содержит текст запроса");
+    expect(text).not.toMatch(/события сайта без личных данных[^.]*без текста поиска/);
+  });
+
   it("отказ обещает удалить и историю под прежними id — сколько их помнит vid_prev", async () => {
     const text = render(await PrivacyPage()).container.textContent ?? "";
     expect(text).toContain(`до ${PREVIOUS_VISITORS_MAX} прежних идентификаторов`);

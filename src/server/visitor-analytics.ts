@@ -10,7 +10,7 @@
 
 import { and, eq, gt, lt, sql } from "drizzle-orm";
 import { getDb } from "@/lib/db";
-import { sessions, visitorEvents, visitors } from "@db/schema";
+import { events, sessions, visitorEvents, visitors } from "@db/schema";
 import { EVENT_RETENTION_DAYS, VISITOR_RETENTION_DAYS } from "@/lib/analytics/limits";
 import type { Device } from "@/lib/analytics/device";
 import type { Source } from "@/lib/analytics/source";
@@ -197,7 +197,9 @@ const lock = (): PruneLock => (G.__inrentaVisitorPrune ??= { nextAt: 0, running:
 /**
  * Чистка по сроку хранения (крона нет): события старше EVENT_RETENTION_DAYS
  * и браузеры без активности дольше VISITOR_RETENTION_DAYS — их события уходят
- * каскадом. Раз в сутки на процесс: зовут её и after() роута сбора, и чтения
+ * каскадом. Туда же — старые просмотры events.view_listing, которые страница
+ * объявления писала при рендере до своей статистики (с аккаунтом смотревшего):
+ * их уже никто не читает, а политика называет для просмотров тот же срок. Раз в сутки на процесс: зовут её и after() роута сбора, и чтения
  * админки, — что раньше случится. Второе место нужно, чтобы срок из политики
  * соблюдался и в дни без единого маяка.
  */
@@ -209,8 +211,9 @@ export function pruneVisitorData(now: Date = new Date()): Promise<void> {
   l.running = (async () => {
     try {
       const db = getDb();
-      await db.delete(visitorEvents)
-        .where(lt(visitorEvents.createdAt, new Date(now.getTime() - EVENT_RETENTION_DAYS * DAY_MS)));
+      const eventsBefore = new Date(now.getTime() - EVENT_RETENTION_DAYS * DAY_MS);
+      await db.delete(visitorEvents).where(lt(visitorEvents.createdAt, eventsBefore));
+      await db.delete(events).where(and(eq(events.event, "view_listing"), lt(events.createdAt, eventsBefore)));
       await db.delete(visitors)
         .where(lt(visitors.lastSeenAt, new Date(now.getTime() - VISITOR_RETENTION_DAYS * DAY_MS)));
     } catch (e) {

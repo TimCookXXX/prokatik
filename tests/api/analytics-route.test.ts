@@ -501,6 +501,13 @@ describe("POST /api/analytics: подписанные данные страни�
     })]);
   });
 
+  it("нашлось по части запроса — и эта часть маскируется, как q", async () => {
+    await send({ body: one("search", signPageData({ ...SEARCH, q: "дрель 912 345-67-89", usedQuery: "дрель 912 345-67-89" })) });
+    const [event] = lastWrite().events;
+    expect(event.q).toBe("дрель ***");
+    expect(event.props).toMatchObject({ partial: true, usedQuery: "дрель ***" });
+  });
+
   it("пустая выдача — причина; пустой запрос — q пустой", async () => {
     await send({ body: one("search", signPageData({ ...SEARCH, q: "", usedQuery: null, partial: false, total: 0, reason: "empty_city" })) });
     const [event] = lastWrite().events;
