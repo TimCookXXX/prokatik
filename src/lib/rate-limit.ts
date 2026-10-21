@@ -110,34 +110,45 @@ if (DISABLED) {
   console.warn("[rate-limit] ВЫКЛЮЧЕН через RATE_LIMIT_DISABLED — только для проверок");
 }
 
-// Два хранилища. В общем — вход, почта, заявки, чат: ключей немного, и
+// Хранилища. В общем — вход, почта, заявки, чат: ключей немного, и
 // вытеснение самого давнего при заполнении их не трогает. Публичные ручки
 // заводят ключ на каждый анонимный IP; в общем хранилище такой поток вытеснял
 // бы ключи `login`, `reset`, `mail_daily` и молча обнулял их. Поэтому у них
-// своё хранилище, побольше, с чисткой просроченных ключей при заполнении.
+// свои хранилища, побольше, с чисткой просроченных ключей при заполнении, —
+// по одному на длину окна (см. sweepExpired).
 const MAX_KEYS = 10_000;
 const MAX_PUBLIC_KEYS = 20_000;
 const store = new Map<string, number[]>();
-const publicStore = new Map<string, number[]>();
+const publicStores = new Map<number, Map<string, number[]>>();
+
+function publicStoreFor(windowMs: number): Map<string, number[]> {
+  let map = publicStores.get(windowMs);
+  if (!map) {
+    map = new Map();
+    publicStores.set(windowMs, map);
+  }
+  return map;
+}
 
 // Ключ при каждом успешном обращении переставляется в конец, так что порядок
 // Map — порядок последней отметки. Просроченные поэтому лежат в начале подряд:
-// чистка идёт с начала и останавливается на первом живом. Окна у публичных
-// видов одинаковые; разойдутся — чистка лишь станет менее полной, вытеснение
-// давнего всё равно держит потолок.
-function sweepExpired(map: Map<string, number[]>, now: number): void {
+// чистка идёт с начала и останавливается на первом живом. Это верно, только
+// пока окна в хранилище одинаковые, — поэтому публичные виды разложены по
+// хранилищам по длине окна. Общий Map с часовым track_new и минутными search
+// и geo останавливал бы чистку на живом часовом ключе, и вытеснение снимало бы
+// именно его — лимит заведения гостей обнулялся бы под нагрузкой.
+function sweepExpired(map: Map<string, number[]>, windowMs: number, now: number): void {
   for (const [key, stamps] of map) {
-    const kind = key.slice(key.lastIndexOf(":") + 1) as LimitKind;
     const last = stamps[stamps.length - 1];
-    if (last !== undefined && now - last < (RULES[kind]?.windowMs ?? 0)) return;
+    if (last !== undefined && now - last < windowMs) return;
     map.delete(key);
   }
 }
 
-function evictIfFull(map: Map<string, number[]>, max: number, now: number): void {
+function evictIfFull(map: Map<string, number[]>, max: number, now: number, sweepWindowMs?: number): void {
   if (map.size < max) return;
-  if (map === publicStore) {
-    sweepExpired(map, now);
+  if (sweepWindowMs !== undefined) {
+    sweepExpired(map, sweepWindowMs, now);
     if (map.size < max) return;
   }
   const firstKey = map.keys().next().value;
@@ -149,7 +160,8 @@ export function checkLimit(subject: string, kind: LimitKind): LimitResult {
   const rule = RULES[kind];
   const now = Date.now();
   const key = `${subject}:${kind}`;
-  const map = rule.store === "public" ? publicStore : store;
+  const isPublic = rule.store === "public";
+  const map = isPublic ? publicStoreFor(rule.windowMs) : store;
   const arr = map.get(key) ?? [];
 
   const fresh = arr.filter((t) => now - t < rule.windowMs);
@@ -168,12 +180,15 @@ export function checkLimit(subject: string, kind: LimitKind): LimitResult {
 
   fresh.push(now);
   if (map.has(key)) map.delete(key);
-  evictIfFull(map, rule.store === "public" ? MAX_PUBLIC_KEYS : MAX_KEYS, now);
+  if (isPublic) evictIfFull(map, MAX_PUBLIC_KEYS, now, rule.windowMs);
+  else evictIfFull(map, MAX_KEYS, now);
   map.set(key, fresh);
   return { ok: true };
 }
 
-export function _resetForTests(): void { store.clear(); publicStore.clear(); }
+export function _resetForTests(): void { store.clear(); publicStores.clear(); }
 export function _storeSizesForTests(): { private: number; public: number } {
-  return { private: store.size, public: publicStore.size };
+  let pub = 0;
+  for (const map of publicStores.values()) pub += map.size;
+  return { private: store.size, public: pub };
 }

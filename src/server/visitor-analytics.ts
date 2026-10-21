@@ -184,8 +184,15 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 /** Не вышло — следующая попытка через час, а не через сутки. */
 const PRUNE_RETRY_MS = 60 * 60 * 1000;
 
-let nextPruneAt = 0;
-let pruning: Promise<void> | null = null;
+// Замок — на globalThis: роут сбора и страницы админки зовут чистку из разных
+// бандлов со своей копией модуля, и замок в переменной модуля был бы у каждой
+// свой (как кэши в src/server/search-index.ts).
+interface PruneLock {
+  nextAt: number;
+  running: Promise<void> | null;
+}
+const G = globalThis as { __inrentaVisitorPrune?: PruneLock };
+const lock = (): PruneLock => (G.__inrentaVisitorPrune ??= { nextAt: 0, running: null });
 
 /**
  * Чистка по сроку хранения (крона нет): события старше EVENT_RETENTION_DAYS
@@ -195,10 +202,11 @@ let pruning: Promise<void> | null = null;
  * соблюдался и в дни без единого маяка.
  */
 export function pruneVisitorData(now: Date = new Date()): Promise<void> {
-  if (pruning) return pruning;
-  if (now.getTime() < nextPruneAt) return Promise.resolve();
-  nextPruneAt = now.getTime() + DAY_MS;
-  pruning = (async () => {
+  const l = lock();
+  if (l.running) return l.running;
+  if (now.getTime() < l.nextAt) return Promise.resolve();
+  l.nextAt = now.getTime() + DAY_MS;
+  l.running = (async () => {
     try {
       const db = getDb();
       await db.delete(visitorEvents)
@@ -206,13 +214,13 @@ export function pruneVisitorData(now: Date = new Date()): Promise<void> {
       await db.delete(visitors)
         .where(lt(visitors.lastSeenAt, new Date(now.getTime() - VISITOR_RETENTION_DAYS * DAY_MS)));
     } catch (e) {
-      nextPruneAt = now.getTime() + PRUNE_RETRY_MS;
+      l.nextAt = now.getTime() + PRUNE_RETRY_MS;
       console.error("[analytics] чистка по сроку не удалась:", dbErrorCode(e));
     } finally {
-      pruning = null;
+      l.running = null;
     }
   })();
-  return pruning;
+  return l.running;
 }
 
 /**
@@ -227,6 +235,5 @@ export function dbErrorCode(e: unknown): string {
 
 /** Только для тестов: замок чистки в исходное состояние. */
 export function _resetPruneForTests(): void {
-  nextPruneAt = 0;
-  pruning = null;
+  G.__inrentaVisitorPrune = { nextAt: 0, running: null };
 }

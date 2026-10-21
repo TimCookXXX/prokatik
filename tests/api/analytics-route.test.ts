@@ -11,7 +11,6 @@ const state = vi.hoisted(() => ({
   stored: null as null | {
     userId: string | null; isInternal: boolean; ymClientId: string | null; hasEvents: boolean; lastSeenAt?: Date;
   },
-  capOk: true,
   sessionLive: false,
 }));
 const LAST_SEEN = new Date("2026-10-20T08:00:00.000Z");
@@ -30,9 +29,6 @@ vi.mock("@/server/visitor-analytics", () => ({
   pruneVisitorData: vi.fn(async () => {}),
   dbErrorCode: () => "x",
 }));
-vi.mock("@/lib/analytics/daily-cap", () => ({
-  visitorEventsCap: { take: vi.fn(() => state.capOk), reachedToday: () => false },
-}));
 
 import { POST } from "@/app/api/analytics/route";
 import { auth } from "@/lib/auth";
@@ -44,6 +40,8 @@ import { TRACK_BODY_MAX_BYTES, TRACK_TOKEN_TTL_HOURS } from "@/lib/analytics/lim
 import { signPageData, type PageData } from "@/lib/analytics/token";
 import { decodeTime } from "ulid";
 import { visitorSwitchGuard } from "@/lib/analytics/switch-guard";
+import { _resetVisitorCapsForTests, visitorEventsCap } from "@/lib/analytics/daily-cap";
+import { DAILY_EVENTS_PER_IP, DAILY_EVENTS_PER_VISITOR, TRACK_BATCH_MAX } from "@/lib/analytics/limits";
 
 const VID = "0f8fad5b-d9cb-469f-a165-70867728950e";
 const ORIGIN = "http://localhost:3000";
@@ -91,7 +89,7 @@ beforeEach(() => {
   _resetForTests();
   state.after = [];
   state.stored = null;
-  state.capOk = true;
+  _resetVisitorCapsForTests();
   state.sessionLive = false;
   visitorSwitchGuard.clear();
   vi.mocked(sessionTokenLive).mockClear();
@@ -219,9 +217,38 @@ describe("POST /api/analytics: лимиты", () => {
   });
 
   it("суточный потолок — события отбрасываются", async () => {
-    state.capOk = false;
+    const take = vi.spyOn(visitorEventsCap, "take").mockReturnValueOnce(false);
     await send();
     expect(writeVisitorBatch).not.toHaveBeenCalled();
+    take.mockRestore();
+  });
+
+  // Лимиты запросов считают пачки, а в пачке до TRACK_BATCH_MAX событий: без
+  // долей по событиям один скрипт выбрал бы общий потолок за минуты.
+  const FULL = { events: Array.from({ length: TRACK_BATCH_MAX }, (_, i) => ({ type: "pageview", path: `/p${i}` })) };
+  const vidN = (i: number) => `0f8fad5b-d9cb-469f-a165-${String(i).padStart(12, "0")}`;
+
+  it("доля браузера в сутки — по событиям, а не по пачкам", async () => {
+    state.stored = { userId: null, isInternal: false, ymClientId: null, hasEvents: true };
+    const batches = DAILY_EVENTS_PER_VISITOR / TRACK_BATCH_MAX;
+    for (let i = 0; i < batches; i++) await send({ body: FULL, ip: `10.0.${i}.1` });
+    expect(writeVisitorBatch).toHaveBeenCalledTimes(batches);
+    await send({ body: FULL, ip: "10.9.9.9" });
+    expect(writeVisitorBatch).toHaveBeenCalledTimes(batches);
+    // Другой браузер пишется дальше.
+    await send({ body: FULL, vid: vidN(1), ip: "10.9.9.9" });
+    expect(writeVisitorBatch).toHaveBeenCalledTimes(batches + 1);
+  });
+
+  it("доля IP в сутки — и с разных id браузера", async () => {
+    state.stored = { userId: null, isInternal: false, ymClientId: null, hasEvents: true };
+    const batches = DAILY_EVENTS_PER_IP / TRACK_BATCH_MAX;
+    for (let i = 0; i < batches; i++) await send({ body: FULL, vid: vidN(i % 10) });
+    expect(writeVisitorBatch).toHaveBeenCalledTimes(batches);
+    await send({ body: FULL, vid: vidN(99) });
+    expect(writeVisitorBatch).toHaveBeenCalledTimes(batches);
+    await send({ body: FULL, vid: vidN(99), ip: "5.6.7.8" });
+    expect(writeVisitorBatch).toHaveBeenCalledTimes(batches + 1);
   });
 });
 

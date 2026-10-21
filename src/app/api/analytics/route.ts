@@ -32,7 +32,7 @@ import { TRACK_BODY_MAX_BYTES } from "@/lib/analytics/limits";
 import { entryOf, sanitizePath, sanitizeQuery } from "@/lib/analytics/sanitize";
 import { verifyPageData, type SearchPageData, type SignedPageData } from "@/lib/analytics/token";
 import { classifySource, type Source } from "@/lib/analytics/source";
-import { visitorEventsCap } from "@/lib/analytics/daily-cap";
+import { takeVisitorEvents } from "@/lib/analytics/daily-cap";
 import { createNoSessionCache } from "@/lib/analytics/no-session-cache";
 import { visitorSwitchGuard as switchGuard } from "@/lib/analytics/switch-guard";
 import {
@@ -246,7 +246,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const markGuest = switching && decision.guestLogin && reissued === null && stored !== null;
   const eventCount = final.length + (login ? 1 : 0) + (markGuest ? 1 : 0);
   if (eventCount === 0) return noContent();
-  if (!visitorEventsCap.take(eventCount)) return noContent();
+  if (!takeVisitorEvents(ip, visitorId, eventCount)) return noContent();
 
   const at = new Date();
   const stamp = (d: Draft): NewVisitorEvent => ({ ...d, id: newSortableId(), createdAt: at });

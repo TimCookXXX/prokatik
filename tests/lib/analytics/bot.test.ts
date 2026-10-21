@@ -19,6 +19,14 @@ describe("isBotUserAgent", () => {
     "curl/8.4.0",
     "Wget/1.21.4",
     "python-requests/2.31.0",
+    // Проверки, которые исполняют JS, а webdriver не выставляют.
+    "Mozilla/5.0 (Linux; Android 6.0.1; Nexus 5X Build/MMB29P) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.6723.69 Mobile Safari/537.36 (compatible; Google-InspectionTool/1.0;)",
+    "Mozilla/5.0 (Linux; Android 11; moto g power (2022)) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36 Chrome-Lighthouse",
+    "Mozilla/5.0 (Linux; Android 6.0.1; Nexus 5X Build/MMB29P) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36 (compatible; AdsBot-Google-Mobile; +http://www.google.com/mobile/adsbot.html)",
+    "Mediapartners-Google",
+    "Mozilla/5.0 (compatible; Storebot-Google/1.0; +http://google.com/storebot)",
+    "Mozilla/5.0 (compatible; GoogleOther)",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_5) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.1.1 Safari/605.1.15 (Applebot/0.1; +http://www.apple.com/go/applebot)",
     SEO_CHECK_UA,
     "",
     "   ",
@@ -34,6 +42,8 @@ describe("isBotUserAgent", () => {
     "Mozilla/5.0 (Linux; arm_64; Android 14; SM-A546E) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.6613.146 YaApp_Android/24.104.1 YaSearchBrowser/24.104.1 BroPP/1.0 SA/3 Mobile Safari/537.36",
     "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1",
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:131.0) Gecko/20100101 Firefox/131.0",
+    // Телефон CUBOT — человек, хоть в имени и «bot».
+    "Mozilla/5.0 (Linux; Android 12; CUBOT KINGKONG 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36",
     // «Как браузер» в seo-check — ровно для того, чтобы выглядеть человеком.
     SEO_CHECK_BROWSER_UA,
   ])("человек: %s", (ua) => {

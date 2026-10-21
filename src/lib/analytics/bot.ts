@@ -5,12 +5,16 @@
 // браузера. Его спрашивают middleware (кука vid) и роут сбора.
 //
 // Браузер и приложение Яндекса (YaBrowser, YaApp, YaSearchBrowser) — люди,
-// поэтому в списке названия роботов целиком, а не общее «yandex».
+// поэтому в списке названия роботов целиком, а не общее «yandex». Общего «bot»
+// нет по той же причине: он ловил бы телефоны CUBOT. Проверки Search Console
+// (Google-InspectionTool) и PageSpeed (Chrome-Lighthouse) исполняют JS и
+// навигатор webdriver не выставляют — их ловит только имя.
 // Пустой User-Agent браузеры не шлют — это скрипт.
 
 const BOT_UA = new RegExp([
   "YandexBot", "YandexMetrika", "YandexRenderResourcesBot", "YandexScreenshotBot", "YandexMobileBot",
-  "Googlebot", "bingbot", "TelegramBot", "vkShare", "facebookexternalhit",
+  "Googlebot", "Google-InspectionTool", "GoogleOther", "AdsBot-Google", "Mediapartners-Google", "Storebot-Google",
+  "Chrome-Lighthouse", "Applebot", "bingbot", "TelegramBot", "vkShare", "facebookexternalhit",
   "HeadlessChrome", "\\bcurl/", "\\bwget/", "python-requests",
 ].join("|"), "i");
 

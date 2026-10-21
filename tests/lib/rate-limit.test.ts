@@ -159,6 +159,24 @@ describe("rate limit: публичные ручки", () => {
     }
   });
 
+  // track_new — окно в час, у search и geo — минута. В общем хранилище живой
+  // часовой ключ останавливал бы чистку, и вытеснение снимало бы его первым.
+  it("a flood of minute-window keys does not reset the hourly track_new limit", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-10-03T12:00:00Z"));
+      for (let i = 0; i < 20; i++) expect(checkLimit("9.9.9.9", "track_new").ok).toBe(true);
+      expect(checkLimit("9.9.9.9", "track_new").ok).toBe(false);
+
+      vi.setSystemTime(new Date("2026-10-03T12:10:00Z"));
+      for (let i = 0; i < 25_000; i++) checkLimit(`10.3.${i >> 8}.${i & 255}`, "search");
+
+      expect(checkLimit("9.9.9.9", "track_new").ok).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("limits address suggestions as geo: 300 a minute per ip, apart from search", () => {
     for (let i = 0; i < 300; i++) expect(checkLimit("1.2.3.4", "geo")).toEqual({ ok: true });
     expect(checkLimit("1.2.3.4", "geo").ok).toBe(false);

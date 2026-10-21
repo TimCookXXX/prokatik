@@ -193,6 +193,15 @@ describe("pruneVisitorData", () => {
     expect(texts()).toHaveLength(4);
   });
 
+  // Роут сбора и админка — разные бандлы со своей копией модуля.
+  it("замок один на процесс, а не на копию модуля", async () => {
+    await pruneVisitorData(AT);
+    vi.resetModules();
+    const copy = await import("@/server/visitor-analytics");
+    await copy.pruneVisitorData(new Date(AT.getTime() + 60 * 60 * 1000));
+    expect(texts()).toHaveLength(2);
+  });
+
   it("одновременный вызов ждёт идущую чистку, а не запускает вторую", async () => {
     await Promise.all([pruneVisitorData(AT), pruneVisitorData(AT)]);
     expect(texts()).toHaveLength(2);

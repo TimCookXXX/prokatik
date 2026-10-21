@@ -1,7 +1,7 @@
 // @vitest-environment node
 // Мелкие части сбора: суточный потолок, отрицательный кеш сессий, устройство.
 import { describe, expect, it, vi } from "vitest";
-import { createDailyCap } from "@/lib/analytics/daily-cap";
+import { createDailyBudget, createDailyCap } from "@/lib/analytics/daily-cap";
 import { NO_SESSION_TTL_MS, createNoSessionCache } from "@/lib/analytics/no-session-cache";
 import { deviceOf } from "@/lib/analytics/device";
 
@@ -37,6 +37,47 @@ describe("createDailyCap", () => {
     expect(cap.take(4, at("2026-10-21T09:00:00Z"))).toBe(true);
     expect(cap.take(2, at("2026-10-21T09:00:01Z"))).toBe(false);
     expect(cap.take(1, at("2026-10-21T09:00:02Z"))).toBe(true);
+  });
+});
+
+// Роут сбора и страницы админки — разные бандлы со своей копией модуля:
+// плашка «потолок достигнут» должна видеть то, что списал роут.
+describe("общий потолок — один на процесс, а не на копию модуля", () => {
+  it("копия модуля, загруженная заново, видит списанное другой", async () => {
+    vi.resetModules();
+    const a = await import("@/lib/analytics/daily-cap");
+    a._resetVisitorCapsForTests();
+    const now = at("2026-10-21T09:00:00Z");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(a.visitorEventsCap.take(Number.MAX_SAFE_INTEGER, now)).toBe(false);
+    warn.mockRestore();
+    vi.resetModules();
+    const b = await import("@/lib/analytics/daily-cap");
+    expect(b).not.toBe(a);
+    expect(b.visitorEventsCap.reachedToday(now)).toBe(true);
+    b._resetVisitorCapsForTests();
+  });
+});
+
+describe("createDailyBudget", () => {
+  it("доля на ключ в московские сутки", () => {
+    const budget = createDailyBudget(10);
+    const t = at("2026-10-21T09:00:00Z");
+    expect(budget.fits("ip1", 10, t)).toBe(true);
+    budget.take("ip1", 8, t);
+    expect(budget.fits("ip1", 3, t)).toBe(false);
+    expect(budget.fits("ip2", 10, t)).toBe(true);
+    expect(budget.fits("ip1", 3, at("2026-10-21T21:00:00Z"))).toBe(true);
+  });
+
+  it("ограничен по числу ключей: вытесняется самый давний", () => {
+    const budget = createDailyBudget(1, 2);
+    const t = at("2026-10-21T09:00:00Z");
+    budget.take("a", 1, t);
+    budget.take("b", 1, t);
+    budget.take("c", 1, t);
+    expect(budget.fits("a", 1, t)).toBe(true);
+    expect(budget.fits("c", 1, t)).toBe(false);
   });
 });
 

@@ -116,13 +116,19 @@ describe("middleware matcher", () => {
       "/opengraph-image",
       "/icons/icon-192.png",
       "/manifest.webmanifest",
+      // Ответы, которые можно положить в общий кэш: Set-Cookie: vid на них
+      // раздал бы один id многим браузерам.
+      "/covers/01ABC.webp",
+      "/demo/1.webp",
+      "/mock/x.png",
+      "/api/geo/client-index?region=krasnodar&v=3",
     ]) {
       expect(pattern.test(path), `${path} must be skipped`).toBe(false);
     }
   });
 
   it("covers application routes", () => {
-    for (const path of ["/", "/kazan", "/cabinet", "/admin/cities", "/api/health"]) {
+    for (const path of ["/", "/kazan", "/cabinet", "/admin/cities", "/api/health", "/api/analytics", "/api/geo/suggest", "/democracy"]) {
       expect(pattern.test(path), `${path} must be matched`).toBe(true);
     }
   });

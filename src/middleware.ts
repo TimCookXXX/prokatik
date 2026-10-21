@@ -111,6 +111,11 @@ export const config = {
     // icon.svg, apple-icon.png и opengraph-image — метаданные-роуты Next из
     // src/app/, лежат в корне рядом с favicon.ico. Без них в списке middleware
     // отрабатывал бы на каждом запросе картинки впустую.
-    "/((?!_next/static|_next/image|favicon\\.ico|icon\\.svg|apple-icon\\.png|opengraph-image|icons/.*|manifest\\.webmanifest).*)",
+    //
+    // Файлы public/ (covers, demo, mock) и индекс подсказок адресов
+    // (/api/geo/client-index, public и immutable) — ответы, которые можно
+    // положить в общий кэш. Set-Cookie: vid на них общий кэш раздал бы многим
+    // браузерам, и разные люди стали бы одним гостем.
+    "/((?!_next/static|_next/image|favicon\\.ico|icon\\.svg|apple-icon\\.png|opengraph-image|icons/.*|manifest\\.webmanifest|covers/|demo/|mock/|api/geo/client-index).*)",
   ],
 };
