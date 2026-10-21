@@ -109,6 +109,20 @@ describe("metrikaInitSnippet", () => {
     },
   );
 
+  it("после отказа от учёта не грузит tag.js, не делает init и не заводит ym", () => {
+    document.cookie = "noanalytics=1; path=/";
+    try {
+      delete (window as unknown as Record<string, unknown>).ym;
+      delete (globalThis as unknown as Record<string, unknown>).ym;
+      const before = document.querySelectorAll('script[src*="mc.yandex.ru"]').length;
+      new Function(metrikaInitSnippet(42))();
+      expect(window.ym).toBeUndefined();
+      expect(document.querySelectorAll('script[src*="mc.yandex.ru"]').length).toBe(before);
+    } finally {
+      document.cookie = "noanalytics=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/";
+    }
+  });
+
   it("на публичной странице с «admin» в адресе работает как обычно", () => {
     window.history.replaceState(null, "", "/krasnodar/administrator");
     expect(runInit().webvisor).toBe(true);
@@ -288,6 +302,19 @@ describe("<MetrikaGoals>", () => {
     reachGoal("booking_sent");
     expect(ym).not.toHaveBeenCalled();
     expect(_pendingGoalsForTests()).toEqual([]);
+  });
+
+  it("после отказа от учёта отбрасывает очередь и не шлёт новых целей", () => {
+    document.cookie = "noanalytics=1; path=/";
+    try {
+      reachGoal("listing_view");
+      render(<MetrikaGoals id={42} />);
+      reachGoal("booking_sent");
+      expect(ym).not.toHaveBeenCalled();
+      expect(_pendingGoalsForTests()).toEqual([]);
+    } finally {
+      document.cookie = "noanalytics=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/";
+    }
   });
 
   // Порядок эффектов — <Script> раньше MetrikaGoals — юнит-тестом не поймать:

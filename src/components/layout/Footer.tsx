@@ -74,7 +74,10 @@ export function Footer({ cities = [] }: { cities?: readonly FooterCity[] }) {
         <div className="mt-9 flex items-end justify-between gap-4">
           <div className="flex min-w-0 flex-col gap-1.5 text-xs text-muted-foreground">
             <p>
-              {content.copyright} · {content.footer.disclaimer}
+              {content.copyright} · {content.footer.disclaimer}{" "}
+              <Link href="/privacy#opt-out" className={creditLink}>
+                {content.footer.optOutLink}
+              </Link>
             </p>
             {/* Атрибуция данных геокодера: ODbL требует видимую ссылку на
              * условия OSM, подробности и предложение базы — на /sources. */}

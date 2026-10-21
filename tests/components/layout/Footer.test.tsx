@@ -11,6 +11,13 @@ describe("<Footer>", () => {
     expect(link.getAttribute("href")).toBe("/privacy");
   });
 
+  // Якорь — id раздела «Как отказаться от учёта» на /privacy.
+  it("ведёт к отказу от учёта на /privacy", () => {
+    const { getByText } = render(<Footer />);
+    const link = getByText(content.footer.optOutLink) as HTMLAnchorElement;
+    expect(link.getAttribute("href")).toBe("/privacy#opt-out");
+  });
+
   it("атрибутирует OSM и ГАР и ведёт на /sources", () => {
     const { container, getByText } = render(<Footer />);
     const credits = content.footer.dataCredits;

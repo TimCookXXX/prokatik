@@ -6,6 +6,8 @@ import { usePathname, useSearchParams } from "next/navigation";
 import { startGoals, stopGoals } from "./goals";
 import { METRIKA_SKIPPED_PATH, isMetrikaSkipped, metrikaSafeHref } from "./metrika-url";
 import { reloadDocument } from "./document-nav";
+import { analyticsAllowedHere } from "./allowed-here";
+import { ANALYTICS_ALLOWED_JS } from "@/lib/analytics/allowed";
 
 declare global {
   interface Window {
@@ -19,13 +21,15 @@ interface Props {
 
 // Код счётчика. Вебвизор включается опцией init `webvisor`, а не только
 // галочкой в настройках счётчика: без неё записей визитов нет. На путях
-// METRIKA_SKIPPED_PATH сниппет не грузит tag.js и не заводит window.ym.
+// METRIKA_SKIPPED_PATH и после отказа от учёта (analyticsAllowed, кука
+// noanalytics) сниппет не грузит tag.js и не заводит window.ym.
 // clean() — та же чистка адреса, что metrikaSafeHref (metrika-url.ts), на JS.
 export function metrikaInitSnippet(id: number): string {
   return `
     (function(){
       var skip = ${METRIKA_SKIPPED_PATH};
       if (skip.test(location.pathname)) return;
+      if (!(${ANALYTICS_ALLOWED_JS})) return;
       (function(m,e,t,r,i,k,a){m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};
       m[i].l=1*new Date();
       for (var j = 0; j < document.scripts.length; j++) {if (document.scripts[j].src === r) { return; }}
@@ -82,13 +86,13 @@ export const GOALS_ATTACH_STEP_MS = 100;
 // следом за <Script>: эффекты соседей идут по порядку, а Script исполняет
 // инлайн-сниппет синхронно в своём эффекте — обычно к этому моменту window.ym
 // уже заведён. Выключаются цели только там, где счётчика на этой загрузке
-// документа точно не будет, — в админке, по пути. На публичной странице ym
-// ждём, а не выключаем: сменись порядок эффектов, ошибка стоила бы задержки, а
-// не всех целей до следующей загрузки. Не дождались — очередь остаётся
-// ждать со своим потолком.
+// документа точно не будет, — в админке, по пути, и после отказа от учёта.
+// На публичной странице ym ждём, а не выключаем: сменись порядок эффектов,
+// ошибка стоила бы задержки, а не всех целей до следующей загрузки. Не
+// дождались — очередь остаётся ждать со своим потолком.
 export function MetrikaGoals({ id }: { id: number }) {
   useEffect(() => {
-    if (isMetrikaSkipped(window.location.pathname)) {
+    if (isMetrikaSkipped(window.location.pathname) || !analyticsAllowedHere()) {
       stopGoals();
       return;
     }

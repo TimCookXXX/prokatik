@@ -12,7 +12,8 @@ import { YandexMetrika } from "@/components/analytics/YandexMetrika";
 import "./globals.css";
 import "@theme/tokens.css";
 import "@theme/typography.css";
-import { headers } from "next/headers";
+import { cookies, headers } from "next/headers";
+import { analyticsAllowed } from "@/lib/analytics/allowed";
 import { resolveViewerCity } from "@/server/city";
 import { getActiveCities } from "@/server/catalog";
 import { CityPreferenceProvider } from "@/components/layout/CityPreference";
@@ -69,10 +70,15 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   // resolveViewerCity, шапка и таб-бар: лишнего запроса нет. Ловить его отказ
   // здесь бессмысленно — тот же промис уже ждёт resolveViewerCity рядом, и без
   // базы layout падает и так.
-  const [hasSession, viewerCity, footerCities] = await Promise.all([
+  //
+  // Отказ от учёта (кука noanalytics с /privacy) снимает счётчик целиком,
+  // вместе с noscript-пикселем. Решение на загрузку документа: после отказа
+  // страница перезагружается. Инлайн-сниппет проверяет то же сам.
+  const [hasSession, viewerCity, footerCities, trackingAllowed] = await Promise.all([
     headers().then((h) => h.get("x-has-session") === "1"),
     resolveViewerCity(),
     getActiveCities(),
+    cookies().then((jar) => analyticsAllowed((name) => jar.get(name)?.value)),
   ]);
 
   return (
@@ -82,7 +88,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       className={`${fontDisplay.variable} ${fontText.variable} ${fontMark.variable} ${fontMono.variable}`}
     >
       <body className="bg-background text-foreground font-sans antialiased min-h-screen flex flex-col">
-        {process.env.NODE_ENV === "production" && process.env.YANDEX_METRIKA_ID && (
+        {process.env.NODE_ENV === "production" && process.env.YANDEX_METRIKA_ID && trackingAllowed && (
           <YandexMetrika counterId={process.env.YANDEX_METRIKA_ID} />
         )}
         <RealtimeProvider enabled={hasSession}>
