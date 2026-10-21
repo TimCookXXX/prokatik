@@ -28,6 +28,32 @@ describe("session callback", () => {
     expect(s.user.signup).toEqual({ createdAt: "2026-10-21T10:00:00.000Z", emailVerified: null });
   });
 
+  // Результат callback'а уходит браузеру по GET /api/auth/session — любому
+  // скрипту страницы, включая чужой tag.js. Auth.js кладёт в аргументы токен
+  // сессии и всю строку пользователя; наружу — только перечисленное.
+  it("отдаёт только нужные поля: без токена сессии, хэша пароля и телефона", () => {
+    const expires = new Date("2026-11-20T10:00:00.000Z");
+    const row = {
+      id: "u1", email: "a@ya.ru", name: "Аня", image: null, role: "user",
+      bannedAt: null, banReason: null, phone: "+79990000000", passwordHash: "$argon2id$secret",
+      cityId: "c1", bio: "о себе", createdAt: new Date("2026-10-21T10:00:00.000Z"), emailVerified: null,
+    };
+    const cb = buildEdgeConfig().callbacks!.session! as unknown as (a: unknown) => Record<string, unknown>;
+    const out = cb({
+      session: { sessionToken: "tok", userId: "u1", expires, user: row },
+      user: row,
+    });
+    expect(Object.keys(out).sort()).toEqual(["expires", "user"]);
+    expect(out.expires).toBe(expires);
+    expect(Object.keys(out.user as object).sort()).toEqual(
+      ["banReason", "bannedAt", "email", "id", "image", "name", "role", "signup"],
+    );
+    const json = JSON.stringify(out);
+    expect(json).not.toContain("tok");
+    expect(json).not.toContain("argon2id");
+    expect(json).not.toContain("+7999");
+  });
+
   it("сохраняет роль и бан, как раньше", () => {
     const s = run({ role: "admin", createdAt: new Date(), emailVerified: null });
     expect(s.user).toMatchObject({ id: "u1", role: "admin", bannedAt: null, banReason: null });

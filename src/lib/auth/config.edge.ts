@@ -16,19 +16,32 @@ export function buildEdgeConfig(): NextAuthConfig {
     secret: env.NEXTAUTH_SECRET,
     pages: { signIn: "/login" },
     callbacks: {
+      // Сессия собирается заново, а не правится на месте: Auth.js отдаёт сюда
+      // строку сессии вместе с токеном и всю строку пользователя (хэш пароля,
+      // телефон), и то, что вернёт callback, уходит и в auth(), и браузеру по
+      // GET /api/auth/session — любому скрипту страницы. Новое поле сессии —
+      // только сюда и только то, что можно показать.
       session({ session, user }) {
-        session.user.id = user.id;
-        session.user.role = user.role ?? "user";
-        session.user.bannedAt = user.bannedAt ?? null;
-        session.user.banReason = user.banReason ?? null;
-        // Свежесть аккаунта для цели «Зарегистрировался» (lib/analytics/signup.ts):
-        // строка пользователя уже прочитана адаптером, запроса не добавляет.
-        // Строками: auth() отдаёт сессию через JSON, и Date до страниц не доезжает.
-        session.user.signup = {
-          createdAt: isoOrNull(user.createdAt),
-          emailVerified: isoOrNull(user.emailVerified),
+        return {
+          expires: session.expires,
+          user: {
+            id: user.id,
+            name: user.name ?? null,
+            email: user.email,
+            image: user.image ?? null,
+            role: user.role ?? "user",
+            bannedAt: user.bannedAt ?? null,
+            banReason: user.banReason ?? null,
+            // Свежесть аккаунта для цели «Зарегистрировался»
+            // (lib/analytics/signup.ts): строка пользователя уже прочитана
+            // адаптером, запроса не добавляет. Строками: auth() отдаёт сессию
+            // через JSON, и Date до страниц не доезжает.
+            signup: {
+              createdAt: isoOrNull(user.createdAt),
+              emailVerified: isoOrNull(user.emailVerified),
+            },
+          },
         };
-        return session;
       },
     },
   };
