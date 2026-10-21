@@ -381,7 +381,9 @@ export function ThreadView({
         if (mode.kind === "new") {
           const res = await startThread({ listingId: mode.listingId, body });
           if (!res.ok) { fail(res.error); return; }
-          reachGoal("chat_started");
+          // Тред уже был (его завела заявка из другой вкладки) — сообщение
+          // дописано в него, и это не начало переписки.
+          if (res.data.created) reachGoal("chat_started");
           upsert([res.data.message]);
           setPending([]);
           router.replace(`/chat/${res.data.threadId}` as never);

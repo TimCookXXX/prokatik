@@ -398,7 +398,7 @@ curl -s localhost:3000/manifest.webmanifest
 | `booking_click` | «Забронировать» (`BookingWidget`) | `authed`: в аккаунте или дальше окно входа |
 | `signup` | первая загрузка страницы после регистрации (см. ниже) | `method`: `email`, `yandex`, `vk`, `other` |
 | `booking_sent` | заявка отправлена (`BookingFormDialog`) | — |
-| `chat_started` | первое сообщение владельцу, новая переписка (`ThreadView`) | — |
+| `chat_started` | первое сообщение владельцу, новая переписка (`ThreadView`): только когда тред завёл сам этот вызов (`created` у `startThread`); сообщение, дописанное в тред, который уже завела заявка, — не в счёт | — |
 | `listing_started` | первое изменение поля в форме нового объявления; правка — не в счёт | — |
 | `listing_created` | новое объявление сохранено (`ListingForm`) | — |
 

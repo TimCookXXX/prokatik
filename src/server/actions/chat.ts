@@ -110,7 +110,7 @@ async function insertMessage(
 
 export async function startThread(
   input: unknown,
-): Promise<ActionResult<{ threadId: string; message: SentMessage }>> {
+): Promise<ActionResult<{ threadId: string; message: SentMessage; created: boolean }>> {
   const session = await auth();
   if (!session?.user?.id) return { ok: false, error: "auth_required" };
   const viewer = { id: session.user.id, bannedAt: session.user.bannedAt ?? null };
@@ -152,19 +152,22 @@ export async function startThread(
     if (!threadLimit.ok) return { ok: false, error: `rate_limited:${threadLimit.retryAfterSec}` };
   }
 
-  const message = await db.transaction(async (tx) => {
+  const { message, created } = await db.transaction(async (tx) => {
     let threadId = existing;
+    let created = false;
     if (!threadId) {
       // Гонка двух вкладок: UNIQUE (listing_id, customer_user_id) не даст завести
       // второй тред, а повторный SELECT достаёт того, кто выиграл.
-      await tx.insert(chatThreads)
+      const inserted = await tx.insert(chatThreads)
         .values({
           id: newId(),
           listingId,
           customerUserId: viewer.id,
           ownerUserId: listing.ownerUserId,
         })
-        .onConflictDoNothing();
+        .onConflictDoNothing()
+        .returning({ id: chatThreads.id });
+      created = inserted.length > 0;
       const rows = await tx.select({ id: chatThreads.id })
         .from(chatThreads)
         .where(and(
@@ -175,10 +178,13 @@ export async function startThread(
       threadId = rows[0].id;
     }
     // Тред заводит арендатор, владельцу это запрещено правилом own_listing.
-    return insertMessage(tx, threadId, viewer.id, false, body, listing.ownerUserId);
+    return { message: await insertMessage(tx, threadId, viewer.id, false, body, listing.ownerUserId), created };
   });
 
-  return { ok: true, data: { threadId: message.threadId, message } };
+  // created — переписку завёл именно этот вызов. Тред мог появиться раньше
+  // (заметка о заявке из другой вкладки, гонка двух вкладок), и тогда
+  // сообщение просто дописано в него: для цели «Начал переписку» это не начало.
+  return { ok: true, data: { threadId: message.threadId, message, created } };
 }
 
 export async function postMessage(

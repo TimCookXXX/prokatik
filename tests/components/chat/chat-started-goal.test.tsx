@@ -46,11 +46,26 @@ function send(text: string) {
 
 describe("цель chat_started", () => {
   it("новая переписка — одна цель без параметров", async () => {
-    chat.startThread.mockResolvedValue({ ok: true, data: { threadId: "01T", message: message("01A", "Здравствуйте") } });
+    chat.startThread.mockResolvedValue({
+      ok: true, data: { threadId: "01T", message: message("01A", "Здравствуйте"), created: true },
+    });
     render(<ThreadView mode={{ kind: "new", listingId: "01L" }} viewerId="01ME" initialMessages={[]} initialHasMore={false} />);
     send("Здравствуйте");
     await waitFor(() => expect(replace).toHaveBeenCalledWith("/chat/01T"));
     expect(reachGoal.mock.calls).toEqual([["chat_started"]]);
+  });
+
+  // Композер «Написать» открыт в одной вкладке, а заявка из другой уже завела
+  // тред заметкой о сделке: startThread дописывает в него. Переписка началась
+  // с заявки, а не со «спрошу сначала».
+  it("тред уже был — сообщение дописано, цели нет", async () => {
+    chat.startThread.mockResolvedValue({
+      ok: true, data: { threadId: "01T", message: message("01A", "Здравствуйте"), created: false },
+    });
+    render(<ThreadView mode={{ kind: "new", listingId: "01L" }} viewerId="01ME" initialMessages={[]} initialHasMore={false} />);
+    send("Здравствуйте");
+    await waitFor(() => expect(replace).toHaveBeenCalledWith("/chat/01T"));
+    expect(reachGoal).not.toHaveBeenCalled();
   });
 
   it("отказ сервера — цели нет", async () => {
