@@ -7,6 +7,7 @@ import { startGoals, stopGoals } from "./goals";
 import { METRIKA_SKIPPED_PATH, isMetrikaSkipped, metrikaSafeHref } from "./metrika-url";
 import { reloadDocument } from "./document-nav";
 import { analyticsAllowedHere } from "./allowed-here";
+import { track } from "./track";
 import { ANALYTICS_ALLOWED_JS } from "@/lib/analytics/allowed";
 
 declare global {
@@ -99,13 +100,29 @@ export function MetrikaGoals({ id }: { id: number }) {
     let tries = 0;
     let timer: number | undefined;
     const attach = () => {
-      if (typeof window.ym === "function") startGoals(id);
-      else if (++tries < GOALS_ATTACH_TRIES) timer = window.setTimeout(attach, GOALS_ATTACH_STEP_MS);
+      if (typeof window.ym === "function") {
+        startGoals(id);
+        reportClientId(id);
+      } else if (++tries < GOALS_ATTACH_TRIES) timer = window.setTimeout(attach, GOALS_ATTACH_STEP_MS);
     };
     attach();
     return () => window.clearTimeout(timer);
   }, [id]);
   return null;
+}
+
+// ClientID Метрики — в свою статистику, раз на загрузку документа: по нему в
+// Метрике находится запись Вебвизора гостя. Роут пишет его только гостю без
+// аккаунта и только когда значение сменилось. Чужой код: сбой — без ClientID.
+function reportClientId(id: number): void {
+  try {
+    window.ym?.(id, "getClientID", (cid: unknown) => {
+      const value = typeof cid === "string" || typeof cid === "number" ? String(cid) : "";
+      if (/^\d{1,32}$/.test(value)) track("ym_client", { cid: value });
+    });
+  } catch {
+    // Без ClientID карточка гостя покажет «ещё не получен».
+  }
 }
 
 // Что считается новым просмотром: другая страница, другая страница выдачи

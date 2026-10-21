@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { Suspense } from "react";
 import NextTopLoader from "nextjs-toploader";
 import { fontDisplay, fontText, fontMark, fontMono } from "@theme/fonts";
 import { seo } from "@theme/seo";
@@ -9,6 +10,7 @@ import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
 import { MobileNav } from "@/components/layout/MobileNav";
 import { YandexMetrika } from "@/components/analytics/YandexMetrika";
+import { PageViewTracker } from "@/components/analytics/PageViewTracker";
 import "./globals.css";
 import "@theme/tokens.css";
 import "@theme/typography.css";
@@ -72,8 +74,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   // базы layout падает и так.
   //
   // Отказ от учёта (кука noanalytics с /privacy) снимает счётчик целиком,
-  // вместе с noscript-пикселем. Решение на загрузку документа: после отказа
-  // страница перезагружается. Инлайн-сниппет проверяет то же сам.
+  // вместе с noscript-пикселем, и трекер своей статистики. Решение на загрузку
+  // документа: после отказа страница перезагружается. Инлайн-сниппет и трекер
+  // проверяют то же сами.
   const [hasSession, viewerCity, footerCities, trackingAllowed] = await Promise.all([
     headers().then((h) => h.get("x-has-session") === "1"),
     resolveViewerCity(),
@@ -90,6 +93,14 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       <body className="bg-background text-foreground font-sans antialiased min-h-screen flex flex-col">
         {process.env.NODE_ENV === "production" && process.env.YANDEX_METRIKA_ID && trackingAllowed && (
           <YandexMetrika counterId={process.env.YANDEX_METRIKA_ID} />
+        )}
+        {/* Своя статистика посещений — и без Метрики (dev, счётчик не задан).
+          * Suspense — ради useSearchParams внутри, над одним трекером, а не
+          * над страницей. */}
+        {trackingAllowed && (
+          <Suspense fallback={null}>
+            <PageViewTracker />
+          </Suspense>
         )}
         <RealtimeProvider enabled={hasSession}>
         <CityPreferenceProvider initialSlug={viewerCity?.slug}>

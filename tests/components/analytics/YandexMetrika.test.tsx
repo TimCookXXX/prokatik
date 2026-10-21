@@ -10,6 +10,8 @@ vi.mock("next/navigation", () => ({
 
 const docNav = vi.hoisted(() => ({ loadDocument: vi.fn(), reloadDocument: vi.fn() }));
 vi.mock("@/components/analytics/document-nav", () => docNav);
+const tracker = vi.hoisted(() => ({ track: vi.fn() }));
+vi.mock("@/components/analytics/track", () => tracker);
 
 import {
   GOALS_ATTACH_STEP_MS, GOALS_ATTACH_TRIES, MetrikaGoals, MetrikaPageHits, YandexMetrika, metrikaInitSnippet, pageViewKey,
@@ -331,7 +333,7 @@ describe("<MetrikaGoals>", () => {
 
       window.ym = ym;
       vi.advanceTimersByTime(GOALS_ATTACH_STEP_MS);
-      expect(ym.mock.calls).toEqual([
+      expect(ym.mock.calls.filter((c) => c[1] === "reachGoal")).toEqual([
         [42, "reachGoal", "listing_view"],
         [42, "reachGoal", "booking_click", { authed: false }],
       ]);
@@ -354,5 +356,32 @@ describe("<MetrikaGoals>", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  // ClientID — в свою статистику раз на загрузку документа: по нему в Метрике
+  // находится запись Вебвизора гостя.
+  it("отдаёт ClientID в свою статистику, когда счётчик поднят", () => {
+    tracker.track.mockClear();
+    ym.mockImplementation((_id: number, method: string, cb?: (cid: unknown) => void) => {
+      if (method === "getClientID") cb?.("1697712345123456789");
+    });
+    render(<MetrikaGoals id={42} />);
+    expect(ym).toHaveBeenCalledWith(42, "getClientID", expect.any(Function));
+    expect(tracker.track).toHaveBeenCalledWith("ym_client", { cid: "1697712345123456789" });
+  });
+
+  it("не цифры вместо ClientID — ничего не уходит", () => {
+    tracker.track.mockClear();
+    ym.mockImplementation((_id: number, method: string, cb?: (cid: unknown) => void) => {
+      if (method === "getClientID") cb?.("abc");
+    });
+    render(<MetrikaGoals id={42} />);
+    expect(tracker.track).not.toHaveBeenCalled();
+  });
+
+  it("в админке ClientID не спрашивается", () => {
+    window.history.replaceState(null, "", "/admin/users");
+    render(<MetrikaGoals id={42} />);
+    expect(ym).not.toHaveBeenCalledWith(42, "getClientID", expect.anything());
   });
 });
