@@ -8,9 +8,13 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(nav.search),
 }));
 
+const docNav = vi.hoisted(() => ({ loadDocument: vi.fn(), reloadDocument: vi.fn() }));
+vi.mock("@/components/analytics/document-nav", () => docNav);
+
 import {
-  MetrikaGoals, MetrikaPageHits, YandexMetrika, metrikaInitSnippet, withoutToken, pageViewKey, isMetrikaSkipped,
+  MetrikaGoals, MetrikaPageHits, YandexMetrika, metrikaInitSnippet, pageViewKey,
 } from "@/components/analytics/YandexMetrika";
+import { isMetrikaSkipped, metrikaSafeHref } from "@/components/analytics/metrika-url";
 import { _pendingGoalsForTests, _resetGoalsForTests, reachGoal } from "@/components/analytics/goals";
 
 const origin = window.location.origin;
@@ -68,6 +72,28 @@ describe("metrikaInitSnippet", () => {
     expect(String(opts.url)).not.toContain("secret");
   });
 
+  it("не отдаёт адрес админки параметром from на /login", () => {
+    // middleware: /admin/users без сессии → /login?from=%2Fadmin%2Fusers.
+    window.history.replaceState(null, "", "/login?from=%2Fadmin%2Fvisitors%2Fabc%3Fq%3D1");
+    const opts = runInit();
+    expect(opts.url).toBe(`${origin}/login`);
+  });
+
+  it.each(["/search?q=a&from=2026-10-21", "/login?from=%2Fcabinet"])(
+    "оставляет from, который в админку не ведёт: %s",
+    (path) => {
+      window.history.replaceState(null, "", path);
+      expect(runInit().url).toBe(`${origin}${path}`);
+    },
+  );
+
+  it("сводит источник перехода из открытой админки к /admin", () => {
+    Object.defineProperty(document, "referrer", { value: `${origin}/admin/visitors/abc?q=1`, configurable: true });
+    const opts = runInit();
+    expect(opts.referrer).toBe(`${origin}/admin`);
+    Object.defineProperty(document, "referrer", { value: "", configurable: true });
+  });
+
   it.each(["/admin", "/admin/users", "/admin/listings?x=1"])(
     "на %s не грузит tag.js, не делает init и не заводит ym",
     (path) => {
@@ -97,12 +123,25 @@ describe("isMetrikaSkipped", () => {
   });
 });
 
-describe("withoutToken", () => {
-  it("убирает только token и не трогает адрес без него", () => {
-    expect(withoutToken(`${origin}/reset?token=abc`)).toBe(`${origin}/reset`);
-    expect(withoutToken(`${origin}/x?token=abc&q=a`)).toBe(`${origin}/x?q=a`);
-    expect(withoutToken(`${origin}/search?q=a%20b`)).toBe(`${origin}/search?q=a%20b`);
-    expect(withoutToken("")).toBe("");
+describe("metrikaSafeHref", () => {
+  it("убирает token и не трогает адрес без него", () => {
+    expect(metrikaSafeHref(`${origin}/reset?token=abc`)).toBe(`${origin}/reset`);
+    expect(metrikaSafeHref(`${origin}/x?token=abc&q=a`)).toBe(`${origin}/x?q=a`);
+    expect(metrikaSafeHref(`${origin}/search?q=a%20b`)).toBe(`${origin}/search?q=a%20b`);
+    expect(metrikaSafeHref("")).toBe("");
+  });
+
+  it("убирает from, ведущий в админку, и только его", () => {
+    expect(metrikaSafeHref(`${origin}/login?from=%2Fadmin`)).toBe(`${origin}/login`);
+    expect(metrikaSafeHref(`${origin}/login?from=%2Fadmin%2Fusers%3Fq%3D1&x=1`)).toBe(`${origin}/login?x=1`);
+    expect(metrikaSafeHref(`${origin}/login?from=%2Fcabinet`)).toBe(`${origin}/login?from=%2Fcabinet`);
+    expect(metrikaSafeHref(`${origin}/search?from=2026-10-21`)).toBe(`${origin}/search?from=2026-10-21`);
+    expect(metrikaSafeHref(`${origin}/login?from=%2Fadministrator`)).toBe(`${origin}/login?from=%2Fadministrator`);
+  });
+
+  it("сводит свой адрес в админке к /admin, чужой не трогает", () => {
+    expect(metrikaSafeHref(`${origin}/admin/visitors/abc?q=1`)).toBe(`${origin}/admin`);
+    expect(metrikaSafeHref("https://example.com/admin/x")).toBe("https://example.com/admin/x");
   });
 });
 
@@ -113,6 +152,7 @@ describe("<MetrikaPageHits>", () => {
     nav.search = "";
     ym = vi.fn();
     window.ym = ym;
+    docNav.reloadDocument.mockClear();
   });
 
   function mount() {
@@ -176,6 +216,21 @@ describe("<MetrikaPageHits>", () => {
     go("/krasnodar/instrumenty", "");
     expect(ym).toHaveBeenCalledTimes(1);
     expect(ym).toHaveBeenCalledWith(42, "hit", `${origin}/krasnodar/instrumenty`, { referer: `${origin}/krasnodar` });
+  });
+
+  it("пришли в админку клиентским переходом при живом счётчике — перезагрузка", () => {
+    nav.pathname = "/login";
+    const go = mount();
+    go("/admin", "");
+    expect(docNav.reloadDocument).toHaveBeenCalledTimes(1);
+  });
+
+  it("документ открыт в админке (счётчика нет) — без перезагрузки", () => {
+    delete window.ym;
+    nav.pathname = "/admin";
+    const go = mount();
+    go("/admin/users", "");
+    expect(docNav.reloadDocument).not.toHaveBeenCalled();
   });
 
   it("не отдаёт токен ни в адресе hit, ни в источнике", () => {

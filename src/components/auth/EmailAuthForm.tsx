@@ -3,11 +3,11 @@
 import { useState, useTransition } from "react";
 import { ArrowLeft } from "lucide-react";
 import { useRouter } from "next/navigation";
-import type { Route } from "next";
 import { Button } from "@/components/ui/button";
 import { field } from "@/components/ui/field";
 import { WEBVISOR_NO_KEYS } from "@/components/analytics/webvisor";
 import { PasswordInput } from "@/components/ui/PasswordInput";
+import { goAfterAuth } from "@/components/auth/go-after-auth";
 import {
   checkEmailDomain, login, register, requestReset, resendVerificationEmail,
 } from "@/server/actions/auth-email";
@@ -80,9 +80,7 @@ export function EmailAuthForm({
       }
 
       const res = await login({ email, password, callbackUrl });
-      // Путь приходит из рантайма и уже пропущен через safeCallback на сервере,
-      // а typedRoutes ждёт литерал — отсюда приведение.
-      if (res.ok) { router.push(res.data.redirectTo as Route); router.refresh(); return; }
+      if (res.ok) { goAfterAuth(router, res.data.redirectTo); return; }
       setError(res.error);
       setNeedsVerification(res.code === "email_not_verified");
     });

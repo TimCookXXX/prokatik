@@ -15,6 +15,8 @@ const actions = vi.hoisted(() => ({
   checkEmailDomain: vi.fn(),
 }));
 vi.mock("@/server/actions/auth-email", () => actions);
+const docNav = vi.hoisted(() => ({ loadDocument: vi.fn(), reloadDocument: vi.fn() }));
+vi.mock("@/components/analytics/document-nav", () => docNav);
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -40,6 +42,20 @@ describe("EmailAuthForm: вход", () => {
 
     await waitFor(() => expect(push).toHaveBeenCalledWith("/cabinet/listings"));
     expect(actions.login).toHaveBeenCalledWith({ email: "a@ya.ru", password: "normalnyi-parol", callbackUrl: "/" });
+  });
+
+  // На /login уже поднят счётчик Метрики с Вебвизором; клиентский переход
+  // оставил бы его записывать админку.
+  it("goes to the admin area with a full page load, not a client navigation", async () => {
+    actions.login.mockResolvedValue({ ok: true, data: { redirectTo: "/admin/users?x=1" } });
+    render(<EmailAuthForm canRegister callbackUrl="/admin/users?x=1" />);
+
+    fill("Почта", "a@ya.ru");
+    fill("Пароль", "normalnyi-parol");
+    click("Войти");
+
+    await waitFor(() => expect(docNav.loadDocument).toHaveBeenCalledWith("/admin/users?x=1"));
+    expect(push).not.toHaveBeenCalled();
   });
 
   it("shows the server error", async () => {

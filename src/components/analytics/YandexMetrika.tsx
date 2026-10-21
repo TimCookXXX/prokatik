@@ -4,6 +4,8 @@ import { Suspense, useEffect, useRef } from "react";
 import Script from "next/script";
 import { usePathname, useSearchParams } from "next/navigation";
 import { startGoals, stopGoals } from "./goals";
+import { METRIKA_SKIPPED_PATH, isMetrikaSkipped, metrikaSafeHref } from "./metrika-url";
+import { reloadDocument } from "./document-nav";
 
 declare global {
   interface Window {
@@ -15,45 +17,26 @@ interface Props {
   counterId: string;
 }
 
-// Секрет из ссылки (сброс пароля — /reset?token=…) в Метрику не уходит: ни
-// адресом страницы, ни источником перехода. Инлайн-сниппет повторяет это же
-// правило на JS — импортировать функцию туда нельзя.
-export function withoutToken(href: string): string {
-  if (!href) return href;
-  try {
-    const url = new URL(href);
-    if (!url.searchParams.has("token")) return href;
-    url.searchParams.delete("token");
-    return url.href;
-  } catch {
-    return href;
-  }
-}
-
-// Админка в Метрику не попадает: ни визитом, ни записью Вебвизора, ни адресом
-// страницы. Решение принимается один раз на загрузку документа — в
-// инлайн-сниппете по пути, с которого документ открыт. Поэтому вход в админку
-// из публичной части — обычная ссылка с полной загрузкой, а не клиентский
-// переход: иначе админку записал бы счётчик, поднятый публичной страницей.
-export const METRIKA_SKIPPED_PATH = /^\/admin(?:\/|$)/;
-
-export function isMetrikaSkipped(pathname: string): boolean {
-  return METRIKA_SKIPPED_PATH.test(pathname);
-}
-
 // Код счётчика. Вебвизор включается опцией init `webvisor`, а не только
 // галочкой в настройках счётчика: без неё записей визитов нет. На путях
 // METRIKA_SKIPPED_PATH сниппет не грузит tag.js и не заводит window.ym.
+// clean() — та же чистка адреса, что metrikaSafeHref (metrika-url.ts), на JS.
 export function metrikaInitSnippet(id: number): string {
   return `
     (function(){
-      if (${METRIKA_SKIPPED_PATH}.test(location.pathname)) return;
+      var skip = ${METRIKA_SKIPPED_PATH};
+      if (skip.test(location.pathname)) return;
       (function(m,e,t,r,i,k,a){m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};
       m[i].l=1*new Date();
       for (var j = 0; j < document.scripts.length; j++) {if (document.scripts[j].src === r) { return; }}
       k=e.createElement(t),a=e.getElementsByTagName(t)[0],k.async=1,k.src=r,a.parentNode.insertBefore(k,a)})
       (window, document, "script", "https://mc.yandex.ru/metrika/tag.js?id=${id}", "ym");
-      function clean(s){try{var u=new URL(s);if(!u.searchParams.has("token"))return s;u.searchParams.delete("token");return u.href}catch(e){return s}}
+      function clean(s){try{var u=new URL(s),c=false,f;
+        if(u.origin===location.origin&&skip.test(u.pathname))return u.origin+"/admin";
+        if(u.searchParams.has("token")){u.searchParams.delete("token");c=true}
+        f=u.searchParams.get("from");
+        if(f!==null&&skip.test(f.split(/[?#]/,1)[0])){u.searchParams.delete("from");c=true}
+        return c?u.href:s}catch(e){return s}}
       ym(${id}, "init", { ssr: true, webvisor: true, clickmap: true, trackLinks: true, accurateTrackBounce: true, referrer: clean(document.referrer), url: clean(location.href) });
     })();
   `;
@@ -129,8 +112,16 @@ export function MetrikaPageHits({ id }: { id: number }) {
 
   useEffect(() => {
     // Адрес админки не уходит ни хитом, ни источником следующего перехода.
-    if (isMetrikaSkipped(pathname)) return;
-    const href = withoutToken(`${window.location.origin}${pathname}${search ? `?${search}` : ""}`);
+    if (isMetrikaSkipped(pathname)) {
+      // Страховка: сюда пришли клиентским переходом, а счётчик с Вебвизором
+      // поднят этой загрузкой документа на публичной странице. Загрузка
+      // админки заново его не поднимет (сниппет смотрит на путь). Основное
+      // правило — входить в админку полной загрузкой (metrika-url.ts): до
+      // перезагрузки Вебвизор успевает снять кадр.
+      if (typeof window.ym === "function") reloadDocument();
+      return;
+    }
+    const href = metrikaSafeHref(`${window.location.origin}${pathname}${search ? `?${search}` : ""}`);
     const last = prev.current;
     if (last && last.view !== view) {
       window.ym?.(id, "hit", href, { referer: last.href });

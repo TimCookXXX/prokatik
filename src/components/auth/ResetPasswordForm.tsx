@@ -2,10 +2,10 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import type { Route } from "next";
 import { Button } from "@/components/ui/button";
 import { field } from "@/components/ui/field";
 import { PasswordInput } from "@/components/ui/PasswordInput";
+import { goAfterAuth } from "@/components/auth/go-after-auth";
 import { submitNewPassword } from "@/server/actions/auth-email";
 
 const INPUT = `${field} h-11 w-full px-5`;
@@ -24,7 +24,7 @@ export function ResetPasswordForm({ token }: { token: string }) {
 
     startTransition(async () => {
       const res = await submitNewPassword({ token, password });
-      if (res.ok) { router.push(res.data.redirectTo as Route); router.refresh(); return; }
+      if (res.ok) { goAfterAuth(router, res.data.redirectTo); return; }
       setError(res.error);
     });
   };
