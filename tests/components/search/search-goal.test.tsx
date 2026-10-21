@@ -22,6 +22,7 @@ import { useSearchPanel } from "@/components/search/use-search-panel";
 import { _resetPanelDates } from "@/components/search/panel-dates";
 import { _resetSuggestCache } from "@/components/search/suggest-client";
 import { _resetSearchQuery } from "@/components/search/search-query";
+import { Hero } from "@/components/home/Hero";
 
 const CITIES = [{ slug: "kazan", name: "Казань", geo: null }];
 const t = content.search;
@@ -75,6 +76,38 @@ describe("цель search", () => {
     fireEvent.change(within(dialog).getByRole("combobox"), { target: { value: "палатка" } });
     fireEvent.submit(form);
     expect(replace).toHaveBeenCalledTimes(1);
+    expect(searchGoals()).toEqual([["search", { kind: "text" }]]);
+  });
+
+  it("экран поиска: тот же адрес — экран закрывается, поиском не считается", () => {
+    url.pathname = "/search";
+    url.search = "q=палатка&city=kazan";
+    const { result } = renderHook(() => useSearchPanel(CITIES));
+    result.current.submit({ kind: "text", q: "палатка" }, { fromScreen: true });
+    expect(replace).not.toHaveBeenCalled();
+    expect(searchGoals()).toEqual([]);
+    // Другой запрос с того же экрана — переход и цель.
+    result.current.submit({ kind: "text", q: "спальник" }, { fromScreen: true });
+    expect(replace).toHaveBeenCalledTimes(1);
+    expect(searchGoals()).toEqual([["search", { kind: "text" }]]);
+  });
+
+  // Одни и те же «Часто ищут» на главной и на экране поиска телефона — одна и
+  // та же цель: иначе верх воронки зависел бы от набора чипов.
+  it("«Часто ищут» на главной и на экране телефона — одна цель с одним kind", () => {
+    const { unmount } = render(<Hero city={CITIES[0]} popular={["перфоратор"]} />);
+    const chip = screen.getByRole("link", { name: "перфоратор" });
+    // Без роутера Next ссылка ушла бы настоящим переходом, которого в jsdom нет.
+    chip.addEventListener("click", (e) => e.preventDefault());
+    fireEvent.click(chip);
+    expect(searchGoals()).toEqual([["search", { kind: "text" }]]);
+    unmount();
+    reachGoal.mockClear();
+
+    render(<><header data-site-header><SearchBar variant="header" cities={CITIES} /></header><MobileSearchScreen cities={CITIES} /></>);
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(`^${t.whatLabel}`), hidden: true }));
+    const dialog = screen.getByRole("dialog", { name: t.screenLabel });
+    fireEvent.click(within(dialog).getByRole("link", { name: content.home.popularQueries[0] }));
     expect(searchGoals()).toEqual([["search", { kind: "text" }]]);
   });
 

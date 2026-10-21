@@ -127,21 +127,22 @@ export function useSearchPanel(cities: readonly SearchCity[], fixedCity?: string
       return;
     }
     opts.onLeave?.();
-    // Цель — до перехода: что выбрано в «Что», без самого текста.
-    reachGoal("search", { kind: what.kind });
     // Поле сразу показывает то, что будет в адресе перехода: запрос выдачи или
     // пусто. Иначе после выбора подсказки в шапке осталось бы название вещи —
     // адрес без q синхронизацию не запустит.
     const dest = new URL(href, "http://x");
     const destQ = dest.pathname === "/search" ? dest.searchParams.get("q") ?? "" : "";
     if (destQ) rememberQuery(destQ);
+    // Тот же адрес с экрана — переходить некуда, но и подменять им запись
+    // экрана нельзя: «назад» вёл бы на ту же страницу. Просто закрываем, и
+    // поиском это не считается: новой выдачи человек не увидел.
+    if (opts.fromScreen && sameHref(href, qs ? `${pathname}?${qs}` : pathname)) {
+      closeSearchScreen();
+      return;
+    }
+    // Цель — до перехода: что выбрано в «Что», без самого текста.
+    reachGoal("search", { kind: what.kind });
     if (opts.fromScreen) {
-      // Тот же адрес — переходить некуда, но и подменять им запись экрана
-      // нельзя: «назад» вёл бы на ту же страницу. Просто закрываем.
-      if (sameHref(href, qs ? `${pathname}?${qs}` : pathname)) {
-        closeSearchScreen();
-        return;
-      }
       leaveSearchScreen(destQ);
       router.replace(href as never);
       return;

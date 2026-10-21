@@ -63,11 +63,12 @@ describe("SearchResults: цель search_zero", () => {
     expect(reachGoal).toHaveBeenCalledWith("search_zero", { reason: "index_failed" });
   });
 
-  it("страница за концом — past_end", async () => {
+  // Старая ссылка или робот на ?page=7 — не неудачный поиск.
+  it("страница за концом — цели нет", async () => {
     vi.mocked(rankListingIds).mockResolvedValue({ ids: ["1"], usedQuery: "дрель", dropped: [] });
     vi.mocked(searchListings).mockResolvedValue({ items: [], total: 3 });
     render(await SearchResults({ city, q: "дрель", searchParams: { q: "дрель", page: "4" } }));
-    expect(reachGoal).toHaveBeenCalledWith("search_zero", { reason: "past_end" });
+    expect(reachGoal).not.toHaveBeenCalled();
   });
 
   it("пустой город без запроса — empty_city", async () => {
@@ -82,10 +83,11 @@ describe("SearchResults: цель search_zero", () => {
     expect(reachGoal).not.toHaveBeenCalled();
   });
 
-  // Смена вида (сетка/список) — тот же показ; новые условия — новый.
-  it("перерисовка с другим видом не шлёт второй раз, новый запрос — шлёт", async () => {
+  // Смена вида (сетка/список) и сортировки — тот же показ; новые условия — новый.
+  it("перерисовка с другим видом или сортировкой не шлёт второй раз, новый запрос — шлёт", async () => {
     const { rerender } = render(await SearchResults({ city, q: "каяк", searchParams: { q: "каяк" } }));
     rerender(await SearchResults({ city, q: "каяк", searchParams: { q: "каяк", view: "list" } }));
+    rerender(await SearchResults({ city, q: "каяк", searchParams: { q: "каяк", view: "list", sort: "new" } }));
     expect(reachGoal).toHaveBeenCalledTimes(1);
     rerender(await SearchResults({ city, q: "байдарка", searchParams: { q: "байдарка" } }));
     expect(reachGoal).toHaveBeenCalledTimes(2);

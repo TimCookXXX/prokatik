@@ -4,6 +4,7 @@ import { content } from "@theme/content";
 import { Button } from "@/components/ui/button";
 import { BracketsHandoff } from "@/components/brand/BracketsHandoff";
 import { SearchBar, type SearchCity } from "@/components/search/SearchBar";
+import { PopularQueryLink } from "./PopularQueryLink";
 
 // Слово стоит на месте две с половиной секунды, считая перелёты: столько нужно,
 // чтобы его прочли. 280 мс — длительность .handoff-out и .handoff-in.
@@ -94,13 +95,13 @@ export function Hero({
                   {content.home.popularLabel}:
                 </span>
                 {popular.map((q) => (
-                  <Link
+                  <PopularQueryLink
                     key={q}
-                    href={`/search?${new URLSearchParams({ city: city.slug, q })}` as never}
+                    href={`/search?${new URLSearchParams({ city: city.slug, q })}`}
                     className="tap-target hoverable shrink-0 rounded-sm border border-border bg-card px-3 py-1.5 text-sm text-foreground"
                   >
                     {q}
-                  </Link>
+                  </PopularQueryLink>
                 ))}
               </nav>
             )}

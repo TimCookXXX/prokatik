@@ -167,15 +167,17 @@ export async function SearchResults({
     return { ...o, href: `/search?${params.toString()}` };
   });
 
-  // Пустая выдача — цель Метрики с причиной. Новый показ — новые условия
-  // выдачи (запрос, город, фильтры, даты, «Где», страница); вид сетки или
-  // списка выдачу не меняет. Ключ остаётся в странице и в Метрику не уходит.
+  // Пустая выдача — цель Метрики с причиной, только на первой странице:
+  // страница за концом списка (старая ссылка, робот) — не неудачный поиск.
+  // Новый показ — новые условия выдачи (запрос, город, фильтры, даты, «Где»);
+  // вид и сортировка пустую выдачу непустой не делают, и их смена — тот же
+  // показ. Ключ остаётся в странице и в Метрику не уходит.
   const zeroShowKey = (() => {
     const params = filterParams(searchParams, { today });
     params.delete("view");
+    params.delete("sort");
     params.set("q", q);
     params.set("city", city.slug);
-    params.set("page", String(page));
     params.sort();
     return params.toString();
   })();
@@ -226,7 +228,7 @@ export async function SearchResults({
             {content.search.subsetNotice(q, ranked.usedQuery)}
           </p>
         )}
-        {items.length === 0 && (
+        {items.length === 0 && page === 1 && (
           <GoalOnMount
             goal="search_zero"
             params={{ reason: zeroReason({ q, ranked, page, narrowed: hasFilters }) }}
