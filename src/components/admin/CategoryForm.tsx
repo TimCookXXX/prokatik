@@ -25,7 +25,7 @@ export function CategoryForm({ roots }: { roots: Array<{ id: string; name: strin
   };
 
   return (
-    <form onSubmit={submit} className="flex flex-wrap items-end gap-2">
+    <form name="admin_category" onSubmit={submit} className="flex flex-wrap items-end gap-2">
       <label className="flex flex-col gap-1 text-xs text-muted-foreground">
         Название
         <input required minLength={2} value={name} onChange={(e) => setName(e.target.value)} className={INPUT} />

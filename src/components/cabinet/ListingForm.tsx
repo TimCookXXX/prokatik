@@ -17,6 +17,7 @@ import { listingCityOf, type AddressHit } from "@/lib/geo/address";
 import type { CityGeoContext } from "@/lib/geo/context";
 import type { ListingAddressInput } from "@/lib/owner/validation";
 import { content } from "@theme/content";
+import { reachGoal } from "@/components/analytics/goals";
 
 export interface ListingFormValues {
   title: string;
@@ -204,6 +205,18 @@ export function ListingForm({
 
   const set = (patch: Partial<ListingFormValues>) => setV((cur) => ({ ...cur, ...patch }));
 
+  // Цель «Начал размещать» — первое изменение поля новой формы: разница с
+  // «Разместил» показывает, где владельцы бросают форму. Правка своего
+  // объявления — не начало размещения. Событие change всплывает с любого поля
+  // формы (и из порталов подсказок — по дереву React); фото, брошенные
+  // перетаскиванием, change не дают и отмечаются в uploadFiles.
+  const started = useRef(false);
+  const markStarted = () => {
+    if (mode !== "create" || started.current) return;
+    started.current = true;
+    reachGoal("listing_started");
+  };
+
   // Слиянием с ref, а не с состоянием рендера: выбор бывает асинхронным
   // (первая подсказка после ухода с поля) и приходит в старое замыкание.
   const setAddress = (patch: Partial<AddressState>) => {
@@ -259,6 +272,7 @@ export function ListingForm({
   );
 
   const uploadFiles = async (files: FileList) => {
+    markStarted();
     setUploadError(null);
     setUploading(true);
     try {
@@ -303,12 +317,13 @@ export function ListingForm({
         else setError(r.error);
         return;
       }
+      if (mode === "create") reachGoal("listing_created");
       router.push(returnHref as never);
     });
   };
 
   return (
-    <form onSubmit={submit} className="flex max-w-xl flex-col gap-3">
+    <form name="listing" onSubmit={submit} onChange={markStarted} className="flex max-w-xl flex-col gap-3">
       <StepProgress
         title={mode === "create" ? "Сдаём вещь" : "Правим объявление"}
         done={blocksDone}

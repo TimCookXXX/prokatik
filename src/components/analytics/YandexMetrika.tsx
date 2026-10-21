@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useRef } from "react";
 import Script from "next/script";
 import { usePathname, useSearchParams } from "next/navigation";
+import { startGoals, stopGoals } from "./goals";
 
 declare global {
   interface Window {
@@ -70,6 +71,8 @@ export function YandexMetrika({ counterId }: Props) {
         strategy="afterInteractive"
         dangerouslySetInnerHTML={{ __html: metrikaInitSnippet(id) }}
       />
+      {/* Строго после <Script>: см. MetrikaGoals. */}
+      <MetrikaGoals id={id} />
       {/* useSearchParams требует Suspense-границы, иначе страница уходит в
         * клиентский рендер целиком. */}
       <Suspense fallback={null}>
@@ -86,6 +89,19 @@ export function YandexMetrika({ counterId }: Props) {
       </noscript>
     </>
   );
+}
+
+// Очередь целей (goals.ts) уходит в счётчик, когда он поднят. Компонент стоит
+// следом за <Script>: эффекты соседей идут по порядку, а Script исполняет
+// инлайн-сниппет синхронно в своём эффекте — к этому моменту window.ym уже
+// заведён, если счётчик на этой загрузке документа есть. Нет его (админка) —
+// цели отбрасываются до следующей загрузки документа.
+export function MetrikaGoals({ id }: { id: number }) {
+  useEffect(() => {
+    if (typeof window.ym === "function" && !isMetrikaSkipped(window.location.pathname)) startGoals(id);
+    else stopGoals();
+  }, [id]);
+  return null;
 }
 
 // Что считается новым просмотром: другая страница, другая страница выдачи

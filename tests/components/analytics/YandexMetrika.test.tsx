@@ -9,8 +9,9 @@ vi.mock("next/navigation", () => ({
 }));
 
 import {
-  MetrikaPageHits, YandexMetrika, metrikaInitSnippet, withoutToken, pageViewKey, isMetrikaSkipped,
+  MetrikaGoals, MetrikaPageHits, YandexMetrika, metrikaInitSnippet, withoutToken, pageViewKey, isMetrikaSkipped,
 } from "@/components/analytics/YandexMetrika";
+import { _pendingGoalsForTests, _resetGoalsForTests, reachGoal } from "@/components/analytics/goals";
 
 const origin = window.location.origin;
 
@@ -195,5 +196,48 @@ describe("pageViewKey", () => {
   });
   it("не считает новой страницей правку дат и фильтров", () => {
     expect(key("/krasnodar", "sort=price_asc&from=2026-10-10&to=2026-10-12")).toBe(key("/krasnodar"));
+  });
+});
+
+describe("<MetrikaGoals>", () => {
+  let ym: ReturnType<typeof vi.fn>;
+  beforeEach(() => {
+    _resetGoalsForTests();
+    ym = vi.fn();
+    window.ym = ym;
+  });
+  afterEach(() => {
+    window.history.replaceState(null, "", "/");
+  });
+
+  it("сбрасывает в поднятый счётчик цели, случившиеся до него", () => {
+    reachGoal("listing_view");
+    render(<MetrikaGoals id={42} />);
+    expect(ym).toHaveBeenCalledWith(42, "reachGoal", "listing_view");
+    reachGoal("booking_click", { authed: true });
+    expect(ym).toHaveBeenLastCalledWith(42, "reachGoal", "booking_click", { authed: true });
+  });
+
+  it("стоит в YandexMetrika: очередь уходит при монтировании счётчика", () => {
+    reachGoal("search", { kind: "text" });
+    render(<YandexMetrika counterId="42" />);
+    expect(ym).toHaveBeenCalledWith(42, "reachGoal", "search", { kind: "text" });
+  });
+
+  it("в админке отбрасывает очередь и не шлёт новых целей", () => {
+    window.history.replaceState(null, "", "/admin/users");
+    reachGoal("listing_view");
+    render(<MetrikaGoals id={42} />);
+    reachGoal("booking_sent");
+    expect(ym).not.toHaveBeenCalled();
+    expect(_pendingGoalsForTests()).toEqual([]);
+  });
+
+  it("сниппет не поднял счётчик — цели не уходят и не копятся", () => {
+    delete window.ym;
+    reachGoal("listing_view");
+    render(<MetrikaGoals id={42} />);
+    reachGoal("listing_view");
+    expect(_pendingGoalsForTests()).toEqual([]);
   });
 });

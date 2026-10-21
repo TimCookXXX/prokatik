@@ -15,6 +15,7 @@ import {
   closeSearchScreen, isSearchScreenOpen, leaveSearchScreen, settleQuery, useSearchQuery,
 } from "./search-query";
 import { rememberQuery } from "./recent-queries";
+import { reachGoal } from "@/components/analytics/goals";
 
 /** Активный город для панели поиска; geo null — геоданных нет, «Где» не рисуется. */
 export interface SearchCity {
@@ -126,6 +127,8 @@ export function useSearchPanel(cities: readonly SearchCity[], fixedCity?: string
       return;
     }
     opts.onLeave?.();
+    // Цель — до перехода: что выбрано в «Что», без самого текста.
+    reachGoal("search", { kind: what.kind });
     // Поле сразу показывает то, что будет в адресе перехода: запрос выдачи или
     // пусто. Иначе после выбора подсказки в шапке осталось бы название вещи —
     // адрес без q синхронизацию не запустит.

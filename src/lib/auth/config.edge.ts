@@ -21,8 +21,20 @@ export function buildEdgeConfig(): NextAuthConfig {
         session.user.role = user.role ?? "user";
         session.user.bannedAt = user.bannedAt ?? null;
         session.user.banReason = user.banReason ?? null;
+        // Свежесть аккаунта для цели «Зарегистрировался» (lib/analytics/signup.ts):
+        // строка пользователя уже прочитана адаптером, запроса не добавляет.
+        // Строками: auth() отдаёт сессию через JSON, и Date до страниц не доезжает.
+        session.user.signup = {
+          createdAt: isoOrNull(user.createdAt),
+          emailVerified: isoOrNull(user.emailVerified),
+        };
         return session;
       },
     },
   };
+}
+
+function isoOrNull(value: unknown): string | null {
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value.toISOString();
+  return typeof value === "string" ? value : null;
 }

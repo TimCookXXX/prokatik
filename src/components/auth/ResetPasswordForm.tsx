@@ -30,7 +30,7 @@ export function ResetPasswordForm({ token }: { token: string }) {
   };
 
   return (
-    <form onSubmit={submit} className="flex flex-col gap-3">
+    <form name="password_reset" onSubmit={submit} className="flex flex-col gap-3">
       <label className="flex flex-col gap-1 text-sm">
         Новый пароль
         <PasswordInput required minLength={8} autoComplete="new-password" className={INPUT}

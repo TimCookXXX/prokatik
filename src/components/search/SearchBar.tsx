@@ -116,6 +116,7 @@ export function SearchBar({
         />
         <form
           {...formProps}
+          name="search_header"
           aria-label={content.search.headerLabel}
           className={cn(fieldWithin, "hidden h-9 w-full items-center gap-1 pl-3 pr-1 lg:flex", className)}
         >
@@ -162,6 +163,7 @@ export function SearchBar({
   return (
     <form
       {...formProps}
+      name="search_hero"
       aria-label={content.search.heroLabel}
       // По этой метке шапка на главной узнаёт, виден ли поиск hero (HeaderSearch).
       data-hero-search

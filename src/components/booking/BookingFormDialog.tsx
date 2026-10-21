@@ -17,6 +17,7 @@ import { field } from "@/components/ui/field";
 import { WEBVISOR_NO_KEYS } from "@/components/analytics/webvisor";
 import { formatDayMonth } from "@/lib/catalog/dates";
 import { formatPrice } from "@/lib/catalog/format";
+import { reachGoal } from "@/components/analytics/goals";
 
 function humanError(code: string): string {
   if (code.startsWith("rate_limited:")) {
@@ -87,8 +88,10 @@ export function BookingFormDialog({
         comment,
         website,
       });
-      if (r.ok) setDone(true);
-      else setError(humanError(r.error));
+      if (r.ok) {
+        reachGoal("booking_sent");
+        setDone(true);
+      } else setError(humanError(r.error));
     });
   };
 
@@ -115,7 +118,7 @@ export function BookingFormDialog({
                 {estimate !== null ? ` · ≈ ${formatPrice(estimate)}` : ""}
               </ModalDescription>
 
-              <form onSubmit={submit} className={`mt-5 flex flex-col gap-3 ${WEBVISOR_NO_KEYS}`}>
+              <form name="booking" onSubmit={submit} className={`mt-5 flex flex-col gap-3 ${WEBVISOR_NO_KEYS}`}>
                 <label className="flex flex-col gap-1 text-sm">
                   Телефон для связи
                   <input

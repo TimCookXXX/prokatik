@@ -96,7 +96,7 @@ export function FilterForm({
   ].join("|");
 
   return (
-    <form key={stateKey} method="GET" action={basePath} className="flex flex-col gap-4">
+    <form key={stateKey} name="filters" method="GET" action={basePath} className="flex flex-col gap-4">
       {hiddenEntries.map(([name, value]) => (
         <input key={name} type="hidden" name={name} value={value} />
       ))}

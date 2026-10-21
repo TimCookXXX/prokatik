@@ -29,6 +29,7 @@ import {
 } from "@/lib/catalog/format";
 import { HandoverIcon } from "@/components/catalog/HandoverIcon";
 import { content } from "@theme/content";
+import { reachGoal } from "@/components/analytics/goals";
 
 const t = content.booking;
 
@@ -142,6 +143,7 @@ export function BookingWidget(props: BookingWidgetProps) {
 
   const onBook = () => {
     if (bookDisabled) return;
+    reachGoal("booking_click", { authed: props.isAuthed });
     if (props.isAuthed) {
       setFormOpen(true);
     } else {

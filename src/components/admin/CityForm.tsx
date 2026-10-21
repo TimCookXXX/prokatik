@@ -77,7 +77,7 @@ export function CityForm({
   };
 
   return (
-    <form onSubmit={submit} className="flex flex-wrap items-end gap-2">
+    <form name="admin_city" onSubmit={submit} className="flex flex-wrap items-end gap-2">
       <label className="flex flex-col gap-1 text-xs text-muted-foreground">
         Город
         <input required minLength={2} value={name} onChange={(e) => editName(e.target.value)} className={INPUT} />

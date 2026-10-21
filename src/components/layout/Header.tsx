@@ -13,10 +13,16 @@ import { CitySelector } from "./CitySelector";
 import type { SearchCity } from "@/components/search/SearchBar";
 import { MobileSearchScreen } from "@/components/search/MobileSearchScreen";
 import { HeaderSearch } from "./HeaderSearch";
+import { freshSignupMethod } from "@/server/signup-goal";
+import { SignupGoal } from "@/components/analytics/SignupGoal";
 
 export async function Header() {
   const [session, cities, citiesGeo] = await Promise.all([auth(), getActiveCities(), getCitiesGeo()]);
   const user = session?.user;
+  // Цель «Зарегистрировался»: шапка — в корневом layout'е и рисуется на первой
+  // же загрузке после входа с провайдера или по ссылке из письма. В базу идёт
+  // только за аккаунтом, созданным только что.
+  const signupMethod = user?.signup ? await freshSignupMethod({ id: user.id, ...user.signup }) : null;
   // Аноним входит модалкой, остальные идут прямиком в создание объявления:
   // гейта на ник больше нет.
   const placeHref = user ? "/cabinet/listings/new" : "/login";
@@ -43,6 +49,7 @@ export async function Header() {
     // Сверху — системный инсет (--safe-top): веб-приложение с экрана «Домой»
     // иначе прятало бы панель под чёлкой и часами.
     <header data-site-header className="sticky top-0 z-40 w-full pt-[var(--safe-top)]">
+      {user && signupMethod && <SignupGoal account={user.id} method={signupMethod} />}
       <div className="mx-auto max-w-[1200px] px-4 py-[var(--header-inset)]">
         <div className="flex h-[var(--header-h)] items-center gap-2 rounded-lg border border-border bg-header px-3 md:gap-3 md:px-4">
           {/* Бренд и город. Город виден и на мобайле: другого способа сменить

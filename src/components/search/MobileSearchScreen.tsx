@@ -227,6 +227,7 @@ export function MobileSearchScreen({ cities }: { cities: readonly SearchCity[] }
                     </button>
                     {/* «Найти» — клавишей клавиатуры (enterKeyHint="search"). */}
                     <form
+                      name="search_mobile"
                       action="/search"
                       method="get"
                       onSubmit={(e) => {

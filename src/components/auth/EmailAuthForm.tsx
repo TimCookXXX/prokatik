@@ -128,7 +128,7 @@ export function EmailAuthForm({
   }
 
   return (
-    <form onSubmit={submit} className={`flex flex-col gap-3 ${WEBVISOR_NO_KEYS}`}>
+    <form name="auth_email" onSubmit={submit} className={`flex flex-col gap-3 ${WEBVISOR_NO_KEYS}`}>
       <label className="flex flex-col gap-1 text-sm">
         Почта
         <input

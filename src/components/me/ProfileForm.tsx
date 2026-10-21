@@ -46,7 +46,7 @@ export function ProfileForm({
   };
 
   return (
-    <form onSubmit={submit} className="flex max-w-md flex-col gap-4">
+    <form name="profile" onSubmit={submit} className="flex max-w-md flex-col gap-4">
       <label className="flex flex-col gap-1 text-sm">
         Имя
         <input required maxLength={100} value={name}

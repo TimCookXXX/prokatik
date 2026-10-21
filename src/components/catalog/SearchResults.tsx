@@ -31,6 +31,8 @@ import { ResultsToolbar } from "@/components/catalog/ResultsToolbar";
 import { activeFilterCount } from "@/lib/catalog/filter-count";
 import { CategoryFacets } from "@/components/catalog/CategoryFacets";
 import { parseView } from "@/components/catalog/ViewToggle";
+import { zeroReason } from "@/lib/search/zero-reason";
+import { GoalOnMount } from "@/components/analytics/GoalOnMount";
 
 export async function SearchResults({
   city, q, searchParams, scope = singleCityScope(city.id),
@@ -165,6 +167,19 @@ export async function SearchResults({
     return { ...o, href: `/search?${params.toString()}` };
   });
 
+  // Пустая выдача — цель Метрики с причиной. Новый показ — новые условия
+  // выдачи (запрос, город, фильтры, даты, «Где», страница); вид сетки или
+  // списка выдачу не меняет. Ключ остаётся в странице и в Метрику не уходит.
+  const zeroShowKey = (() => {
+    const params = filterParams(searchParams, { today });
+    params.delete("view");
+    params.set("q", q);
+    params.set("city", city.slug);
+    params.set("page", String(page));
+    params.sort();
+    return params.toString();
+  })();
+
   const pageHref = (p: number) => {
     const params = filterParams(searchParams, { today });
     if (q) params.set("q", q);
@@ -210,6 +225,13 @@ export async function SearchResults({
           <p role="status" className="rounded-lg border border-border px-3 py-2 text-sm text-muted-foreground">
             {content.search.subsetNotice(q, ranked.usedQuery)}
           </p>
+        )}
+        {items.length === 0 && (
+          <GoalOnMount
+            goal="search_zero"
+            params={{ reason: zeroReason({ q, ranked, page, narrowed: hasFilters }) }}
+            showKey={zeroShowKey}
+          />
         )}
         {items.length === 0 ? (
           // Пусто по разным причинам, и валить их в одну фразу нельзя: «в

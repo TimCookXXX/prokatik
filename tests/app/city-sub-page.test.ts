@@ -42,6 +42,8 @@ vi.mock("next/navigation", () => ({
 }));
 
 const { default: CitySubPage, generateMetadata } = await import("@/app/(public)/[city]/[seg]/[sub]/page");
+const { GoalOnMount } = await import("@/components/analytics/GoalOnMount");
+const { auth } = await import("@/lib/auth");
 
 const props = (city: string, sp: Record<string, string> = {}) => ({
   params: Promise.resolve({ city, seg: "tools", sub: `drill-${LISTING_ID}` }),
@@ -270,5 +272,36 @@ describe("listing metadata and share", () => {
     expect(String(share.props.url)).toMatch(new RegExp(`^https?://[^/?#]+${canonical}$`));
     expect(share.props.title).toBe("Дрель");
     expect(plain(share.props.text)).toBe("Дрель — аренда в Краснодаре, 500 ₽/сутки");
+  });
+});
+
+// Цель «Открыл объявление» — интерес покупателя: на странице своего объявления
+// владельца её нет. Само срабатывание один раз — в тестах GoalOnMount.
+describe("/{city}/{cat}/{slug}-{id}: цель listing_view", () => {
+  type El = { type: unknown; props: Record<string, unknown> };
+  const goals = (node: unknown): El[] => {
+    if (Array.isArray(node)) return node.flatMap(goals);
+    if (!node || typeof node !== "object" || !("props" in node)) return [];
+    const el = node as El;
+    return [...(el.type === GoalOnMount ? [el] : []), ...goals(el.props.children)];
+  };
+  const listingTree = async () => {
+    const el = await CitySubPage(props("krasnodar"));
+    return (el.type as (p: unknown) => Promise<unknown>)(el.props);
+  };
+
+  beforeEach(() => {
+    city.getCityScope.mockResolvedValue({ region: false, nearby: false, cityIds: [krasnodar.id], near: null });
+  });
+
+  it("гостю — одна цель с ключом объявления, без параметров", async () => {
+    const found = goals(await listingTree());
+    expect(found).toHaveLength(1);
+    expect(found[0].props).toEqual({ goal: "listing_view", showKey: LISTING_ID });
+  });
+
+  it("владельцу на своём объявлении — нет", async () => {
+    vi.mocked(auth).mockResolvedValueOnce({ user: { id: "U1", role: "user", bannedAt: null } } as never);
+    expect(goals(await listingTree())).toEqual([]);
   });
 });

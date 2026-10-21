@@ -44,6 +44,7 @@ import { findThreadByListing } from "@/server/chat";
 import { getDb } from "@/lib/db";
 import { events } from "@db/schema";
 import { newId } from "@/lib/id";
+import { GoalOnMount } from "@/components/analytics/GoalOnMount";
 
 export const dynamic = "force-dynamic";
 
@@ -318,6 +319,8 @@ async function ListingPage({
         crumbs.map((c) => ({ name: c.label, url: c.href })),
         siteUrl(),
       )} />
+      {/* Свой просмотр владельца — не интерес покупателя. */}
+      {!isOwn && <GoalOnMount goal="listing_view" showKey={listing.id} />}
       <Breadcrumbs items={visibleCrumbs} />
       {/* «Поделиться» — справа от названия: рядом с тем, чем делятся, и на
         * телефоне, и на десктопе. Делится канонический адрес без дат и «Где». */}

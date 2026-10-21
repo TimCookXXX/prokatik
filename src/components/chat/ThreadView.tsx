@@ -27,6 +27,7 @@ import { isUnreadFor } from "@/lib/chat/unread";
 import { TypingIndicator } from "@/components/chat/TypingIndicator";
 import { content } from "@theme/content";
 import type { ThreadMessage } from "@/server/chat";
+import { reachGoal } from "@/components/analytics/goals";
 
 const t = content.chat;
 
@@ -380,6 +381,7 @@ export function ThreadView({
         if (mode.kind === "new") {
           const res = await startThread({ listingId: mode.listingId, body });
           if (!res.ok) { fail(res.error); return; }
+          reachGoal("chat_started");
           upsert([res.data.message]);
           setPending([]);
           router.replace(`/chat/${res.data.threadId}` as never);

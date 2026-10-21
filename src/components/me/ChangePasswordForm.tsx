@@ -50,7 +50,7 @@ export function ChangePasswordForm() {
   }
 
   return (
-    <form onSubmit={submit} className="flex max-w-sm flex-col gap-3">
+    <form name="password_change" onSubmit={submit} className="flex max-w-sm flex-col gap-3">
       <label className="flex flex-col gap-1 text-sm">
         Текущий пароль
         <PasswordInput required autoComplete="current-password" className={INPUT}
