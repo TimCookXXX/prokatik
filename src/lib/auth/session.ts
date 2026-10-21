@@ -4,12 +4,12 @@ import { getDb } from "@/lib/db";
 import { sessions } from "@db/schema";
 import { getEnv } from "@/lib/env";
 import { sessionCookieNameFor } from "@/lib/auth/cookie-name";
+import { SESSION_TTL_SECONDS } from "@/lib/auth/session-ttl";
 
 // Общий механизм выдачи сессии для всех способов входа: VK, почта с паролем,
 // dev-логин. Сессия — строка в БД, cookie хранит только её токен, поэтому
 // удаление строки отзывает доступ мгновенно (на этом держится бан).
 
-const SESSION_TTL_SECONDS = 30 * 24 * 60 * 60;
 export const sessionTtlSeconds = SESSION_TTL_SECONDS;
 
 export function sessionCookieName(): string {

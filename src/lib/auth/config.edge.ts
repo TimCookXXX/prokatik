@@ -1,6 +1,7 @@
 import type { NextAuthConfig } from "next-auth";
 import Yandex from "next-auth/providers/yandex";
 import { getEnv } from "@/lib/env";
+import { SESSION_TTL_SECONDS } from "@/lib/auth/session-ttl";
 
 export function buildEdgeConfig(): NextAuthConfig {
   const env = getEnv();
@@ -12,7 +13,7 @@ export function buildEdgeConfig(): NextAuthConfig {
 
   return {
     providers,
-    session: { strategy: "database", maxAge: 30 * 24 * 60 * 60 },
+    session: { strategy: "database", maxAge: SESSION_TTL_SECONDS },
     secret: env.NEXTAUTH_SECRET,
     pages: { signIn: "/login" },
     callbacks: {
@@ -33,18 +34,29 @@ export function buildEdgeConfig(): NextAuthConfig {
             bannedAt: user.bannedAt ?? null,
             banReason: user.banReason ?? null,
             // Свежесть аккаунта для цели «Зарегистрировался»
-            // (lib/analytics/signup.ts): строка пользователя уже прочитана
-            // адаптером, запроса не добавляет. Строками: auth() отдаёт сессию
-            // через JSON, и Date до страниц не доезжает.
+            // (lib/analytics/signup.ts): строки пользователя и сессии уже
+            // прочитаны адаптером, запроса не добавляет. Строками: auth()
+            // отдаёт сессию через JSON, и Date до страниц не доезжает.
             signup: {
               createdAt: isoOrNull(user.createdAt),
               emailVerified: isoOrNull(user.emailVerified),
+              sessionIssuedAt: sessionIssuedAt(session.expires),
             },
           },
         };
       },
     },
   };
+}
+
+// Когда выдана сессия. Отдельной колонки нет, но срок у всех способов входа
+// один: issueSession и Auth.js ставят expires = выдача + SESSION_TTL_SECONDS.
+// Auth.js продлевает строку не чаще раза в сутки (updateAge) и в callback
+// отдаёт срок до продления, так что первые сутки это ровно момент выдачи —
+// окна цели signup с запасом хватает.
+function sessionIssuedAt(expires: unknown): string | null {
+  const at = expires instanceof Date ? expires.getTime() : Date.parse(typeof expires === "string" ? expires : "");
+  return Number.isNaN(at) ? null : new Date(at - SESSION_TTL_SECONDS * 1000).toISOString();
 }
 
 function isoOrNull(value: unknown): string | null {

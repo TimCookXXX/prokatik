@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  SIGNUP_GOAL_WINDOW_MS, isFreshSignup, signupMethod, signupMoment,
+  SIGNUP_GOAL_WINDOW_MS, SIGNUP_SESSION_SKEW_MS, isFreshSignup, signupMethod, signupMoment,
 } from "@/lib/analytics/signup";
 
 const now = Date.parse("2026-10-21T12:00:00.000Z");
@@ -21,26 +21,52 @@ describe("signupMoment", () => {
 });
 
 describe("isFreshSignup", () => {
+  // Сессия выдана в момент регистрации: ссылка из письма, возврат с OAuth.
+  const fresh = (createdAt: string | null, emailVerified: string | null = null) => ({
+    createdAt, emailVerified, sessionIssuedAt: emailVerified ?? createdAt,
+  });
+
   it("свежий — в пределах окна", () => {
-    expect(isFreshSignup({ createdAt: ago(60_000), emailVerified: null }, now)).toBe(true);
-    expect(isFreshSignup({ createdAt: ago(SIGNUP_GOAL_WINDOW_MS - 1), emailVerified: null }, now)).toBe(true);
-    expect(isFreshSignup({ createdAt: ago(SIGNUP_GOAL_WINDOW_MS), emailVerified: null }, now)).toBe(false);
+    expect(isFreshSignup(fresh(ago(60_000)), now)).toBe(true);
+    expect(isFreshSignup(fresh(ago(SIGNUP_GOAL_WINDOW_MS - 1)), now)).toBe(true);
+    expect(isFreshSignup(fresh(ago(SIGNUP_GOAL_WINDOW_MS)), now)).toBe(false);
   });
 
   it("почту, брошенную давно и подтверждённую сейчас, считает свежей", () => {
-    expect(isFreshSignup({ createdAt: ago(7 * 86_400_000), emailVerified: ago(10_000) }, now)).toBe(true);
+    expect(isFreshSignup(fresh(ago(7 * 86_400_000), ago(10_000)), now)).toBe(true);
   });
 
   it("давний аккаунт — не регистрация", () => {
-    expect(isFreshSignup({ createdAt: ago(86_400_000), emailVerified: ago(86_000_000) }, now)).toBe(false);
+    expect(isFreshSignup(fresh(ago(86_400_000), ago(86_000_000)), now)).toBe(false);
   });
 
   it("отметка чуть из будущего (часы разошлись) — свежая", () => {
-    expect(isFreshSignup({ createdAt: ago(-2000), emailVerified: null }, now)).toBe(true);
+    expect(isFreshSignup(fresh(ago(-2000)), now)).toBe(true);
   });
 
   it("без дат — не свежий", () => {
-    expect(isFreshSignup({ createdAt: null, emailVerified: null }, now)).toBe(false);
+    expect(isFreshSignup(fresh(null), now)).toBe(false);
+  });
+
+  // Ссылку из письма открыли во встроенном браузере почты — там регистрация.
+  // Потом вошли паролем в Safari: аккаунт ещё свежий, флага в localStorage
+  // Safari нет, но сессия выдана позже — это вход, а не регистрация.
+  it("сессия выдана позже регистрации (вход с другого устройства) — не регистрация", () => {
+    const verified = ago(10 * 60_000);
+    expect(isFreshSignup({ createdAt: ago(86_400_000), emailVerified: verified, sessionIssuedAt: ago(60_000) }, now))
+      .toBe(false);
+    expect(isFreshSignup({ createdAt: ago(10 * 60_000), emailVerified: null, sessionIssuedAt: ago(5 * 60_000) }, now))
+      .toBe(false);
+  });
+
+  it("сессия выдана вслед за созданием, с разбросом часов, — регистрация", () => {
+    const created = ago(5 * 60_000);
+    const issued = new Date(Date.parse(created) + SIGNUP_SESSION_SKEW_MS - 1000).toISOString();
+    expect(isFreshSignup({ createdAt: created, emailVerified: null, sessionIssuedAt: issued }, now)).toBe(true);
+  });
+
+  it("срок сессии неизвестен — не регистрация", () => {
+    expect(isFreshSignup({ createdAt: ago(60_000), emailVerified: null, sessionIssuedAt: null }, now)).toBe(false);
   });
 });
 

@@ -35,25 +35,25 @@ beforeEach(() => {
 
 describe("freshSignupMethod", () => {
   it("давний аккаунт — null, в базу не ходит", async () => {
-    const user = { id: "u1", createdAt: iso(SIGNUP_GOAL_WINDOW_MS + 1), emailVerified: null };
+    const user = { id: "u1", createdAt: iso(SIGNUP_GOAL_WINDOW_MS + 1), emailVerified: null, sessionIssuedAt: iso(SIGNUP_GOAL_WINDOW_MS + 1) };
     expect(await freshSignupMethod(user, now)).toBeNull();
     expect(db.selects).toBe(0);
   });
 
   it("свежий OAuth — провайдер из accounts", async () => {
     db.providers = ["yandex"];
-    expect(await freshSignupMethod({ id: "u1", createdAt: iso(5000), emailVerified: null }, now)).toBe("yandex");
+    expect(await freshSignupMethod({ id: "u1", createdAt: iso(5000), emailVerified: null, sessionIssuedAt: iso(5000) }, now)).toBe("yandex");
     db.providers = ["vk"];
-    expect(await freshSignupMethod({ id: "u1", createdAt: iso(5000), emailVerified: null }, now)).toBe("vk");
+    expect(await freshSignupMethod({ id: "u1", createdAt: iso(5000), emailVerified: null, sessionIssuedAt: iso(5000) }, now)).toBe("vk");
   });
 
   it("почта, подтверждённая только что, — email", async () => {
-    const user = { id: "u1", createdAt: iso(3 * 86_400_000), emailVerified: iso(2000) };
+    const user = { id: "u1", createdAt: iso(3 * 86_400_000), emailVerified: iso(2000), sessionIssuedAt: iso(2000) };
     expect(await freshSignupMethod(user, now)).toBe("email");
   });
 
   it("сбой базы — null, шапка не падает", async () => {
     db.fail = true;
-    expect(await freshSignupMethod({ id: "u1", createdAt: iso(1000), emailVerified: null }, now)).toBeNull();
+    expect(await freshSignupMethod({ id: "u1", createdAt: iso(1000), emailVerified: null, sessionIssuedAt: iso(1000) }, now)).toBeNull();
   });
 });

@@ -2,12 +2,13 @@
 import { describe, expect, it } from "vitest";
 import type { Session } from "next-auth";
 import { buildEdgeConfig } from "@/lib/auth/config.edge";
+import { SESSION_TTL_SECONDS } from "@/lib/auth/session-ttl";
 
 // auth() отдаёт сессию через JSON: даты в ней — строки ISO. Свежесть аккаунта
 // для цели `signup` едет так же, а не объектом Date, которого на странице нет.
 describe("session callback", () => {
-  const run = (user: Record<string, unknown>) => {
-    const session = { user: {}, expires: "" } as unknown as Session;
+  const run = (user: Record<string, unknown>, expires: unknown = "") => {
+    const session = { user: {}, expires } as unknown as Session;
     const cb = buildEdgeConfig().callbacks!.session! as unknown as (a: unknown) => Session;
     return cb({ session, user: { id: "u1", role: "user", bannedAt: null, banReason: null, ...user } });
   };
@@ -20,12 +21,21 @@ describe("session callback", () => {
     expect(s.user.signup).toEqual({
       createdAt: "2026-10-21T10:00:00.000Z",
       emailVerified: "2026-10-21T11:00:00.000Z",
+      sessionIssuedAt: null,
     });
+  });
+
+  // Колонки «выдана» у сессии нет: срок у всех способов входа один, и момент
+  // выдачи — срок минус SESSION_TTL_SECONDS.
+  it("кладёт момент выдачи сессии по её сроку", () => {
+    const issued = Date.parse("2026-10-21T11:00:05.000Z");
+    const s = run({ createdAt: new Date(issued - 1000), emailVerified: null }, new Date(issued + SESSION_TTL_SECONDS * 1000));
+    expect(s.user.signup.sessionIssuedAt).toBe("2026-10-21T11:00:05.000Z");
   });
 
   it("у OAuth подтверждения нет — null", () => {
     const s = run({ createdAt: new Date("2026-10-21T10:00:00.000Z"), emailVerified: null });
-    expect(s.user.signup).toEqual({ createdAt: "2026-10-21T10:00:00.000Z", emailVerified: null });
+    expect(s.user.signup).toEqual({ createdAt: "2026-10-21T10:00:00.000Z", emailVerified: null, sessionIssuedAt: null });
   });
 
   // Результат callback'а уходит браузеру по GET /api/auth/session — любому

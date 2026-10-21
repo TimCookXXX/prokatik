@@ -24,14 +24,16 @@
 cookie хранит только её токен. Удаление строки мгновенно отзывает доступ — на
 этом держатся бан и сброс пароля.
 
-- TTL — 30 дней (`src/lib/auth/session.ts`).
+- TTL — `SESSION_TTL_SECONDS` (`src/lib/auth/session-ttl.ts`), общий для
+  `issueSession()` и Auth.js.
 - Имя cookie: `authjs.session-token`, в HTTPS-окружении —
   `__Secure-authjs.session-token`. Выбор по префиксу `NEXTAUTH_URL`.
 - Флаги: `httpOnly`, `sameSite=lax`, `secure` только на https, `path=/`.
 - Что лежит в `session.user` сверх стандартного — callback `session` в
-  `src/lib/auth/config.edge.ts`: роль, бан и `signup` (создание аккаунта и
-  подтверждение почты, для цели Метрики `signup` — [seo.md](seo.md#цели)).
-  Всё берётся из строки пользователя, которую адаптер уже прочитал. `auth()`
+  `src/lib/auth/config.edge.ts`: роль, бан и `signup` (создание аккаунта,
+  подтверждение почты и момент выдачи сессии, для цели Метрики `signup` —
+  [seo.md](seo.md#цели)).
+  Всё берётся из строк пользователя и сессии, которые адаптер уже прочитал. `auth()`
   отдаёт сессию через JSON, поэтому даты в ней — строки, а не `Date`.
 - Callback собирает сессию заново списком полей, а не правит то, что дал
   Auth.js: там токен сессии и вся строка пользователя с хэшем пароля, а

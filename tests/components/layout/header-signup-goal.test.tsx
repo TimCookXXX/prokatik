@@ -31,10 +31,11 @@ vi.mock("@/components/analytics/goals", () => ({ reachGoal }));
 import { Header } from "@/components/layout/Header";
 import { CityPreferenceProvider } from "@/components/layout/CityPreference";
 
-const session = (createdAt: string) => ({
+// Сессия выдана вслед за созданием аккаунта — возврат с провайдера.
+const session = (createdAt: string, sessionIssuedAt = createdAt) => ({
   user: {
     id: "u1", name: "Аня", email: "a@ya.ru", image: null, role: "user", bannedAt: null, banReason: null,
-    signup: { createdAt, emailVerified: null },
+    signup: { createdAt, emailVerified: null, sessionIssuedAt },
   },
 });
 
@@ -57,6 +58,14 @@ describe("Header: цель signup", () => {
 
   it("давний аккаунт — цели нет и в accounts шапка не ходит", async () => {
     authMock.mockResolvedValue(session("2026-01-01T00:00:00.000Z"));
+    await renderHeader();
+    expect(reachGoal).not.toHaveBeenCalled();
+    expect(db.selects).toBe(0);
+  });
+
+  it("свежий аккаунт, но сессия выдана позже — вход с другого устройства, цели нет", async () => {
+    const created = Date.now() - 10 * 60_000;
+    authMock.mockResolvedValue(session(new Date(created).toISOString(), new Date(created + 5 * 60_000).toISOString()));
     await renderHeader();
     expect(reachGoal).not.toHaveBeenCalled();
     expect(db.selects).toBe(0);
