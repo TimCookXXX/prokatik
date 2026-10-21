@@ -263,7 +263,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // выхода и на тот же аккаунт, но не на чужой аккаунт, вошедший с этого
     // компьютера: его заходы — не свои.
     isInternal: admin || (stored?.isInternal === true && (userId === null || stored.userId === userId)),
-    firstSource: source,
+    // Строка, заведённая сменой id, начинается со входа или выхода, а не с
+    // перехода: referrer её первой страницы — страница входа или сам сайт.
+    firstSource: switching ? { kind: "account", label: decision.reason } : source,
     ymClientId: newCid,
     previous: markGuest
       ? { id: visitorId, markInternal: admin, events: [{ type: "login", id: newIdAt(guestMarkAt.getTime()), createdAt: guestMarkAt }] }

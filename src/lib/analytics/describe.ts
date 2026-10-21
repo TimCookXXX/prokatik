@@ -78,6 +78,7 @@ export function describeSource(source: Source | null | undefined): string {
     case "ad": return label ? s.fromAd(s.ad[label] ?? s.search[label] ?? s.social[label] ?? label) : s.fromAdAny;
     case "campaign": return s.fromCampaign(label);
     case "referral": return s.fromSite(label);
+    case "account": return s.account[label] ?? s.account.login;
   }
 }
 

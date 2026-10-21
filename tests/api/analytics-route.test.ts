@@ -271,6 +271,26 @@ describe("POST /api/analytics: связка с аккаунтом", () => {
     expect(w.previous!.events.map((e) => e.type)).toEqual(["login"]);
   });
 
+  // Первая страница после входа Яндекс ID — с referrer'ом oauth.yandex.ru, после
+  // входа почтой — клиентский переход: ни то ни другое не «откуда пришёл».
+  it("строка, заведённая сменой id, начинается со входа или выхода, а не с referrer'а", async () => {
+    state.stored = { userId: null, isInternal: false, ymClientId: null, hasEvents: true };
+    signedIn("u1");
+    const oauth = { events: [{ type: "pageview", path: "/", doc: true, ref: "https://oauth.yandex.ru/authorize" }] };
+    await send({ body: oauth, cookie: SESSION });
+    expect(lastWrite().firstSource).toEqual({ kind: "account", label: "login" });
+
+    visitorSwitchGuard.clear();
+    state.stored = { userId: "u1", isInternal: false, ymClientId: null, hasEvents: true };
+    vi.mocked(auth).mockResolvedValue(null as never);
+    await send({ vid: "22222222-2222-4333-8444-555555555555" });
+    expect(lastWrite().firstSource).toEqual({ kind: "account", label: "logout" });
+
+    signedIn("u2");
+    await send({ vid: "33333333-2222-4333-8444-555555555555", cookie: SESSION });
+    expect(lastWrite().firstSource).toEqual({ kind: "account", label: "account" });
+  });
+
   // Общий момент и соседние id связали бы гостевую строку со строкой
   // аккаунта, а история до входа с аккаунтом не связывается.
   it("отметка входа у гостя — временем его последнего захода, без общего ключа со строкой аккаунта", async () => {

@@ -121,6 +121,9 @@ describe("describeSource", () => {
     [{ kind: "campaign", label: "osen" }, "по ссылке с меткой «osen»"],
     [{ kind: "referral", label: "example.ru" }, "с сайта example.ru"],
     [{ kind: "direct", label: "" }, "прямой заход"],
+    [{ kind: "account", label: "login" }, "после входа в аккаунт"],
+    [{ kind: "account", label: "logout" }, "после выхода из аккаунта"],
+    [{ kind: "account", label: "account" }, "после смены аккаунта"],
   ] as const)("%o → %s", (source, phrase) => {
     expect(describeSource(source)).toBe(phrase);
   });

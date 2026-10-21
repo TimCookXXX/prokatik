@@ -652,6 +652,13 @@ export const content = {
       fromAdAny: "реклама",
       fromCampaign: (label: string) => `по ссылке с меткой «${label}»`,
       fromSite: (host: string) => `с сайта ${host}`,
+      // Браузер получил новый id при входе, выходе или смене аккаунта, или
+      // документ открыт возвратом со страницы входа Яндекс ID / VK ID.
+      account: {
+        login: "после входа в аккаунт",
+        logout: "после выхода из аккаунта",
+        account: "после смены аккаунта",
+      } as Record<string, string>,
       campaign: (name: string) => `кампания «${name}»`,
     },
     // Страницы — винительным падежом, после «Открыл».

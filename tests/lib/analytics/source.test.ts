@@ -49,8 +49,27 @@ describe("classifySource", () => {
     expect(from("/", "https://www.inrenta.ru/")).toEqual({ kind: "internal", label: "" });
   });
 
-  // Яндекс.Браузер шлёт referrer страницы, с которой ушли, а не себя.
-  it("поддомен Яндекса — тоже Яндекс", () => {
-    expect(from("/", "https://mail.yandex.ru/")).toEqual({ kind: "search", label: "yandex" });
+  // Поисковик — сам поисковый хост: почта и сервисы тех же компаний — не поиск.
+  it.each([
+    "https://mail.yandex.ru/", "https://market.yandex.ru/", "https://mail.google.com/mail/u/0/",
+    "https://accounts.google.com/", "https://e.mail.ru/inbox/",
+  ])("%s — сайт, а не поиск", (ref) => {
+    expect(from("/", ref)).toEqual({ kind: "referral", label: new URL(ref).hostname });
+  });
+
+  it.each(["https://yandex.com.tr/search/", "https://yandex.kz/", "https://www.google.co.uk/", "https://google.com.ua/"])(
+    "%s — поиск",
+    (ref) => {
+      expect(from("/", ref).kind).toBe("search");
+    },
+  );
+
+  // Возврат со страницы входа Яндекс ID или VK ID — продолжение входа, а не
+  // переход из поиска или соцсети.
+  it.each([
+    "https://oauth.yandex.ru/authorize?x=1", "https://passport.yandex.ru/auth", "https://oauth.yandex.com/",
+    "https://id.vk.com/auth", "https://id.vk.ru/", "https://oauth.vk.com/authorize", "https://login.vk.com/",
+  ])("%s — после входа в аккаунт", (ref) => {
+    expect(from("/", ref)).toEqual({ kind: "account", label: "login" });
   });
 });

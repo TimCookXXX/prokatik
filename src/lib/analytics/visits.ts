@@ -89,8 +89,16 @@ export function sourceOf(props: Record<string, unknown>): Source | null {
   return { kind: src.kind as Source["kind"], label: typeof src.label === "string" ? src.label : "" };
 }
 
+/** Визит начался со смены id при входе: после неё первая страница — не переход. */
+const AFTER_LOGIN: VisitEntry = { kind: "entry", source: { kind: "account", label: "login" }, campaign: null };
+
 function entryOf(events: readonly TimelineEvent[]): VisitEntry {
-  const first = events.find((e) => !SERVICE_TYPES.has(e.type));
+  const firstIndex = events.findIndex((e) => !SERVICE_TYPES.has(e.type));
+  // Вход почтой уводит на страницу клиентским переходом, а входа Яндекс ID и
+  // VK ID referrer — страница провайдера: источник визита — сам вход.
+  if (events.slice(0, firstIndex === -1 ? events.length : firstIndex)
+    .some((e) => e.type === "login" && e.props.via === "switch")) return AFTER_LOGIN;
+  const first = events[firstIndex];
   if (!first || first.type !== "pageview" || first.props.doc !== true) return { kind: "continued" };
   const utm = first.props.utm as Record<string, unknown> | undefined;
   const campaign = utm && typeof utm.utm_campaign === "string" ? utm.utm_campaign : null;
@@ -127,8 +135,17 @@ export function mergePageViews(events: readonly TimelineEvent[]): TimelineEvent[
   return events.filter((_, i) => !hidden.has(i));
 }
 
-/** Лента браузера → визиты, по времени. Источник считается до склейки показов. */
-export function splitVisits(events: readonly TimelineEvent[], gapMs: number = VISIT_GAP_MS): Visit[] {
+/**
+ * Лента браузера → визиты, по времени. Источник считается до склейки показов.
+ * `rowStart` — первый источник самой строки браузера, если лента начинается с
+ * её начала: строку, заведённую выходом из аккаунта, первый визит продолжает,
+ * а не «вкладка была открыта».
+ */
+export function splitVisits(
+  events: readonly TimelineEvent[],
+  gapMs: number = VISIT_GAP_MS,
+  rowStart: Source | null = null,
+): Visit[] {
   const sorted = [...events].sort(byTime);
   const groups: TimelineEvent[][] = [];
   for (const ev of sorted) {
@@ -137,12 +154,18 @@ export function splitVisits(events: readonly TimelineEvent[], gapMs: number = VI
     if (current && last && ev.at.getTime() - last.at.getTime() < gapMs) current.push(ev);
     else groups.push([ev]);
   }
-  return groups.map((group) => ({
-    start: group[0].at,
-    end: group[group.length - 1].at,
-    entry: entryOf(group),
-    items: mergePageViews(group).map((event) => ({ kind: "event" as const, event })),
-  }));
+  return groups.map((group, i) => {
+    let entry = entryOf(group);
+    if (i === 0 && entry.kind === "continued" && rowStart?.kind === "account") {
+      entry = { kind: "entry", source: rowStart, campaign: null };
+    }
+    return {
+      start: group[0].at,
+      end: group[group.length - 1].at,
+      entry,
+      items: mergePageViews(group).map((event) => ({ kind: "event" as const, event })),
+    };
+  });
 }
 
 /**

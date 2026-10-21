@@ -28,7 +28,9 @@ function Item({ item, phrase }: { item: VisitItem; phrase: string }) {
 }
 
 export function VisitorTimeline({ card, now }: { card: VisitorCard; now: Date }) {
-  const { visits, elsewhere } = attachActions(splitVisits(card.events), card.actions);
+  // Лента с начала строки — её первый визит продолжает вход или выход.
+  const rowStart = card.truncated ? null : card.visitor.firstSource;
+  const { visits, elsewhere } = attachActions(splitVisits(card.events, undefined, rowStart), card.actions);
   const signupMethod = card.user ? describeSignIn(card.user.providers, card.user.hasPassword) : "";
 
   return (

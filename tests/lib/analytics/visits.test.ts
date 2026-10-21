@@ -54,6 +54,31 @@ describe("splitVisits", () => {
     expect(visit.entry).toEqual({ kind: "entry", source: { kind: "social", label: "telegram" }, campaign: null });
   });
 
+  // Вход почтой уводит клиентским переходом, Яндекс ID и VK ID возвращают с
+  // referrer'ом провайдера: источник такого визита — сам вход.
+  it("визит после смены id при входе — «после входа», а не продолжение вкладки", () => {
+    const [visit] = splitVisits([
+      ev(0, "login", { userId: "u1", path: null, props: { via: "switch" } }),
+      ev(0, "pageview", { path: "/cabinet" }),
+    ]);
+    expect(visit.entry).toEqual({ kind: "entry", source: { kind: "account", label: "login" }, campaign: null });
+    // Строка заведена уже с сессией: источник — её первая страница.
+    const [created] = splitVisits([
+      ev(0, "login", { userId: "u1", path: null, props: { via: "create" } }),
+      doc(0, { kind: "search", label: "google" }),
+    ]);
+    expect(created.entry).toMatchObject({ source: { kind: "search", label: "google" } });
+  });
+
+  it("первый визит строки, заведённой выходом, — «после выхода»; только когда лента с её начала", () => {
+    const events = [ev(0, "pageview", { path: "/" }), ev(120, "pageview", { path: "/search" })];
+    const logout = { kind: "account" as const, label: "logout" };
+    const visits = splitVisits(events, undefined, logout);
+    expect(visits[0].entry).toEqual({ kind: "entry", source: logout, campaign: null });
+    expect(visits[1].entry).toEqual({ kind: "continued" });
+    expect(splitVisits(events)[0].entry).toEqual({ kind: "continued" });
+  });
+
   it("визит с внутреннего перехода — продолжение, вкладка была открыта", () => {
     const visits = splitVisits([doc(0, { kind: "direct", label: "" }), ev(120, "pageview", { path: "/search" })]);
     expect(visits[1].entry).toEqual({ kind: "continued" });
