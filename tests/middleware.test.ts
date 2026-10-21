@@ -127,3 +127,108 @@ describe("middleware matcher", () => {
     }
   });
 });
+
+describe("middleware visitor cookie", () => {
+  // Кука vid — id браузера для своей статистики посещений. Строку в базе она не
+  // заводит (это делает роут сбора), поэтому здесь проверяется только сама кука.
+  const BROWSER = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1";
+  const VID = "0f8fad5b-d9cb-469f-a165-70867728950e";
+  const YEAR = 60 * 60 * 24 * 365;
+
+  function visit(
+    path: string,
+    { cookies = {}, headers = {}, base = "https://inrenta.ru" }: {
+      cookies?: Record<string, string>; headers?: Record<string, string>; base?: string;
+    } = {},
+  ) {
+    const cookie = Object.entries(cookies).map(([k, v]) => `${k}=${v}`).join("; ");
+    return middleware(new NextRequest(new URL(`${base}${path}`), {
+      headers: { "user-agent": BROWSER, ...(cookie ? { cookie } : {}), ...headers },
+    }));
+  }
+  const docLoad = { "sec-fetch-dest": "document" };
+  const fetchEmpty = { "sec-fetch-dest": "empty" };
+
+  it("выдаёт vid, если куки нет: UUID, httpOnly, год, на весь сайт", () => {
+    for (const headers of [docLoad, fetchEmpty, {}]) {
+      const set = visit("/", { headers }).cookies.get("vid");
+      expect(set?.value, JSON.stringify(headers)).toMatch(/^[0-9a-f-]{36}$/);
+      expect(set).toMatchObject({ httpOnly: true, sameSite: "lax", secure: true, path: "/", maxAge: YEAR });
+    }
+  });
+
+  it("каждому новому браузеру — свой id", () => {
+    expect(visit("/").cookies.get("vid")?.value).not.toBe(visit("/").cookies.get("vid")?.value);
+  });
+
+  it("не трогает валидную куку на запросах, кроме загрузки документа", () => {
+    expect(visit("/kazan", { cookies: { vid: VID }, headers: fetchEmpty }).cookies.get("vid")).toBeUndefined();
+    expect(visit("/api/search/suggest?q=a", { cookies: { vid: VID } }).cookies.get("vid")).toBeUndefined();
+  });
+
+  it("продлевает валидную куку на загрузке документа, не меняя значения", () => {
+    const set = visit("/kazan", { cookies: { vid: VID }, headers: docLoad }).cookies.get("vid");
+    expect(set).toMatchObject({ value: VID, maxAge: YEAR });
+  });
+
+  it("переставляет битую куку", () => {
+    for (const bad of ["garbage", `${VID}x`, "1' or '1'='1"]) {
+      const set = visit("/", { cookies: { vid: bad }, headers: fetchEmpty }).cookies.get("vid");
+      expect(set?.value, bad).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+      expect(set?.value, bad).not.toBe(bad);
+    }
+  });
+
+  it("ставит куку и на редирект защищённого пути, редирект прежний", () => {
+    const res = visit("/cabinet", { headers: docLoad });
+    expect(res.status).toBe(307);
+    expect(res.headers.get("location")).toBe(`https://inrenta.ru/login?from=${encodeURIComponent("/cabinet")}`);
+    expect(res.cookies.get("vid")?.value).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it("флаг сессии и пропуск запроса с кукой не сломаны", () => {
+    const res = visit("/cabinet", { cookies: { [SESSION_COOKIES[0]]: "t" }, headers: docLoad });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("x-middleware-request-x-has-session")).toBe("1");
+    expect(res.cookies.get("vid")).toBeDefined();
+  });
+
+  it("после отказа от учёта не выдаёт и стирает оставшуюся", () => {
+    expect(visit("/", { cookies: { noanalytics: "1" }, headers: docLoad }).cookies.get("vid")).toBeUndefined();
+    const cleared = visit("/", { cookies: { noanalytics: "1", vid: VID }, headers: docLoad }).cookies.get("vid");
+    expect(cleared?.value).toBe("");
+    expect(cleared?.expires).toEqual(new Date(0));
+    // На редиректе — то же.
+    expect(visit("/cabinet", { cookies: { noanalytics: "1" } }).cookies.get("vid")).toBeUndefined();
+  });
+
+  it("ботам не выдаёт", () => {
+    for (const ua of [
+      "Mozilla/5.0 (compatible; YandexBot/3.0; +http://yandex.com/bots)",
+      "Mozilla/5.0 (Linux; Android 6.0.1; Nexus 5X Build/MMB29P) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+      "curl/8.4.0",
+      "",
+    ]) {
+      expect(visit("/", { headers: { ...docLoad, "user-agent": ua } }).cookies.get("vid"), ua).toBeUndefined();
+    }
+  });
+
+  // Prefetch — не заход: срок не продлевает, но id получает, если его нет, —
+  // события открытой из него страницы должно быть к чему отнести.
+  it("prefetch не продлевает куку, но выдаёт её, если нет", () => {
+    const prefetches = [
+      { ...fetchEmpty, "next-router-prefetch": "1", rsc: "1" },
+      { ...docLoad, "sec-purpose": "prefetch" },
+      { ...docLoad, "sec-purpose": "prefetch;prerender" },
+      { ...docLoad, purpose: "prefetch" },
+    ];
+    for (const headers of prefetches) {
+      expect(visit("/kazan", { cookies: { vid: VID }, headers }).cookies.get("vid"), JSON.stringify(headers)).toBeUndefined();
+      expect(visit("/kazan", { headers }).cookies.get("vid")?.value, JSON.stringify(headers)).toMatch(/^[0-9a-f-]{36}$/);
+    }
+  });
+
+  it("без https кука без Secure", () => {
+    expect(visit("/", { base: "http://localhost:3000" }).cookies.get("vid")?.secure).toBe(false);
+  });
+});
