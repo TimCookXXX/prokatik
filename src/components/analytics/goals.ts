@@ -13,6 +13,7 @@
 // выключает.
 
 import { ZERO_REASONS } from "@/lib/search/zero-reason";
+import { analyticsAllowedHere } from "./allowed-here";
 import { SIGNUP_METHODS } from "@/lib/analytics/signup";
 
 type ParamSpec = Readonly<Record<string, readonly (string | boolean)[]>>;
@@ -74,7 +75,10 @@ function safeParams(name: Goal, params: unknown): SafeParams | undefined {
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
+// Отказ от учёта проверяется на каждой цели, а не раз при старте: его могли
+// поставить в другой вкладке, пока счётчик этой загрузки работает.
 function send(counterId: number, [name, params]: Call): void {
+  if (!analyticsAllowedHere()) return;
   try {
     if (params) window.ym?.(counterId, "reachGoal", name, params);
     else window.ym?.(counterId, "reachGoal", name);

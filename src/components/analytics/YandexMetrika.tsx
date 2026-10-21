@@ -91,6 +91,10 @@ export const GOALS_ATTACH_STEP_MS = 100;
 // На публичной странице ym ждём, а не выключаем: сменись порядок эффектов,
 // ошибка стоила бы задержки, а не всех целей до следующей загрузки. Не
 // дождались — очередь остаётся ждать со своим потолком.
+//
+// Отказ от учёта в другой вкладке: счётчик этой загрузки уже поднят, и
+// Вебвизор пишет, пока вкладка открыта. Вкладка, к которой вернулись после
+// отказа, перезагружается — новая загрузка счётчик не поднимет.
 export function MetrikaGoals({ id }: { id: number }) {
   useEffect(() => {
     if (isMetrikaSkipped(window.location.pathname) || !analyticsAllowedHere()) {
@@ -106,9 +110,28 @@ export function MetrikaGoals({ id }: { id: number }) {
       } else if (++tries < GOALS_ATTACH_TRIES) timer = window.setTimeout(attach, GOALS_ATTACH_STEP_MS);
     };
     attach();
-    return () => window.clearTimeout(timer);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") stopIfOptedOut();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, [id]);
   return null;
+}
+
+/**
+ * Отказ от учёта поставлен, пока счётчик этой загрузки работает (кнопка в
+ * другой вкладке): перезагрузка — новая загрузка счётчик не поднимет. true —
+ * счётчику больше ничего не слать.
+ */
+function stopIfOptedOut(): boolean {
+  if (analyticsAllowedHere()) return false;
+  stopGoals();
+  if (typeof window.ym === "function") reloadDocument();
+  return true;
 }
 
 // ClientID Метрики — в свою статистику, раз на загрузку документа: по нему в
@@ -159,6 +182,9 @@ export function MetrikaPageHits({ id }: { id: number }) {
       if (typeof window.ym === "function") reloadDocument();
       return;
     }
+    // Отказ поставили в другой вкладке, а здесь человек ходит клиентскими
+    // переходами: хит не уходит, вкладка перезагружается без счётчика.
+    if (stopIfOptedOut()) return;
     const href = metrikaSafeHref(`${window.location.origin}${pathname}${search ? `?${search}` : ""}`);
     const last = prev.current;
     if (last && last.view !== view) {

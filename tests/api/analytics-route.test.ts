@@ -252,6 +252,24 @@ describe("POST /api/analytics: связка с аккаунтом", () => {
     expect(w.previous!.events[0].id < w.events[0].id).toBe(true);
   });
 
+  // Отказ от учёта удаляет и строки прежних id: связь живёт только в браузере.
+  it("смена vid — прежний id дописывается в vid_prev первым", async () => {
+    const OLDER = "11111111-2222-4333-8444-555555555555";
+    state.stored = { userId: null, isInternal: false, ymClientId: null, hasEvents: true };
+    signedIn("u1");
+    const res = await send({ cookie: `${SESSION}; vid_prev=${OLDER}` });
+    const prev = res.cookies.get("vid_prev");
+    expect(prev?.value).toBe(`${VID}.${OLDER}`);
+    expect(prev).toMatchObject({ httpOnly: true, path: "/" });
+    expect(res.cookies.get("vid")?.value).not.toBe(VID);
+  });
+
+  it("без смены vid кука vid_prev не трогается", async () => {
+    state.stored = { userId: null, isInternal: false, ymClientId: null, hasEvents: true };
+    const res = await send();
+    expect(res.cookies.get("vid_prev")).toBeUndefined();
+  });
+
   it("аккаунт сменился — новый vid под новый аккаунт", async () => {
     state.stored = { userId: "u1", isInternal: false, ymClientId: null, hasEvents: true };
     signedIn("u2");

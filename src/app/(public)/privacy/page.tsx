@@ -1,10 +1,13 @@
 import type { Metadata } from "next";
+import { cookies } from "next/headers";
 import { content } from "@theme/content";
 import { siteUrl } from "@/lib/site-config";
 import { ruPlural } from "@/lib/plural";
 import {
   BACKUP_RETENTION_DAYS, EVENT_RETENTION_DAYS, VISITOR_RETENTION_DAYS,
 } from "@/lib/analytics/limits";
+import { analyticsAllowed } from "@/lib/analytics/allowed";
+import { PREVIOUS_VISITORS_MAX } from "@/lib/analytics/visitor-cookie";
 import { AnalyticsOptOut } from "@/components/analytics/AnalyticsOptOut";
 
 // Функция, а не объект: адрес сайта читается при запросе, а не при импорте.
@@ -19,7 +22,10 @@ export function generateMetadata(): Metadata {
 /** Якорь раздела с кнопкой отказа: на него ведёт ссылка в подвале. */
 const OPT_OUT_ANCHOR = "opt-out";
 
-export default function PrivacyPage() {
+export default async function PrivacyPage() {
+  // Отказ — по кукам запроса: кнопка без JS должна показать верное состояние.
+  const jar = await cookies();
+  const allowed = analyticsAllowed((name) => jar.get(name)?.value);
   const p = content.privacy;
   const s = p.section;
   const email = content.site.contactEmail;
@@ -58,8 +64,8 @@ export default function PrivacyPage() {
       </p>
 
       <h2 id={OPT_OUT_ANCHOR} className="scroll-mt-24">{s.optOut}</h2>
-      <p>{s.optOutBody}</p>
-      <AnalyticsOptOut />
+      <p>{s.optOutBody(String(PREVIOUS_VISITORS_MAX))}</p>
+      <AnalyticsOptOut allowed={allowed} />
 
       <h2>{s.delete}</h2>
       <p>{s.deleteBody}</p>

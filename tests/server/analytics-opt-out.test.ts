@@ -26,7 +26,14 @@ vi.mock("next/headers", () => ({
 
 vi.mock("drizzle-orm", async (importOriginal) => ({
   ...(await importOriginal<typeof import("drizzle-orm")>()),
-  eq: (column: unknown, value: unknown) => ({ column, value }),
+  inArray: (column: unknown, value: unknown) => ({ column, value }),
+}));
+const nav = vi.hoisted(() => ({ redirects: [] as string[] }));
+vi.mock("next/navigation", () => ({
+  redirect: (to: string) => {
+    nav.redirects.push(to);
+    throw new Error("NEXT_REDIRECT");
+  },
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -40,7 +47,9 @@ vi.mock("@/lib/db", () => ({
   }),
 }));
 
-import { optInToAnalytics, optOutOfAnalytics } from "@/server/actions/analytics";
+import {
+  optInToAnalytics, optInToAnalyticsForm, optOutOfAnalytics, optOutOfAnalyticsForm,
+} from "@/server/actions/analytics";
 import { visitors } from "@db/schema";
 
 const VID = "0f8fad5b-d9cb-469f-a165-70867728950e";
@@ -51,16 +60,29 @@ beforeEach(() => {
   state.deleted = [];
   state.dbDeletes = [];
   state.dbFails = false;
+  nav.redirects = [];
 });
 
 describe("optOutOfAnalytics", () => {
   it("удаляет строку этого браузера, стирает vid и ставит отказ", async () => {
     state.cookies.set("vid", VID);
     expect(await optOutOfAnalytics()).toEqual({ ok: true, data: undefined });
-    expect(state.dbDeletes).toEqual([{ table: visitors, where: { column: visitors.id, value: VID } }]);
-    expect(state.deleted).toEqual(["vid"]);
+    expect(state.dbDeletes).toEqual([{ table: visitors, where: { column: visitors.id, value: [VID] } }]);
+    expect(state.deleted).toEqual(["vid", "vid_prev"]);
     expect(state.set).toHaveLength(1);
     expect(state.set[0]).toMatchObject({ name: "noanalytics", value: "1", options: { httpOnly: false, path: "/" } });
+  });
+
+  // Вход, выход и смена аккаунта дают браузеру новый id; история под
+  // прежними — тоже этого браузера, и отказ обещает удалить и её.
+  it("удаляет и строки прежних id этого браузера из vid_prev", async () => {
+    const GUEST = "11111111-2222-4333-8444-555555555555";
+    const OLD_ACCOUNT = "22222222-2222-4333-8444-555555555555";
+    state.cookies.set("vid", VID);
+    state.cookies.set("vid_prev", `${GUEST}.${OLD_ACCOUNT.toUpperCase()}.garbage`);
+    expect((await optOutOfAnalytics()).ok).toBe(true);
+    expect(state.dbDeletes).toEqual([{ table: visitors, where: { column: visitors.id, value: [VID, GUEST, OLD_ACCOUNT] } }]);
+    expect(state.deleted).toEqual(["vid", "vid_prev"]);
   });
 
   it("без куки id в базу не ходит, но отказ ставит", async () => {
@@ -74,7 +96,7 @@ describe("optOutOfAnalytics", () => {
     state.cookies.set("vid", "1' or '1'='1");
     expect((await optOutOfAnalytics()).ok).toBe(true);
     expect(state.dbDeletes).toEqual([]);
-    expect(state.deleted).toEqual(["vid"]);
+    expect(state.deleted).toEqual(["vid", "vid_prev"]);
   });
 
   // Иначе повторить было бы нечем: id уже стёрт, а строка осталась бы.
@@ -94,5 +116,22 @@ describe("optInToAnalytics", () => {
     expect(state.deleted).toEqual(["noanalytics"]);
     expect(state.set).toEqual([]);
     expect(state.dbDeletes).toEqual([]);
+  });
+});
+
+// Без JS кнопка уходит обычной отправкой формы: тот же отказ и редирект к ней.
+describe("формы без JS", () => {
+  it("отказ: удаляет, ставит куку и возвращает к кнопке", async () => {
+    state.cookies.set("vid", VID);
+    await expect(optOutOfAnalyticsForm()).rejects.toThrow("NEXT_REDIRECT");
+    expect(state.dbDeletes).toHaveLength(1);
+    expect(state.set.map((c) => c.name)).toEqual(["noanalytics"]);
+    expect(nav.redirects).toEqual(["/privacy#opt-out"]);
+  });
+
+  it("возврат: снимает отказ и возвращает к кнопке", async () => {
+    await expect(optInToAnalyticsForm()).rejects.toThrow("NEXT_REDIRECT");
+    expect(state.deleted).toEqual(["noanalytics"]);
+    expect(nav.redirects).toEqual(["/privacy#opt-out"]);
   });
 });

@@ -243,6 +243,21 @@ describe("<MetrikaPageHits>", () => {
     expect(docNav.reloadDocument).toHaveBeenCalledTimes(1);
   });
 
+  // Отказ поставили в другой вкладке: счётчик этой загрузки жив, но хиты не
+  // уходят, а вкладка перезагружается — новая загрузка его не поднимет.
+  it("отказ от учёта в другой вкладке — без хита и с перезагрузкой", () => {
+    nav.pathname = "/krasnodar";
+    const go = mount();
+    document.cookie = "noanalytics=1; path=/";
+    try {
+      go("/krasnodar/instrumenty", "");
+      expect(ym).not.toHaveBeenCalled();
+      expect(docNav.reloadDocument).toHaveBeenCalledTimes(1);
+    } finally {
+      document.cookie = "noanalytics=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/";
+    }
+  });
+
   it("документ открыт в админке (счётчика нет) — без перезагрузки", () => {
     delete window.ym;
     nav.pathname = "/admin";
@@ -317,6 +332,30 @@ describe("<MetrikaGoals>", () => {
     } finally {
       document.cookie = "noanalytics=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/";
     }
+  });
+
+  // Счётчик поднят, а отказ поставили в другой вкладке: цели этой загрузки не
+  // уходят, а вернувшись во вкладку, человек получает её перезагруженной.
+  it("отказ в другой вкладке: цели не уходят, возврат во вкладку — перезагрузка", () => {
+    docNav.reloadDocument.mockClear();
+    render(<MetrikaGoals id={42} />);
+    ym.mockClear();
+    document.cookie = "noanalytics=1; path=/";
+    try {
+      reachGoal("booking_sent");
+      expect(ym).not.toHaveBeenCalledWith(42, "reachGoal", "booking_sent");
+      document.dispatchEvent(new Event("visibilitychange"));
+      expect(docNav.reloadDocument).toHaveBeenCalledTimes(1);
+    } finally {
+      document.cookie = "noanalytics=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/";
+    }
+  });
+
+  it("возврат во вкладку без отказа — без перезагрузки", () => {
+    docNav.reloadDocument.mockClear();
+    render(<MetrikaGoals id={42} />);
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(docNav.reloadDocument).not.toHaveBeenCalled();
   });
 
   // Порядок эффектов — <Script> раньше MetrikaGoals — юнит-тестом не поймать:

@@ -2,7 +2,9 @@ import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE_NAMES } from "@/lib/auth/cookie-name";
 import { analyticsAllowed } from "@/lib/analytics/allowed";
 import { isBotUserAgent } from "@/lib/analytics/bot";
-import { VISITOR_COOKIE, isVisitorId, visitorCookieOptions } from "@/lib/analytics/visitor-cookie";
+import {
+  PREVIOUS_VISITORS_COOKIE, VISITOR_COOKIE, isVisitorId, visitorCookieOptions,
+} from "@/lib/analytics/visitor-cookie";
 
 // Маршруты, на которые анон не должен попадать вообще (префикс-match).
 // /requests здесь больше нет: заявки арендатора переехали в общую ленту
@@ -23,7 +25,8 @@ function isProtected(pathname: string): boolean {
 type VisitorCookie =
   | { kind: "keep" }
   | { kind: "set"; id: string }
-  | { kind: "clear" };
+  /** Стереть оставшиеся куки id — эти имена. */
+  | { kind: "clear"; names: string[] };
 
 // Prefetch — не заход: его делает роутер Next или браузер наперёд, без
 // человека. Он только получает id, если того нет, — чтобы события страницы,
@@ -36,7 +39,7 @@ function isPrefetch(req: NextRequest): boolean {
 // Кука vid — id браузера для своей статистики посещений. Выдаётся, если её нет
 // или в ней не UUID; на загрузке документа переставляется с новым сроком, на
 // остальных запросах не трогается. Отказ от учёта (noanalytics) — не выдаётся,
-// а оставшаяся стирается. Ботам не выдаётся: строк в базе им всё равно не
+// а оставшаяся стирается вместе с прежними id (vid_prev). Ботам не выдаётся: строк в базе им всё равно не
 // заведут, а Set-Cookie на каждом ответе краулеру незачем.
 //
 // Строку в базе кука не создаёт: её заводит роут сбора по первому событию,
@@ -46,7 +49,8 @@ function isPrefetch(req: NextRequest): boolean {
 function visitorCookieFor(req: NextRequest): VisitorCookie {
   const current = req.cookies.get(VISITOR_COOKIE)?.value;
   if (!analyticsAllowed((name) => req.cookies.get(name)?.value)) {
-    return current === undefined ? { kind: "keep" } : { kind: "clear" };
+    const names = [VISITOR_COOKIE, PREVIOUS_VISITORS_COOKIE].filter((name) => req.cookies.has(name));
+    return names.length === 0 ? { kind: "keep" } : { kind: "clear", names };
   }
   if (isBotUserAgent(req.headers.get("user-agent"))) return { kind: "keep" };
   if (!isVisitorId(current)) return { kind: "set", id: crypto.randomUUID() };
@@ -58,7 +62,7 @@ function applyVisitorCookie(req: NextRequest, res: NextResponse, cookie: Visitor
   if (cookie.kind === "set") {
     res.cookies.set(VISITOR_COOKIE, cookie.id, visitorCookieOptions(req.nextUrl.protocol === "https:"));
   } else if (cookie.kind === "clear") {
-    res.cookies.delete(VISITOR_COOKIE);
+    for (const name of cookie.names) res.cookies.delete(name);
   }
   return res;
 }

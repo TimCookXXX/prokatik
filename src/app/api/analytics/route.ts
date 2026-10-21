@@ -34,7 +34,10 @@ import { verifyPageData, type SearchPageData, type SignedPageData } from "@/lib/
 import { classifySource, type Source } from "@/lib/analytics/source";
 import { visitorEventsCap } from "@/lib/analytics/daily-cap";
 import { createNoSessionCache } from "@/lib/analytics/no-session-cache";
-import { VISITOR_COOKIE, isVisitorId, visitorCookieOptions } from "@/lib/analytics/visitor-cookie";
+import {
+  PREVIOUS_VISITORS_COOKIE, VISITOR_COOKIE, isVisitorId, parsePreviousVisitors, previousVisitorsCookieOptions,
+  visitorCookieOptions, withPreviousVisitor,
+} from "@/lib/analytics/visitor-cookie";
 import {
   dbErrorCode, pruneVisitorData, readVisitor, writeVisitorBatch,
   type NewVisitorEvent, type VisitorWrite,
@@ -258,7 +261,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const res = noContent();
   if (decision.kind === "switch") {
-    res.cookies.set(VISITOR_COOKIE, targetId, visitorCookieOptions(getEnv().NEXTAUTH_URL.startsWith("https://")));
+    const secure = getEnv().NEXTAUTH_URL.startsWith("https://");
+    res.cookies.set(VISITOR_COOKIE, targetId, visitorCookieOptions(secure));
+    // Прежний id — в браузер, а не в базу: отказ от учёта удалит и его историю.
+    const previous = parsePreviousVisitors(req.cookies.get(PREVIOUS_VISITORS_COOKIE)?.value);
+    res.cookies.set(PREVIOUS_VISITORS_COOKIE, withPreviousVisitor(previous, visitorId), previousVisitorsCookieOptions(secure));
   }
   return res;
 }

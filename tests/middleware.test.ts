@@ -202,6 +202,13 @@ describe("middleware visitor cookie", () => {
     expect(visit("/cabinet", { cookies: { noanalytics: "1" } }).cookies.get("vid")).toBeUndefined();
   });
 
+  it("после отказа стирает и прежние id браузера (vid_prev)", () => {
+    const res = visit("/", { cookies: { noanalytics: "1", vid_prev: VID }, headers: docLoad });
+    expect(res.cookies.get("vid_prev")?.expires).toEqual(new Date(0));
+    expect(res.cookies.get("vid")).toBeUndefined();
+    expect(visit("/", { cookies: { vid: VID, vid_prev: VID }, headers: docLoad }).cookies.get("vid_prev")).toBeUndefined();
+  });
+
   it("ботам не выдаёт", () => {
     for (const ua of [
       "Mozilla/5.0 (compatible; YandexBot/3.0; +http://yandex.com/bots)",
