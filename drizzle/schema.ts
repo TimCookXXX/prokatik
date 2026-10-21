@@ -1,6 +1,6 @@
 import {
   pgTable, text, varchar, integer, bigint, timestamp, pgEnum, jsonb, check,
-  boolean, date, doublePrecision, index, primaryKey, uniqueIndex,
+  boolean, date, doublePrecision, index, primaryKey, uniqueIndex, uuid,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
@@ -289,8 +289,10 @@ export const bookingRequests = pgTable("booking_requests", {
     .where(sql`${t.status} = 'new'`),
 }));
 
-// events — сырые продуктовые события (view_listing, view_phone, submit_request...).
-// Основа статистики для владельца; агрегатов в v1 нет.
+// events — журнал сделок: submit_request, cancel_request, request_declined.
+// Поведение посетителей — страницы, поиски, просмотры — живёт отдельно, в
+// visitors и visitor_events. view_listing сюда пока пишет страница объявления
+// при рендере; новые просмотры идут в visitor_events, старые строки остаются.
 export const events = pgTable("events", {
   id: text("id").primaryKey(),
   entityType: varchar("entity_type", { length: 40 }).notNull(),
@@ -440,6 +442,82 @@ export const chatMessages = pgTable("chat_messages", {
   threadIdx: index("chat_messages_thread_idx").on(t.threadId, t.id),
   // Без него каскад при удалении пользователя пойдёт сиквеншл-сканом.
   senderIdx: index("chat_messages_sender_idx").on(t.senderUserId),
+}));
+
+// ========================= Статистика посещений =========================
+// Своя статистика посетителей для админки. Не журнал сделок: заявки, переписки
+// и объявления сюда не пишутся — админка читает их из своих таблиц по user_id
+// связанного браузера. Время — UTC, как во всей схеме; сутки для сводки
+// считаются по Europe/Moscow при чтении.
+//
+// Удаление аккаунта уносит каскадом и его статистику. Чужую историю каскад
+// не задевает: один id браузера — одно состояние, гость или конкретный
+// аккаунт, при входе, выходе и смене аккаунта браузер получает новый id.
+
+// Один браузер в одном состоянии. id — значение куки `vid`
+// (src/lib/analytics/visitor-cookie.ts).
+export const visitors = pgTable("visitors", {
+  id: uuid("id").primaryKey(),
+  firstSeenAt: timestamp("first_seen_at").defaultNow().notNull(),
+  lastSeenAt: timestamp("last_seen_at").defaultNow().notNull(),
+  /** NULL у гостя. */
+  userId: text("user_id").references(() => users.id, { onDelete: "cascade" }),
+  /** Откуда пришёл впервые; пишется первым событием с источником и не перезаписывается. */
+  firstSource: jsonb("first_source").$type<{ kind: string; label: string }>(),
+  /** `phone` или `desktop` — из User-Agent; сам User-Agent не хранится. */
+  device: varchar("device", { length: 10 }),
+  /** Последний ClientID Метрики, только цифры. Только у гостя без аккаунта. */
+  ymClientId: varchar("ym_client_id", { length: 32 }),
+  isBot: boolean("is_bot").notNull().default(false),
+  /** Заходы владельца сайта: админ или ручная пометка «Это я». */
+  isInternal: boolean("is_internal").notNull().default(false),
+}, (t) => ({
+  // Список гостей листается ключом (last_seen_at, id); по нему же чистка
+  // браузеров без активности.
+  lastSeenIdx: index("visitors_last_seen_idx").on(t.lastSeenAt, t.id),
+  // «Устройства» человека в админке и каскад при удалении аккаунта.
+  userIdx: index("visitors_user_idx").on(t.userId),
+  // Точный поиск по ClientID в админке.
+  ymClientIdx: index("visitors_ym_client_idx").on(t.ymClientId).where(sql`${t.ymClientId} is not null`),
+}));
+
+// События браузера. id — ULID (newSortableId), создаётся до записи: порядок
+// внутри пачки и время события фиксируются в момент приёма.
+export const visitorEvents = pgTable("visitor_events", {
+  id: text("id").primaryKey(),
+  visitorId: uuid("visitor_id").notNull().references(() => visitors.id, { onDelete: "cascade" }),
+  /** Кто был в аккаунте в момент события; NULL у гостя. */
+  userId: text("user_id").references(() => users.id, { onDelete: "cascade" }),
+  type: varchar("type", { length: 30 }).notNull(),
+  /** Очищенный путь (src/lib/analytics/sanitize.ts). */
+  path: varchar("path", { length: 300 }),
+  listingId: text("listing_id").references(() => listings.id, { onDelete: "set null" }),
+  /** Текст поиска, замаскированный. */
+  q: varchar("q", { length: 100 }),
+  /** Сколько нашлось. */
+  total: integer("total"),
+  props: jsonb("props").$type<Record<string, unknown>>().notNull().default({}),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => ({
+  // Лента карточки гостя.
+  visitorIdx: index("visitor_events_visitor_idx").on(t.visitorId, t.createdAt),
+  // Сводка, таблица по дням и «Поиски».
+  typeIdx: index("visitor_events_type_idx").on(t.type, t.createdAt),
+  // Просмотры объявления: плитка кабинета.
+  listingIdx: index("visitor_events_listing_idx")
+    .on(t.listingId, t.createdAt)
+    .where(sql`${t.listingId} is not null`),
+  // Чистка по сроку хранения.
+  createdIdx: index("visitor_events_created_idx").on(t.createdAt),
+  // Поиск гостя по ClientID в истории значений.
+  ymClientIdx: index("visitor_events_ym_client_idx")
+    .on(sql`(${t.props}->>'cid')`)
+    .where(sql`${t.type} = 'ym_client'`),
+  // Каскад при удалении аккаунта и события аккаунта («вошёл», регистрация);
+  // без него удаление пользователя шло бы сиквеншл-сканом.
+  userIdx: index("visitor_events_user_idx")
+    .on(t.userId, t.createdAt)
+    .where(sql`${t.userId} is not null`),
 }));
 
 // ============================== Геоданные ==============================
