@@ -1,5 +1,8 @@
-import type { Metadata } from "next";
+import type { Metadata, Route } from "next";
+import Link from "next/link";
+import { content } from "@theme/content";
 import { adminListUsers } from "@/server/admin";
+import { analyticsHref } from "@/lib/analytics/admin-filters";
 import { adminBanUser, adminUnbanUser, adminSetUserVerified } from "@/server/actions/admin";
 import { ActionButton } from "@/components/admin/ActionButton";
 
@@ -13,7 +16,7 @@ export default async function AdminUsersPage() {
     <section aria-label="Пользователи">
       <p className="mb-4 text-sm text-muted-foreground">Последние {rows.length} пользователей</p>
       <ul className="flex flex-col gap-2">
-        {rows.map(({ user, listingCount, requestCount }) => (
+        {rows.map(({ user, listingCount, requestCount, deviceCount }) => (
           <li key={user.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-card px-4 py-3">
             <div className="min-w-0">
               <span className="font-medium">{user.name ?? "—"}</span>
@@ -31,6 +34,15 @@ export default async function AdminUsersPage() {
                 {user.email} · {listingCount} объявл. · {requestCount} заявок · с {user.createdAt.toLocaleDateString("ru-RU")}
                 {user.banReason ? ` · причина бана: ${user.banReason}` : ""}
               </p>
+              {/* Устройства — браузеры своей статистики после входа в аккаунт. */}
+              {deviceCount > 0 && (
+                <Link
+                  href={analyticsHref("/admin/visitors", { user: user.id }) as Route}
+                  className="text-sm underline underline-offset-2 hoverable hover:text-foreground"
+                >
+                  {content.adminAnalytics.users.devices(String(deviceCount))}
+                </Link>
+              )}
             </div>
             <div className="flex flex-wrap gap-2">
               <ActionButton

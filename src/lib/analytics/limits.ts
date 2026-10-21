@@ -23,6 +23,12 @@ export const BACKUP_RETENTION_DAYS = 30;
  */
 export const DAILY_EVENT_CAP = 10_000;
 
+/**
+ * Пауза, после которой начинается новый визит (lib/analytics/visits.ts).
+ * Визиты не хранятся: админка делит ленту браузера на визиты при чтении.
+ */
+export const VISIT_GAP_MINUTES = 30;
+
 /** Сколько событий трекер отправляет одной пачкой. */
 export const TRACK_BATCH_MAX = 10;
 

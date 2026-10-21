@@ -1,6 +1,11 @@
 // Read-слой админки. Роль проверяет каждое чтение само (assertAdmin): проверка
 // в layout'е не гарантия — Next не перерисовывает его при переходах внутри
 // сегмента (см. src/lib/auth/guard.ts).
+//
+// Таблицы в подзапросах полей — явными именами и псевдонимами: в полях select
+// без join drizzle пишет колонки без таблицы, и ${users.id} внутри
+// подзапроса по listings превратился бы в "id" самих listings — счётчик
+// молча показывал бы ноль.
 
 import { count, desc, eq, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
@@ -32,7 +37,7 @@ export async function adminListCities() {
   return getDb()
     .select({
       city: cities,
-      listingCount: sql<number>`(SELECT count(*)::int FROM ${listings} WHERE ${listings.cityId} = ${cities.id})`,
+      listingCount: sql<number>`(SELECT count(*)::int FROM listings l WHERE l.city_id = cities.id)`,
     })
     .from(cities)
     .orderBy(cities.name);
@@ -52,8 +57,8 @@ export async function adminListCategories() {
   return getDb()
     .select({
       category: categories,
-      listingCount: sql<number>`(SELECT count(*)::int FROM ${listings} WHERE ${listings.categoryId} = ${categories.id})`,
-      childCount: sql<number>`(SELECT count(*)::int FROM ${categories} AS c2 WHERE c2.parent_id = ${categories.id})`,
+      listingCount: sql<number>`(SELECT count(*)::int FROM listings l WHERE l.category_id = categories.id)`,
+      childCount: sql<number>`(SELECT count(*)::int FROM categories c2 WHERE c2.parent_id = categories.id)`,
     })
     .from(categories)
     .orderBy(categories.name);
@@ -83,8 +88,10 @@ export async function adminListUsers(limit = 200) {
   return db
     .select({
       user: users,
-      listingCount: sql<number>`(SELECT count(*)::int FROM ${listings} WHERE ${listings.ownerUserId} = ${users.id})`,
-      requestCount: sql<number>`(SELECT count(*)::int FROM ${bookingRequests} WHERE ${bookingRequests.customerUserId} = ${users.id})`,
+      listingCount: sql<number>`(SELECT count(*)::int FROM listings l WHERE l.owner_user_id = users.id)`,
+      requestCount: sql<number>`(SELECT count(*)::int FROM booking_requests br WHERE br.customer_user_id = users.id)`,
+      // Браузеры своей статистики, записанные за аккаунтом, — ссылка «Устройства».
+      deviceCount: sql<number>`(SELECT count(*)::int FROM visitors v WHERE v.user_id = users.id)`,
     })
     .from(users)
     .orderBy(desc(users.createdAt))
