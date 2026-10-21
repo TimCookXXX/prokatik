@@ -1,4 +1,7 @@
-// Админка. Доступ — только role=admin (assertAdmin редиректит остальных).
+// Админка, только role=admin. Проверка здесь — не гарантия: layout Next не
+// перерисовывает при переходах внутри сегмента (см. src/lib/auth/guard.ts).
+// Данные защищают сами чтения src/server/admin.ts (assertAdmin) и actions
+// src/server/actions/admin.ts (requireAdmin).
 
 import { assertAdmin } from "@/lib/auth/assert-admin";
 import { AccountShell } from "@/components/account/AccountShell";

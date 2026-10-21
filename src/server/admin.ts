@@ -1,13 +1,17 @@
-// Read-слой админки. Доступ проверяют страницы (assertAdmin).
+// Read-слой админки. Роль проверяет каждое чтение само (assertAdmin): проверка
+// в layout'е не гарантия — Next не перерисовывает его при переходах внутри
+// сегмента (см. src/lib/auth/guard.ts).
 
 import { count, desc, eq, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { getDb } from "@/lib/db";
+import { assertAdmin } from "@/lib/auth/assert-admin";
 import {
   bookingRequests, categories, cities, geoImports, listings, users,
 } from "@db/schema";
 
 export async function adminListListings(limit = 200) {
+  await assertAdmin();
   return getDb()
     .select({
       listing: listings,
@@ -24,6 +28,7 @@ export async function adminListListings(limit = 200) {
 }
 
 export async function adminListCities() {
+  await assertAdmin();
   return getDb()
     .select({
       city: cities,
@@ -35,6 +40,7 @@ export async function adminListCities() {
 
 // Регионы геоданных, загруженные `pnpm geo:import`, — выбор в форме города.
 export async function adminListGeoRegions(): Promise<string[]> {
+  await assertAdmin();
   const rows = await getDb().selectDistinct({ region: geoImports.region })
     .from(geoImports)
     .orderBy(geoImports.region);
@@ -42,6 +48,7 @@ export async function adminListGeoRegions(): Promise<string[]> {
 }
 
 export async function adminListCategories() {
+  await assertAdmin();
   return getDb()
     .select({
       category: categories,
@@ -53,6 +60,7 @@ export async function adminListCategories() {
 }
 
 export async function adminListRequests(limit = 100) {
+  await assertAdmin();
   const owner = alias(users, "owner");
   return getDb()
     .select({
@@ -70,6 +78,7 @@ export async function adminListRequests(limit = 100) {
 }
 
 export async function adminListUsers(limit = 200) {
+  await assertAdmin();
   const db = getDb();
   return db
     .select({
@@ -83,6 +92,7 @@ export async function adminListUsers(limit = 200) {
 }
 
 export async function adminCounts() {
+  await assertAdmin();
   const db = getDb();
   const [l, r, u] = await Promise.all([
     db.select({ c: count() }).from(listings),

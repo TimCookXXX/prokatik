@@ -183,9 +183,11 @@ OAuth-аккаунт.
    показывает `/banned`, куда уводит гард.
 
 **Админка**: `assertAdmin()` (редирект на `/` при `role !== "admin"`) стоит в
-`src/app/(app)/admin/layout.tsx`, а каждый admin-action дополнительно проверяет
-роль через собственный `requireAdmin()` и возвращает `forbidden`. См. раздел
-Current limitations в [architecture.md](architecture.md).
+`src/app/(app)/admin/layout.tsx` и в начале каждого чтения
+`src/server/admin.ts`, а каждый admin-action проверяет роль через собственный
+`requireAdmin()` и возвращает `forbidden`. Одного layout'а мало: при переходах
+внутри сегмента Next его не перерисовывает (комментарий в
+`src/lib/auth/guard.ts`), поэтому данные защищает само чтение.
 
 **Загрузка файлов**: `/api/upload` проверяет сессию и бан самостоятельно.
 
