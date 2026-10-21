@@ -8,9 +8,9 @@
 // а не голыми Date в sql``: драйвер pg отдал бы их в зоне процесса
 // (TZ=Europe/Moscow), и колонка без зоны записала бы московское время как UTC.
 
-import { eq, lt, sql } from "drizzle-orm";
+import { and, eq, gt, lt, sql } from "drizzle-orm";
 import { getDb } from "@/lib/db";
-import { visitorEvents, visitors } from "@db/schema";
+import { sessions, visitorEvents, visitors } from "@db/schema";
 import { EVENT_RETENTION_DAYS, VISITOR_RETENTION_DAYS } from "@/lib/analytics/limits";
 import type { Device } from "@/lib/analytics/device";
 import type { Source } from "@/lib/analytics/source";
@@ -20,8 +20,10 @@ export interface StoredVisitor {
   isInternal: boolean;
   /** Последний ClientID Метрики гостя. */
   ymClientId: string | null;
-  /** Есть ли у строки события: гость без них при входе связывается на месте. */
+  /** Есть ли у строки события: отметку «вошёл» получает только гость с историей. */
   hasEvents: boolean;
+  /** Последний заход: этим временем помечается «вошёл» прежнего гостя. */
+  lastSeenAt: Date;
 }
 
 /** Строка браузера по id из куки; null — такой нет. */
@@ -31,6 +33,7 @@ export async function readVisitor(id: string): Promise<StoredVisitor | null> {
       userId: visitors.userId,
       isInternal: visitors.isInternal,
       ymClientId: visitors.ymClientId,
+      lastSeenAt: visitors.lastSeenAt,
       // Таблицы — явными именами: в полях select drizzle пишет колонки без
       // таблицы, и "id" внутри подзапроса оказался бы id события.
       hasEvents: sql<boolean>`exists (select 1 from visitor_events e where e.visitor_id = visitors.id)`,
@@ -66,13 +69,25 @@ export interface VisitorWrite {
   firstSource: Source | null;
   /** Новый ClientID Метрики гостя; null — не менялся. */
   ymClientId: string | null;
+  /**
+   * «Вошёл» — первым событием, только если строку завела эта запись. Её мог
+   * завести раньше параллельный маяк того же браузера (его after() ещё шёл,
+   * когда эта пачка прочитала «строки нет»): тогда вход уже записан.
+   */
+  login?: NewVisitorEvent;
   events: NewVisitorEvent[];
   /**
    * Прежний id браузера при входе гостя с историей: его лента кончается
    * событием «вошёл» без аккаунта, а вход админа помечает его заходы своими.
+   * Время и id этого события — от последнего захода гостя, а не от входа, и
+   * последний заход не сдвигается: иначе общий момент связал бы его строку
+   * со строкой аккаунта.
    */
   previous?: { id: string; markInternal: boolean; events: NewVisitorEvent[] };
 }
+
+/** Чем кончилась запись: строку завели, дописали или не тронули (она чужого состояния). */
+export type WriteOutcome = "created" | "updated" | "skipped";
 
 const eventRow = (visitorId: string, userId: string | null) => (e: NewVisitorEvent) => ({
   id: e.id,
@@ -91,18 +106,19 @@ const eventRow = (visitorId: string, userId: string | null) => (e: NewVisitorEve
  * Строка браузера и события одной транзакцией. Строку заводит upsert: её
  * может не быть (новый гость, новый id после входа), а параллельная пачка того
  * же браузера могла завести её раньше.
+ *
+ * Аккаунт у строки upsert не меняет: строка чужого состояния — гостевая, когда
+ * пишется аккаунт, или наоборот (пачка решила по устаревшему чтению) — не
+ * трогается вовсе, и её история к аккаунту не прирастает.
  */
-export async function writeVisitorBatch(w: VisitorWrite): Promise<void> {
-  await getDb().transaction(async (tx) => {
+export async function writeVisitorBatch(w: VisitorWrite): Promise<WriteOutcome> {
+  return getDb().transaction(async (tx) => {
     if (w.previous) {
       // Только обновление: строку прежнего id мог удалить отказ от учёта, и
-      // заводить её заново нельзя.
+      // заводить её заново нельзя. Последний заход не трогается.
       const prev = w.previous;
       const updated = await tx.update(visitors)
-        .set({
-          lastSeenAt: sql`greatest(${visitors.lastSeenAt}, ${w.at.toISOString()}::timestamp)`,
-          isInternal: sql`${visitors.isInternal} or ${prev.markInternal}`,
-        })
+        .set({ isInternal: sql`${visitors.isInternal} or ${prev.markInternal}` })
         .where(eq(visitors.id, prev.id))
         .returning({ id: visitors.id });
       if (updated.length > 0 && prev.events.length > 0) {
@@ -110,7 +126,7 @@ export async function writeVisitorBatch(w: VisitorWrite): Promise<void> {
       }
     }
 
-    await tx.insert(visitors)
+    const [row] = await tx.insert(visitors)
       .values({
         id: w.id,
         firstSeenAt: w.at,
@@ -126,22 +142,42 @@ export async function writeVisitorBatch(w: VisitorWrite): Promise<void> {
         target: visitors.id,
         set: {
           lastSeenAt: sql`greatest(${visitors.lastSeenAt}, excluded.last_seen_at)`,
-          // Аккаунт у строки ставится один раз (связка гостя без событий) и
-          // другим не перезаписывается: смена аккаунта — это новый id.
-          userId: sql`coalesce(${visitors.userId}, excluded.user_id)`,
           firstSource: sql`coalesce(${visitors.firstSource}, excluded.first_source)`,
           device: sql`coalesce(excluded.device, ${visitors.device})`,
-          // ClientID хранится только у гостя: связанной строке он не нужен.
-          ymClientId: sql`case when coalesce(${visitors.userId}, excluded.user_id) is null
+          // ClientID хранится только у гостя: строке аккаунта он не нужен.
+          ymClientId: sql`case when ${visitors.userId} is null
             then coalesce(excluded.ym_client_id, ${visitors.ymClientId}) end`,
           isBot: sql`${visitors.isBot} or excluded.is_bot`,
           isInternal: sql`${visitors.isInternal} or excluded.is_internal`,
         },
-      });
-    if (w.events.length > 0) {
-      await tx.insert(visitorEvents).values(w.events.map(eventRow(w.id, w.userId)));
+        // Смена аккаунта — это новый id: строку другого состояния не трогаем.
+        setWhere: sql`${visitors.userId} is not distinct from excluded.user_id`,
+      })
+      // xmax = 0 — строку вставила эта команда, а не обновила.
+      .returning({ inserted: sql<boolean>`(xmax = 0)` });
+    if (!row) return "skipped";
+
+    const events = [...(row.inserted && w.login ? [w.login] : []), ...w.events];
+    if (events.length > 0) {
+      await tx.insert(visitorEvents).values(events.map(eventRow(w.id, w.userId)));
     }
+    return row.inserted ? "created" : "updated";
   });
+}
+
+/**
+ * Живая ли сессия с этим токеном — когда auth() ответил «нет». Auth.js
+ * глотает сбой базы и отвечает тем же «нет», а роут по нему меняет id браузера
+ * и запоминает «нет сессии» на 10 минут: ложный выход и вход. true — сессия
+ * есть, и «нет» значило сбой.
+ */
+export async function sessionTokenLive(token: string, now: Date = new Date()): Promise<boolean> {
+  const [row] = await getDb()
+    .select({ one: sql<number>`1` })
+    .from(sessions)
+    .where(and(eq(sessions.sessionToken, token), gt(sessions.expires, now)))
+    .limit(1);
+  return row !== undefined;
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;

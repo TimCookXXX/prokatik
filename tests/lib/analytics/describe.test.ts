@@ -62,6 +62,15 @@ describe("describeEvent", () => {
     expect(describeEvent(ev("login"), dir)).toMatch(/^Вошёл в аккаунт — дальше история/);
   });
 
+  // Строку завели, когда сессия уже была (выкат, «Учитывать снова»): входа в
+  // эту минуту не было.
+  it("вход с уже открытой сессией — не «вошёл»", () => {
+    expect(describeEvent(ev("login", { userId: "u1", props: { via: "create" } }), dir)).toBe("Пришёл уже в аккаунте");
+    expect(describeEvent(ev("login", { userId: "u1", props: { via: "switch" } }), dir)).toBe("Вошёл в аккаунт");
+    expect(describeEvent(ev("login", { userId: "u1", props: { via: "create" } }), dir, { signup: "" }))
+      .toBe("Зарегистрировался и вошёл");
+  });
+
   it("показ страницы, ClientID и незнакомый тип", () => {
     expect(describeEvent(ev("pageview", { path: "/krasnodar/instrumenty?sort=new" }), dir))
       .toBe("Открыл раздел «Инструменты» · Краснодар");

@@ -201,7 +201,8 @@ export function describeEvent(ev: TimelineEvent, dir: Directory, ctx: DescribeCo
     }
     case "login":
       if (ev.userId === null) return e.guestLogin;
-      return ctx.signup !== undefined ? e.signup(ctx.signup) : e.login;
+      if (ctx.signup !== undefined) return e.signup(ctx.signup);
+      return ev.props.via === "create" ? e.alreadyIn : e.login;
     case "ym_client": {
       const cid = prop(ev.props, "cid", isString);
       return cid ? e.clientId(cid) : e.other(ev.type);

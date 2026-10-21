@@ -48,14 +48,16 @@ const flushAfterWait = async () => {
 };
 
 describe("track", () => {
-  it("копит события тика и шлёт одной пачкой keepalive-POST'ом", async () => {
+  // Обычная пачка — без keepalive: смена id приходит Set-Cookie ответа, а
+  // куку из ответа на keepalive-запрос принимает не каждый браузер.
+  it("копит события тика и шлёт одной пачкой обычным POST'ом", async () => {
     track("pageview", { path: "/krasnodar", doc: true });
     track("ym_client", { cid: "123" });
     expect(sent).toHaveLength(0);
     await flush();
     expect(sent).toHaveLength(1);
     expect(sent[0].url).toBe(TRACK_ENDPOINT);
-    expect(sent[0].init).toMatchObject({ method: "POST", keepalive: true, credentials: "same-origin" });
+    expect(sent[0].init).toMatchObject({ method: "POST", keepalive: false, credentials: "same-origin" });
     expect(sent[0].body.events.map((e) => e.type)).toEqual(["pageview", "ym_client"]);
   });
 

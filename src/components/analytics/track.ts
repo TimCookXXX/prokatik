@@ -10,8 +10,11 @@
 //
 // Пачки уходят по одной: следующая ждёт ответа на прошлую. Ответ может выдать
 // браузеру новый id (вход, выход, смена аккаунта), и параллельная пачка со
-// старым id завела бы второй новый. При уходе со страницы (pagehide) остаток
-// уходит сразу — fetch keepalive переживает выгрузку документа.
+// старым id завела бы второй новый. Обычная пачка — простым fetch: кука из его
+// ответа принимается везде. При уходе со страницы (pagehide) остаток уходит
+// сразу и с keepalive — только он переживает выгрузку документа; примет ли
+// браузер куку из такого ответа, неважно, — страницы, которой она нужна, уже
+// нет, а повтор со старым id роут сводит к тому же новому id.
 
 import type { ClientEvent } from "@/lib/analytics/payload";
 import type { ZeroReason } from "@/lib/search/zero-reason";
@@ -96,12 +99,12 @@ function takeBatch(): ClientEvent[] {
   return batch;
 }
 
-function post(events: ClientEvent[]): Promise<unknown> {
+function post(events: ClientEvent[], keepalive = false): Promise<unknown> {
   const body = JSON.stringify(navigator.webdriver ? { events, bot: true } : { events });
   return fetch(TRACK_ENDPOINT, {
     method: "POST",
     body,
-    keepalive: true,
+    keepalive,
     credentials: "same-origin",
     headers: { "content-type": "application/json" },
   });
@@ -149,7 +152,7 @@ function onPageHide(): void {
   }
   tick++;
   for (let batch = takeBatch(); batch.length > 0; batch = takeBatch()) {
-    post(batch).catch(() => {});
+    post(batch, true).catch(() => {});
   }
 }
 

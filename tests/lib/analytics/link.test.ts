@@ -14,18 +14,20 @@ describe("decideLink", () => {
     expect(decideLink({ userId: "u1", hasEvents: true }, "u1")).toEqual({ kind: "keep" });
   });
 
-  it("гость без событий вошёл — связать эту строку", () => {
-    expect(decideLink({ userId: null, hasEvents: false }, "u1")).toEqual({ kind: "link" });
-  });
-
   // История до входа с аккаунтом не связывается.
   it("гость с историей вошёл — новый vid, старый кончается входом", () => {
-    expect(decideLink({ userId: null, hasEvents: true }, "u1")).toEqual({ kind: "switch", guestLogin: true });
+    expect(decideLink({ userId: null, hasEvents: true }, "u1")).toEqual({ kind: "switch", reason: "login", guestLogin: true });
+  });
+
+  // Строка без событий — гость, чью историю удалил срок хранения: его первый
+  // заход и источник аккаунту не принадлежат.
+  it("гость без событий вошёл — тоже новый vid, без отметки входа", () => {
+    expect(decideLink({ userId: null, hasEvents: false }, "u1")).toEqual({ kind: "switch", reason: "login", guestLogin: false });
   });
 
   it("аккаунт сменился или человек вышел — новый vid", () => {
-    expect(decideLink({ userId: "u1", hasEvents: true }, "u2")).toEqual({ kind: "switch", guestLogin: false });
-    expect(decideLink({ userId: "u1", hasEvents: true }, null)).toEqual({ kind: "switch", guestLogin: false });
-    expect(decideLink({ userId: "u1", hasEvents: false }, null)).toEqual({ kind: "switch", guestLogin: false });
+    expect(decideLink({ userId: "u1", hasEvents: true }, "u2")).toEqual({ kind: "switch", reason: "account", guestLogin: false });
+    expect(decideLink({ userId: "u1", hasEvents: true }, null)).toEqual({ kind: "switch", reason: "logout", guestLogin: false });
+    expect(decideLink({ userId: "u1", hasEvents: false }, null)).toEqual({ kind: "switch", reason: "logout", guestLogin: false });
   });
 });

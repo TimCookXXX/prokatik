@@ -18,7 +18,7 @@ import { NextResponse, after, type NextRequest } from "next/server";
 import { auth } from "@/lib/auth";
 import { getEnv } from "@/lib/env";
 import { siteUrl } from "@/lib/site-config";
-import { newSortableId } from "@/lib/id";
+import { newIdAt, newSortableId } from "@/lib/id";
 import { checkLimit } from "@/lib/rate-limit";
 import { clientIp } from "@/lib/http/client-ip";
 import { readBodyCapped } from "@/lib/http/read-capped";
@@ -34,12 +34,13 @@ import { verifyPageData, type SearchPageData, type SignedPageData } from "@/lib/
 import { classifySource, type Source } from "@/lib/analytics/source";
 import { visitorEventsCap } from "@/lib/analytics/daily-cap";
 import { createNoSessionCache } from "@/lib/analytics/no-session-cache";
+import { visitorSwitchGuard as switchGuard } from "@/lib/analytics/switch-guard";
 import {
   PREVIOUS_VISITORS_COOKIE, VISITOR_COOKIE, isVisitorId, parsePreviousVisitors, previousVisitorsCookieOptions,
   visitorCookieOptions, withPreviousVisitor,
 } from "@/lib/analytics/visitor-cookie";
 import {
-  dbErrorCode, pruneVisitorData, readVisitor, writeVisitorBatch,
+  dbErrorCode, pruneVisitorData, readVisitor, sessionTokenLive, writeVisitorBatch,
   type NewVisitorEvent, type VisitorWrite,
 } from "@/server/visitor-analytics";
 
@@ -155,16 +156,22 @@ function buildEvents(batch: Batch): Built {
   return { drafts, source, cid };
 }
 
-/** Кто в аккаунте. Мусорная или протухшая кука помнится, и в базу за ней не ходят. */
-async function sessionUser(req: NextRequest): Promise<{ id: string; admin: boolean } | null> {
+/** Кто в аккаунте; "unknown" — сессия есть, но прочитать её не вышло. */
+type SessionUser = { id: string; admin: boolean } | null | "unknown";
+
+/**
+ * Кто в аккаунте. Мусорная или протухшая кука помнится, и в базу за ней не
+ * ходят. «Нет» от auth() сверяется с таблицей сессий: Auth.js отвечает им и
+ * на сбой базы, а роут по нему сменил бы id браузера — ложный выход.
+ */
+async function sessionUser(req: NextRequest): Promise<SessionUser> {
   const token = SESSION_COOKIE_NAMES.map((name) => req.cookies.get(name)?.value).find(Boolean);
   if (!token || noSession.has(token)) return null;
   const session = await auth();
-  if (!session?.user?.id) {
-    noSession.remember(token);
-    return null;
-  }
-  return { id: session.user.id, admin: session.user.role === "admin" };
+  if (session?.user?.id) return { id: session.user.id, admin: session.user.role === "admin" };
+  if (await sessionTokenLive(token)) return "unknown";
+  noSession.remember(token);
+  return null;
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
@@ -196,7 +203,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const { drafts, source, cid } = buildEvents(parsed);
   if (drafts.length === 0 && cid === null) return noContent();
 
-  let user: { id: string; admin: boolean } | null;
+  let user: SessionUser;
   let stored: Awaited<ReturnType<typeof readVisitor>>;
   try {
     user = await sessionUser(req);
@@ -205,50 +212,66 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     console.error("[analytics] чтение не удалось:", dbErrorCode(e));
     return noContent();
   }
+  // Не знаем, кто в аккаунте, — не знаем, в какую строку писать: пачка теряется.
+  if (user === "unknown") return noContent();
 
   const userId = user?.id ?? null;
   const admin = user?.admin ?? false;
   const decision = decideLink(stored, userId);
+  const switching = decision.kind === "switch";
+  // Этот id браузеру уже выдан, а он пришёл со старым: та же смена, а не новая.
+  const reissued = switching ? switchGuard.get(visitorId, userId) : null;
 
   // Новая строка в visitors — свой контур лимита: кука id ничего не стоит.
-  const createsRow = decision.kind === "create" || decision.kind === "switch";
+  const createsRow = decision.kind === "create" || (switching && reissued === null);
   if (createsRow && !checkLimit(ip, "track_new").ok) return noContent();
 
-  const targetId = decision.kind === "switch" ? crypto.randomUUID() : visitorId;
-  // Состояние «в аккаунте» началось здесь: строка заведена с сессией, гость
-  // без событий связан или браузер получил id под этот аккаунт.
-  const loginHere = userId !== null && decision.kind !== "keep";
+  const targetId = switching ? reissued ?? crypto.randomUUID() : visitorId;
   // ClientID — только у гостя и только новый: история значений идёт событиями.
-  const knownCid = decision.kind === "switch" ? null : stored?.ymClientId ?? null;
+  const knownCid = switching ? null : stored?.ymClientId ?? null;
   const newCid = userId === null && cid !== null && cid !== knownCid ? cid : null;
 
+  // «Вошёл» — когда состояние «в аккаунте» началось здесь: браузер получил id
+  // под аккаунт (via: switch) или строка заводится уже с сессией (via:
+  // create — вход мог быть и раньше, до учёта этого браузера).
+  const login: Draft | null = userId !== null && decision.kind !== "keep"
+    ? { type: "login", props: { via: decision.kind } }
+    : null;
   const final: Draft[] = [
-    ...(loginHere ? [{ type: "login" }] : []),
     ...drafts.map((d) => (d.type === "booking_click" ? { ...d, props: { authed: userId !== null } } : d)),
     ...(newCid ? [{ type: "ym_client", props: { cid: newCid } }] : []),
   ];
-  const previousEvents: Draft[] = decision.kind === "switch" && decision.guestLogin ? [{ type: "login" }] : [];
-  if (final.length + previousEvents.length === 0) return noContent();
-  if (!visitorEventsCap.take(final.length + previousEvents.length)) return noContent();
+  // Прежняя лента гостя кончается «вошёл» — один раз, не на каждую пачку со
+  // старым id.
+  const markGuest = switching && decision.guestLogin && reissued === null && stored !== null;
+  const eventCount = final.length + (login ? 1 : 0) + (markGuest ? 1 : 0);
+  if (eventCount === 0) return noContent();
+  if (!visitorEventsCap.take(eventCount)) return noContent();
 
   const at = new Date();
   const stamp = (d: Draft): NewVisitorEvent => ({ ...d, id: newSortableId(), createdAt: at });
+  // Отметка входа у гостя — временем его последнего захода, а не входа: общий
+  // момент и соседние id связали бы гостевую строку со строкой аккаунта.
+  const guestMarkAt = stored ? new Date(stored.lastSeenAt.getTime() + 1) : at;
   const write: VisitorWrite = {
     id: targetId,
     userId,
     at,
     device: deviceOf(ua),
     isBot: parsed.bot === true,
-    // Свои заходы: аккаунт админа, а пометка переходит на новый id в обе
-    // стороны — и при входе, и при выходе.
-    isInternal: admin || (stored?.isInternal ?? false),
+    // Свои заходы: аккаунт админа. Пометка браузера переходит на гостя после
+    // выхода и на тот же аккаунт, но не на чужой аккаунт, вошедший с этого
+    // компьютера: его заходы — не свои.
+    isInternal: admin || (stored?.isInternal === true && (userId === null || stored.userId === userId)),
     firstSource: source,
     ymClientId: newCid,
-    previous: previousEvents.length > 0
-      ? { id: visitorId, markInternal: admin, events: previousEvents.map(stamp) }
+    previous: markGuest
+      ? { id: visitorId, markInternal: admin, events: [{ type: "login", id: newIdAt(guestMarkAt.getTime()), createdAt: guestMarkAt }] }
       : undefined,
+    login: login ? stamp(login) : undefined,
     events: final.map(stamp),
   };
+  if (switching && reissued === null) switchGuard.remember(visitorId, userId, targetId);
 
   after(async () => {
     try {
@@ -260,7 +283,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   });
 
   const res = noContent();
-  if (decision.kind === "switch") {
+  if (switching) {
     const secure = getEnv().NEXTAUTH_URL.startsWith("https://");
     res.cookies.set(VISITOR_COOKIE, targetId, visitorCookieOptions(secure));
     // Прежний id — в браузер, а не в базу: отказ от учёта удалит и его историю.

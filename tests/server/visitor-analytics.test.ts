@@ -8,6 +8,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const db = vi.hoisted(() => ({
   queries: [] as { text: string; params: unknown[] }[],
   updatedRows: [["prev"]] as unknown[][],
+  /** Ответ upsert'а строки браузера: [[true]] — вставлена, [[false]] — обновлена, [] — не тронута. */
+  upsertRows: [[true]] as unknown[][],
+  selectRows: [] as unknown[][],
   fail: false,
 }));
 
@@ -19,6 +22,8 @@ vi.mock("@/lib/db", async () => {
       db.queries.push({ text, params });
       if (db.fail && /^delete/.test(text)) throw Object.assign(new Error("boom"), { code: "57014" });
       if (/^update/.test(text) && /returning/.test(text)) return { rows: db.updatedRows, rowCount: db.updatedRows.length };
+      if (/^insert into "visitors"/.test(text)) return { rows: db.upsertRows, rowCount: db.upsertRows.length };
+      if (/^select/.test(text)) return { rows: db.selectRows, rowCount: db.selectRows.length };
       return { rows: [], rowCount: 0 };
     },
   };
@@ -27,7 +32,7 @@ vi.mock("@/lib/db", async () => {
 });
 
 import {
-  _resetPruneForTests, dbErrorCode, pruneVisitorData, writeVisitorBatch, type VisitorWrite,
+  _resetPruneForTests, dbErrorCode, pruneVisitorData, sessionTokenLive, writeVisitorBatch, type VisitorWrite,
 } from "@/server/visitor-analytics";
 import { EVENT_RETENTION_DAYS, VISITOR_RETENTION_DAYS } from "@/lib/analytics/limits";
 
@@ -51,6 +56,8 @@ const texts = () => db.queries.map((q) => q.text);
 beforeEach(() => {
   db.queries = [];
   db.updatedRows = [["prev"]];
+  db.upsertRows = [[true]];
+  db.selectRows = [];
   db.fail = false;
   _resetPruneForTests();
 });
@@ -76,11 +83,38 @@ describe("writeVisitorBatch", () => {
   it("upsert не перезаписывает аккаунт, первый источник и флаги", async () => {
     await writeVisitorBatch(base);
     const upsert = db.queries[1].text;
-    expect(upsert).toContain('"user_id" = coalesce("visitors"."user_id", excluded.user_id)');
+    expect(upsert).not.toMatch(/"user_id" =/);
     expect(upsert).toContain('"first_source" = coalesce("visitors"."first_source", excluded.first_source)');
     expect(upsert).toContain('"is_bot" = "visitors"."is_bot" or excluded.is_bot');
     expect(upsert).toContain('"is_internal" = "visitors"."is_internal" or excluded.is_internal');
     expect(upsert).toContain('"last_seen_at" = greatest("visitors"."last_seen_at", excluded.last_seen_at)');
+  });
+
+  // Пачка решила по устаревшему чтению («строки нет»), а параллельный маяк
+  // того же браузера уже завёл её гостевой: история гостя к аккаунту не
+  // прирастает — строка и её события не трогаются.
+  it("строку другого состояния не трогает: ни аккаунта, ни событий", async () => {
+    db.upsertRows = [];
+    expect(await writeVisitorBatch({ ...base, userId: "u1", ymClientId: null })).toBe("skipped");
+    const upsert = db.queries[1].text;
+    expect(upsert).toMatch(/do update set .* where "visitors"."user_id" is not distinct from excluded.user_id returning \(xmax = 0\)/s);
+    expect(texts().some((t) => /^insert into "visitor_events"/.test(t))).toBe(false);
+  });
+
+  // Её мог завести параллельный маяк: тогда «вошёл» уже записан им.
+  it("«вошёл» — только если строку завела эта запись", async () => {
+    const login = { ...ev("01L", "login"), props: { via: "create" } };
+    expect(await writeVisitorBatch({ ...base, userId: "u1", ymClientId: null, login })).toBe("created");
+    let insert = db.queries.find((q) => /^insert into "visitor_events"/.test(q.text))!;
+    expect(insert.params).toContain("01L");
+    expect(insert.params.indexOf("01L")).toBeLessThan(insert.params.indexOf("01A"));
+
+    db.queries = [];
+    db.upsertRows = [[false]];
+    expect(await writeVisitorBatch({ ...base, userId: "u1", ymClientId: null, login })).toBe("updated");
+    insert = db.queries.find((q) => /^insert into "visitor_events"/.test(q.text))!;
+    expect(insert.params).not.toContain("01L");
+    expect(insert.params).toContain("01A");
   });
 
   it("ClientID — только у гостя", async () => {
@@ -105,8 +139,11 @@ describe("writeVisitorBatch", () => {
       previous: { id: base.id, markInternal: true, events: [ev("01B", "login")] },
     });
     const t = texts();
-    expect(t[1]).toMatch(/^update "visitors" set/);
-    expect(db.queries[1].params).toContain("2026-10-21T09:00:00.000Z");
+    expect(t[1]).toMatch(/^update "visitors" set "is_internal" = "visitors"."is_internal" or \$1 where/);
+    // Последний заход прежнего гостя не сдвигается на момент входа: общий
+    // момент связал бы его строку со строкой аккаунта.
+    expect(t[1]).not.toContain("last_seen_at");
+    expect(db.queries[1].params).not.toContain("2026-10-21T09:00:00.000Z");
     expect(t[2]).toMatch(/^insert into "visitor_events"/);
     expect(db.queries[2].params).toEqual(expect.arrayContaining(["01B", base.id, null, "login"]));
     expect(db.queries[2].params).not.toContain("u1");
@@ -123,6 +160,16 @@ describe("writeVisitorBatch", () => {
     expect(t[1]).toMatch(/^update "visitors"/);
     expect(t[2]).toMatch(/^insert into "visitors"/);
     expect(t.filter((x) => /^insert into "visitor_events"/.test(x))).toHaveLength(1);
+  });
+});
+
+describe("sessionTokenLive", () => {
+  it("ищет живую сессию по токену", async () => {
+    expect(await sessionTokenLive("tok", AT)).toBe(false);
+    expect(db.queries[0].text).toMatch(/from "sessions" where \("sessions"."session_token" = \$1 and "sessions"."expires" > \$2\)/);
+    expect(db.queries[0].params).toEqual(["tok", AT.toISOString(), 1]);
+    db.selectRows = [[1]];
+    expect(await sessionTokenLive("tok", AT)).toBe(true);
   });
 });
 
