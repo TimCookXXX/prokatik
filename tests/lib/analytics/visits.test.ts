@@ -3,7 +3,7 @@
 // событием, «вернулся» по московским дням, шаги сделки — в окно визита.
 import { describe, expect, it } from "vitest";
 import {
-  attachActions, isReturned, isSignupLogin, mergePageViews, splitVisits, VISIT_GAP_MS,
+  attachActions, isReturned, isSignupLogin, mergePageViews, splitVisits, visitorBadge, VISIT_GAP_MS,
   type AccountAction, type TimelineEvent,
 } from "@/lib/analytics/visits";
 import { VISIT_GAP_MINUTES } from "@/lib/analytics/limits";
@@ -178,5 +178,26 @@ describe("isSignupLogin", () => {
   it("позже суток или задолго до создания — обычный вход", () => {
     expect(isSignupLogin(new Date("2026-10-22T09:00:01Z"), created)).toBe(false);
     expect(isSignupLogin(new Date("2026-10-21T08:00:00Z"), created)).toBe(false);
+  });
+});
+
+describe("visitorBadge", () => {
+  const NOW = new Date("2026-10-21T15:00:00Z");
+  const at = (iso: string) => new Date(iso);
+
+  it("впервые сегодня — «новый»; один день не сегодня — «один день»; другой день — «вернулся»", () => {
+    expect(visitorBadge({ firstSeenAt: at("2026-10-21T08:00:00Z"), lastSeenAt: at("2026-10-21T09:00:00Z"), continued: false }, NOW)).toBe("new");
+    expect(visitorBadge({ firstSeenAt: at("2026-09-26T08:00:00Z"), lastSeenAt: at("2026-09-26T09:00:00Z"), continued: false }, NOW)).toBe("oneDay");
+    expect(visitorBadge({ firstSeenAt: at("2026-10-03T08:00:00Z"), lastSeenAt: at("2026-10-21T09:00:00Z"), continued: false }, NOW)).toBe("returned");
+  });
+
+  // Аккаунт с 3 октября вошёл сегодня — новая строка, но не новый человек:
+  // в бейдж идёт первый заход человека.
+  it("давний аккаунт с сегодняшней строкой — «вернулся» по первому заходу человека", () => {
+    expect(visitorBadge({ firstSeenAt: at("2026-10-03T10:00:00Z"), lastSeenAt: at("2026-10-21T09:00:00Z"), continued: false }, NOW)).toBe("returned");
+  });
+
+  it("строка, начатая выходом из аккаунта, — не «новый»", () => {
+    expect(visitorBadge({ firstSeenAt: at("2026-10-21T08:00:00Z"), lastSeenAt: at("2026-10-21T09:00:00Z"), continued: true }, NOW)).toBe("oneDay");
   });
 });

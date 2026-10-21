@@ -27,21 +27,23 @@ function render() {
 }
 
 describe("cabinetViewsWhere", () => {
-  it("просмотры своей статистики за срок, без ботов", () => {
+  // Свои заходы — админ, проверяющий объявления: это не спрос покупателя.
+  it("просмотры своей статистики за срок, без ботов и своих заходов", () => {
     const { sql, params } = render();
     expect(sql).toContain('"visitor_events"."type" = $1');
     expect(sql).toContain('"visitor_events"."created_at" >= $2');
     expect(sql).toContain('"visitors"."is_bot" = $3');
-    expect(params.slice(0, 3)).toEqual(["view_listing", SINCE.toISOString(), false]);
+    expect(sql).toContain('"visitors"."is_internal" = $4');
+    expect(params.slice(0, 4)).toEqual(["view_listing", SINCE.toISOString(), false, false]);
   });
 
   // Права: чужие вещи в плитку не попадают ни при каком сочетании условий.
   it("только вещи этого человека", () => {
     const { sql, params } = render();
     expect(sql).toMatch(
-      /"visitor_events"\."listing_id" in \(select "id" from "listings" where "listings"\."owner_user_id" = \$4\)/,
+      /"visitor_events"\."listing_id" in \(select "id" from "listings" where "listings"\."owner_user_id" = \$5\)/,
     );
-    expect(params[3]).toBe(ME);
+    expect(params[4]).toBe(ME);
   });
 
   // Старый журнал events.view_listing писался на каждый рендер, с ботами и

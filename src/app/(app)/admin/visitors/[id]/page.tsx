@@ -9,7 +9,6 @@ import { analyticsHref } from "@/lib/analytics/admin-filters";
 import {
   describeDevice, describeSignIn, describeSource, momentLabel, visitorLabel,
 } from "@/lib/analytics/describe";
-import { moscowDay } from "@/lib/analytics/visits";
 import { ActionButton } from "@/components/admin/ActionButton";
 import { CopyValue } from "@/components/admin/analytics/CopyValue";
 import { VisitorBadges } from "@/components/admin/analytics/VisitorBadges";
@@ -37,7 +36,6 @@ export default async function AdminVisitorPage({ params }: { params: Promise<{ i
 
   const now = new Date();
   const { visitor, user } = card;
-  const days = new Set(card.events.map((e) => moscowDay(e.at))).size;
 
   return (
     <section aria-label={visitorLabel({ id: visitor.id, userName: user?.name, userEmail: user?.email })} className="flex flex-col gap-4">
@@ -50,14 +48,14 @@ export default async function AdminVisitorPage({ params }: { params: Promise<{ i
           <h2 className="min-w-0 break-words font-display text-xl font-bold">
             {visitorLabel({ id: visitor.id, userName: user?.name, userEmail: user?.email })}
           </h2>
-          <VisitorBadges v={{ ...visitor, userId: user?.id ?? null }} />
+          <VisitorBadges v={{ ...visitor, userId: user?.id ?? null }} now={now} />
         </div>
         <code className="break-all font-mono text-xs text-muted-foreground">{visitor.id}</code>
 
         <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <Fact label={t.firstSeen}>{momentLabel(visitor.firstSeenAt, now)}</Fact>
           <Fact label={t.lastSeen}>{momentLabel(visitor.lastSeenAt, now)}</Fact>
-          <Fact label={t.days}>{days}</Fact>
+          <Fact label={t.days}>{visitor.days}</Fact>
           <Fact label={t.firstSource}>{describeSource(visitor.firstSource)}</Fact>
           <Fact label={t.device}>{describeDevice(visitor.device)}</Fact>
           {user ? (

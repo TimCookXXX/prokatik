@@ -5,7 +5,8 @@
 
 import { content } from "@theme/content";
 import {
-  clockLabel, describeAction, describeEvent, describeSignIn, describeVisit, momentLabel,
+  clockLabel, describeAction, describeEvent, describeSignIn, describeVisit, momentLabel, searchShape,
+  type SearchShape,
 } from "@/lib/analytics/describe";
 import { attachActions, splitVisits, type VisitItem } from "@/lib/analytics/visits";
 import type { VisitorCard } from "@/server/analytics-admin";
@@ -39,6 +40,7 @@ export function VisitorTimeline({ card, now }: { card: VisitorCard; now: Date })
       <ol className="flex flex-col gap-3">
         {visits.map((visit) => {
           let previousListingId: string | null = null;
+          let previousSearch: SearchShape | null = null;
           return (
             <li key={visit.start.toISOString()} className="rounded-lg border border-border bg-card">
               <h3 className="border-b border-border px-4 py-2.5 text-sm font-medium">
@@ -54,8 +56,10 @@ export function VisitorTimeline({ card, now }: { card: VisitorCard; now: Date })
                     phrase = describeEvent(ev, card.directory, {
                       signup: ev.id === card.signupLoginId ? signupMethod : undefined,
                       previousListingId,
+                      previousSearch,
                     });
                     if (ev.type !== "ym_client" && ev.type !== "login") previousListingId = ev.listingId;
+                    if (ev.type === "search") previousSearch = searchShape(ev);
                   }
                   const key = item.kind === "event" ? item.event.id : `${item.action.kind}-${item.action.id}`;
                   return <Item key={key} item={item} phrase={phrase} />;

@@ -10,6 +10,7 @@
 import { content } from "@theme/content";
 import { APP_TIME_ZONE, formatDayMonthShort, shortRangeLabel, todayStr } from "@/lib/catalog/dates";
 import { extractListingId } from "@/lib/catalog/listing-path";
+import { SORT_OPTIONS } from "@/lib/catalog/filters";
 import { ruPlural } from "@/lib/plural";
 import type { Source } from "./source";
 import type { AccountAction, TimelineEvent, VisitEntry } from "./visits";
@@ -146,8 +147,30 @@ const prop = <T>(props: Record<string, unknown>, key: string, check: (v: unknown
 const isString = (v: unknown): v is string => typeof v === "string";
 const isNumber = (v: unknown): v is number => typeof v === "number";
 
-/** «Искал «перфоратор» — нашлось 12 · с датами». */
-export function describeSearch(ev: TimelineEvent, dir: Directory): string {
+/** Чем выдача отличается от соседней: запрос, раздел, сортировка. */
+export interface SearchShape {
+  q: string | null;
+  category: string | null;
+  sort: string | null;
+}
+
+/** Запрос, раздел и сортировка показа выдачи — для сравнения с соседним. */
+export function searchShape(ev: TimelineEvent): SearchShape {
+  return {
+    q: ev.q?.toLowerCase() ?? null,
+    category: prop(ev.props, "category", isString),
+    sort: prop(ev.props, "sort", isString),
+  };
+}
+
+const sortLabel = (sort: string) => SORT_OPTIONS.find((o) => o.value === sort)?.label ?? sort;
+
+/**
+ * «Искал «перфоратор» — нашлось 12 · с датами». Тот же запрос в том же разделе,
+ * что в прошлом показе, но с другой сортировкой — «Сменил сортировку на
+ * «Дешевле»»: иначе один поиск читался бы в ленте тремя.
+ */
+export function describeSearch(ev: TimelineEvent, dir: Directory, previous: SearchShape | null = null): string {
   const e = t.events;
   const reason = prop(ev.props, "reason", isString);
   const usedQuery = prop(ev.props, "usedQuery", isString);
@@ -155,10 +178,15 @@ export function describeSearch(ev: TimelineEvent, dir: Directory): string {
   const category = categorySlug ? dir.categories.get(categorySlug) ?? categorySlug : null;
   const page = prop(ev.props, "page", isNumber) ?? 1;
   const total = String(ev.total ?? 0);
+  const shape = searchShape(ev);
+  const resorted = previous !== null && shape.sort !== null && previous.sort !== shape.sort
+    && previous.q === shape.q && previous.category === shape.category;
 
-  const what = ev.q
-    ? category ? e.searchedIn(ev.q, category) : e.searched(ev.q)
-    : category ? e.browsedCategory(category) : e.browsedAll;
+  const what = resorted
+    ? e.resorted(sortLabel(shape.sort!))
+    : ev.q
+      ? category ? e.searchedIn(ev.q, category) : e.searched(ev.q)
+      : category ? e.browsedCategory(category) : e.browsedAll;
   const result = reason
     ? e.nothing(describeReason(reason))
     : ev.props.partial === true && usedQuery ? e.foundPartial(total, usedQuery) : e.found(total);
@@ -178,6 +206,8 @@ export interface DescribeContext {
   signup?: string;
   /** Объявление предыдущего события: «Забронировать» на нём не повторяет название. */
   previousListingId?: string | null;
+  /** Прошлый показ выдачи в визите: смена одной сортировки — не новый поиск. */
+  previousSearch?: SearchShape | null;
 }
 
 /** Фраза одного события ленты. */
@@ -187,7 +217,7 @@ export function describeEvent(ev: TimelineEvent, dir: Directory, ctx: DescribeCo
     case "pageview":
       return e.opened(describePage(ev.path, dir));
     case "search":
-      return describeSearch(ev, dir);
+      return describeSearch(ev, dir, ctx.previousSearch ?? null);
     case "view_listing": {
       const base = ev.listingTitle ? e.viewed(ev.listingTitle) : e.viewedGone;
       const extras: string[] = [];

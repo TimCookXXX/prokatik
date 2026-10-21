@@ -203,6 +203,24 @@ export function isReturned(firstSeen: Date, lastSeen: Date): boolean {
   return moscowDay(firstSeen) !== moscowDay(lastSeen);
 }
 
+export type VisitorBadge = "new" | "oneDay" | "returned";
+
+/**
+ * Бейдж строки в админке. `firstSeenAt` — первый заход человека: у аккаунта —
+ * регистрация или самая ранняя его строка, иначе давний аккаунт после каждого
+ * входа (новая строка) выглядел бы новичком. «Новый» — пришёл впервые сегодня;
+ * «один день» — был один день, и не сегодня, или строка начата выходом из
+ * аккаунта (`continued`: человек уже был, только под аккаунтом); «вернулся» —
+ * пришёл в другой день по Москве, чем впервые.
+ */
+export function visitorBadge(
+  v: { firstSeenAt: Date; lastSeenAt: Date; continued: boolean },
+  now: Date,
+): VisitorBadge {
+  if (isReturned(v.firstSeenAt, v.lastSeenAt)) return "returned";
+  return !v.continued && moscowDay(v.firstSeenAt) === moscowDay(now) ? "new" : "oneDay";
+}
+
 /** Первый вход аккаунта — это регистрация, если он не позже суток от создания аккаунта. */
 export function isSignupLogin(loginAt: Date, userCreatedAt: Date): boolean {
   const d = loginAt.getTime() - userCreatedAt.getTime();

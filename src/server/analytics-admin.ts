@@ -64,11 +64,16 @@ const humansOnly = (all: boolean) => (all ? sql`` : sql`and not v.is_bot and not
 const customersOnly = (all: boolean) => (all ? sql`` : sql`and u.role <> 'admin'`);
 
 /** «Ничего не нашёл» — пустая выдача с причиной, кроме страницы за концом списка. */
-const ZERO_RESULT = sql`e.props->>'reason' is not null and e.props->>'reason' <> 'past_end'`;
+const zeroResult = (alias: string) =>
+  sql.raw(`${alias}.props->>'reason' is not null and ${alias}.props->>'reason' <> 'past_end'`);
+const ZERO_RESULT = zeroResult("e");
+const ZERO_RESULT_EV = zeroResult("ev");
 
 export interface DayFigures {
   people: number;
+  /** Впервые пришли в это окно; не строка, начатая входом или выходом. */
   new: number;
+  /** Остальные: приходили и раньше. new + returned = people. */
   returned: number;
   searched: number;
   zero: number;
@@ -99,43 +104,68 @@ const ZERO_FIGURES: DayFigures = {
 
 type Grouped<T> = T & { day: string | null };
 
+/**
+ * Сводка и таблица по дням. «Новый» — впервые пришёл в это окно (в этот день
+ * для строки таблицы, в этот период для итога), «приходил и раньше» —
+ * остальные: новые и вернувшиеся вместе дают людей. Строка браузера,
+ * заведённая входом, выходом или сменой аккаунта (first_source вида account),
+ * новым человеком не считается — это продолжение того, кто уже был.
+ *
+ * Первый заход человека: у гостя — его строка (по PK), у аккаунта — самая
+ * ранняя его строка (по visitors_user_idx) и дата регистрации, что раньше:
+ * аккаунт старше своей статистики новым не бывает.
+ */
 export async function adminVisitorSummary(f: AnalyticsFilters, now: Date = new Date()): Promise<VisitorSummary> {
   await adminRead();
   const db = getDb();
   const since = periodStartDay(f.period, now);
   const bound = moscowMidnightUtc(since);
 
+  const figures = (newWhen: SQL) => sql`
+    count(distinct ev.person)::int as people,
+    count(distinct ev.person) filter (where ${newWhen} and not f.continued)::int as new,
+    count(distinct ev.person) filter (where ev.type = 'search' and ev.q is not null)::int as searched,
+    count(distinct ev.person) filter (where ev.type = 'search' and ev.q is not null and ${ZERO_RESULT_EV})::int as zero,
+    count(distinct ev.person) filter (where ev.type = 'view_listing')::int as viewed,
+    count(distinct ev.person) filter (where ev.type = 'booking_click')::int as clicked`;
+
   const [activity, requests, signups] = await Promise.all([
-    // Строка с day = null — итог периода (grouping sets): люди за период
-    // считаются без повторов, а не суммой дней.
-    db.execute<Grouped<Omit<DayFigures, "requested" | "signups">>>(sql`
+    // Строка с day = null — итог периода: люди за период считаются без
+    // повторов, а не суммой дней. Служебные события (ClientID, отметка входа)
+    // — не заход.
+    db.execute<Grouped<Omit<DayFigures, "returned" | "requested" | "signups">>>(sql`
       with ev as (
         select coalesce(v.user_id, v.id::text) as person,
+          case when v.user_id is null then v.id end as guest_id,
+          v.user_id,
           ${moscowDate(sql`e.created_at`)} as day,
-          e.type, e.props
+          e.type, e.q, e.props
         from visitor_events e
         join visitors v on v.id = e.visitor_id
-        where e.created_at >= ${bound} and e.type <> 'ym_client' ${humansOnly(f.all)}
+        where e.created_at >= ${bound} and e.type not in ('ym_client', 'login') ${humansOnly(f.all)}
       ),
+      people as (select distinct person, guest_id, user_id from ev),
       firsts as (
-        select p.person, ${moscowDate(sql`min(v.first_seen_at)`)} as first_day
-        from (select distinct person from ev) p
-        join visitors v on coalesce(v.user_id, v.id::text) = p.person
-        group by p.person
+        select p.person, ${moscowDate(sql`v.first_seen_at`)} as first_day,
+          coalesce(v.first_source->>'kind' = 'account', false) as continued
+        from people p join visitors v on v.id = p.guest_id
+        union all
+        select p.person, ${moscowDate(sql`least(u.created_at, a.first_seen_at)`)} as first_day, a.continued
+        from people p
+        join users u on u.id = p.user_id
+        cross join lateral (
+          select v.first_seen_at, coalesce(v.first_source->>'kind' = 'account', false) as continued
+          from visitors v where v.user_id = p.user_id
+          order by v.first_seen_at, v.id
+          limit 1
+        ) a
       )
-      select ev.day::text as day,
-        count(distinct ev.person)::int as people,
-        count(distinct ev.person) filter (where ev.day = f.first_day)::int as new,
-        count(distinct ev.person) filter (where ev.day > f.first_day)::int as returned,
-        count(distinct ev.person) filter (where ev.type = 'search')::int as searched,
-        count(distinct ev.person) filter (
-          where ev.type = 'search' and ev.props->>'reason' is not null and ev.props->>'reason' <> 'past_end'
-        )::int as zero,
-        count(distinct ev.person) filter (where ev.type = 'view_listing')::int as viewed,
-        count(distinct ev.person) filter (where ev.type = 'booking_click')::int as clicked
-      from ev
-      join firsts f on f.person = ev.person
-      group by grouping sets ((ev.day), ())
+      select ev.day::text as day, ${figures(sql`f.first_day = ev.day`)}
+      from ev join firsts f on f.person = ev.person
+      group by ev.day
+      union all
+      select null as day, ${figures(sql`f.first_day >= ${since}::date`)}
+      from ev join firsts f on f.person = ev.person
     `),
     db.execute<Grouped<{ requested: number }>>(sql`
       select d.day::text as day, count(distinct d.customer)::int as requested
@@ -162,7 +192,7 @@ export async function adminVisitorSummary(f: AnalyticsFilters, now: Date = new D
   const merge = (day: string | null, part: Partial<DayFigures>) => {
     byDay.set(day, { ...(byDay.get(day) ?? ZERO_FIGURES), ...part });
   };
-  for (const { day, ...rest } of activity.rows) merge(day, rest);
+  for (const { day, ...rest } of activity.rows) merge(day, { ...rest, returned: rest.people - rest.new });
   for (const { day, requested } of requests.rows) merge(day, { requested });
   for (const { day, signups: n } of signups.rows) merge(day, { signups: n });
 
@@ -180,10 +210,28 @@ export async function adminVisitorSummary(f: AnalyticsFilters, now: Date = new D
   };
 }
 
+/**
+ * Первый заход человека этой строки: у аккаунта — его регистрация или самая
+ * ранняя строка, что раньше (новая строка — на каждый вход, и иначе давний
+ * аккаунт после входа выглядел бы новичком); у гостя — своя строка. Таблица —
+ * псевдоним `visitors` основного запроса.
+ */
+const personFirstSeen = sql<Date>`case when visitors.user_id is null then visitors.first_seen_at
+  else least(users.created_at, (select min(v2.first_seen_at) from visitors v2 where v2.user_id = visitors.user_id)) end`;
+/** Строка заведена входом, выходом или сменой аккаунта — продолжение, а не новый гость. */
+const startedBySwitch = sql<boolean>`coalesce(visitors.first_source->>'kind' = 'account', false)`;
+/** Дни с заходами, по Москве: служебные события (ClientID, отметка входа) — не заход. */
+const activeDays = sql<number>`(select count(distinct ${moscowDate(sql`e.created_at`)})::int from visitor_events e
+  where e.visitor_id = visitors.id and e.type not in ('ym_client', 'login'))`;
+
 export interface VisitorListRow {
   id: string;
   firstSeenAt: Date;
   lastSeenAt: Date;
+  /** Первый заход человека (personFirstSeen) — для бейджа «новый» / «вернулся». */
+  personFirstSeenAt: Date;
+  /** Строка начата входом, выходом или сменой аккаунта. */
+  continued: boolean;
   userId: string | null;
   userName: string | null;
   userEmail: string | null;
@@ -191,9 +239,11 @@ export interface VisitorListRow {
   device: string | null;
   isBot: boolean;
   isInternal: boolean;
+  /** Разных запросов за день: листание и смена сортировки того же запроса — не новый поиск. */
   searches: number;
+  /** Разных объявлений за день: перезагрузка той же страницы — не новый просмотр. */
   views: number;
-  /** В скольких разных днях по Москве есть события (в пределах срока хранения). */
+  /** В скольких разных днях по Москве есть заходы (в пределах срока хранения). */
   days: number;
 }
 
@@ -249,12 +299,13 @@ export async function adminListVisitors(f: VisitorListFilters): Promise<VisitorL
       isBot: visitors.isBot,
       isInternal: visitors.isInternal,
       cursor: sql<string>`to_char(visitors.last_seen_at, 'YYYY-MM-DD"T"HH24:MI:SS.US')`,
-      searches: sql<number>`(select count(*)::int from visitor_events e
-        where e.visitor_id = visitors.id and e.type = 'search')`,
-      views: sql<number>`(select count(*)::int from visitor_events e
-        where e.visitor_id = visitors.id and e.type = 'view_listing')`,
-      days: sql<number>`(select count(distinct ${moscowDate(sql`e.created_at`)})::int from visitor_events e
-        where e.visitor_id = visitors.id)`,
+      personFirstSeenAt: personFirstSeen.mapWith(visitors.firstSeenAt),
+      continued: startedBySwitch,
+      searches: sql<number>`(select count(distinct (lower(e.q), ${moscowDate(sql`e.created_at`)}))::int
+        from visitor_events e where e.visitor_id = visitors.id and e.type = 'search' and e.q is not null)`,
+      views: sql<number>`(select count(distinct (e.listing_id, ${moscowDate(sql`e.created_at`)}))::int
+        from visitor_events e where e.visitor_id = visitors.id and e.type = 'view_listing' and e.listing_id is not null)`,
+      days: activeDays,
     })
     .from(visitors)
     .leftJoin(users, eq(users.id, visitors.userId))
@@ -292,6 +343,11 @@ export interface VisitorCard {
     id: string;
     firstSeenAt: Date;
     lastSeenAt: Date;
+    /** Первый заход человека — для бейджа, как в списке. */
+    personFirstSeenAt: Date;
+    continued: boolean;
+    /** Дни с заходами — тем же запросом, что в списке. */
+    days: number;
     firstSource: Source | null;
     device: string | null;
     ymClientId: string | null;
@@ -396,6 +452,9 @@ export async function adminVisitorCard(id: string): Promise<VisitorCard | null> 
       ymClientId: visitors.ymClientId,
       isBot: visitors.isBot,
       isInternal: visitors.isInternal,
+      personFirstSeenAt: personFirstSeen.mapWith(visitors.firstSeenAt),
+      continued: startedBySwitch,
+      days: activeDays,
       userId: visitors.userId,
       userName: users.name,
       userEmail: users.email,
@@ -428,8 +487,11 @@ export async function adminVisitorCard(id: string): Promise<VisitorCard | null> 
   const recent = eventRows.slice(0, CARD_EVENTS_MAX).reverse();
 
   const userId = row.userId;
+  // Лента обрезана — шаги сделки только с первого показанного события: более
+  // ранним нет визита на экране, и они встали бы в «на других устройствах».
+  const actionsFrom = truncated && recent.length > 0 ? recent[0].at : row.firstSeenAt;
   const extras = userId
-    ? await accountExtras(userId, visitorId, row.firstSeenAt, new Date(row.lastSeenAt.getTime() + VISIT_GAP_MS))
+    ? await accountExtras(userId, visitorId, actionsFrom, new Date(row.lastSeenAt.getTime() + VISIT_GAP_MS))
     : null;
 
   const listingIds = [
@@ -464,6 +526,9 @@ export async function adminVisitorCard(id: string): Promise<VisitorCard | null> 
       ymClientId: row.ymClientId,
       isBot: row.isBot,
       isInternal: row.isInternal,
+      personFirstSeenAt: row.personFirstSeenAt,
+      continued: row.continued === true,
+      days: row.days,
     },
     user: userId && row.userEmail && row.userCreatedAt
       ? {

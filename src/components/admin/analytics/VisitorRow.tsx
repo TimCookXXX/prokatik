@@ -20,7 +20,7 @@ export function VisitorRow({ row, now }: { row: VisitorListRow; now: Date }) {
       >
         <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <span className="min-w-0 break-words font-medium">{visitorLabel(row)}</span>
-          <VisitorBadges v={row} />
+          <VisitorBadges v={row} now={now} />
         </span>
         <span className="text-sm text-muted-foreground">
           {t.firstSeen} {momentLabel(row.firstSeenAt, now)} · {t.lastSeen} {momentLabel(row.lastSeenAt, now)}

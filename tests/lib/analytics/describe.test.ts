@@ -3,7 +3,7 @@
 import { describe, expect, it } from "vitest";
 import {
   EMPTY_DIRECTORY, describeAction, describeEvent, describePage, describeReason, describeSignIn,
-  describeSource, describeVisit, guestCode, momentLabel, visitorLabel, type Directory,
+  describeSource, describeVisit, guestCode, momentLabel, searchShape, visitorLabel, type Directory,
 } from "@/lib/analytics/describe";
 import { ZERO_REASONS } from "@/lib/search/zero-reason";
 import { SOURCE_KINDS } from "@/lib/analytics/source";
@@ -39,6 +39,21 @@ describe("describeEvent", () => {
     }), dir)).toBe("Искал «дрель» в разделе «Инструменты» — ничего: отсекли даты или фильтры · с датами, с адресом «Где», с фильтрами");
     expect(describeEvent(ev("search", { q: null, total: 5, props: { category: "instrumenty", page: 2 } }), dir))
       .toBe("Смотрел раздел «Инструменты» — нашлось 5 · стр. 2");
+  });
+
+  // Смена сортировки — тот же поиск: иначе одна фраза повторялась бы трижды.
+  it("тот же запрос с другой сортировкой — «Сменил сортировку»", () => {
+    const first = ev("search", { q: "перфоратор", total: 12, props: { sort: "relevance", page: 1 } });
+    const resorted = ev("search", { q: "Перфоратор", total: 12, props: { sort: "price_asc", page: 1 } });
+    const prev = searchShape(first);
+    expect(describeEvent(resorted, dir, { previousSearch: prev })).toBe("Сменил сортировку на «Дешевле» — нашлось 12");
+    // Новый запрос или другой раздел — обычная фраза.
+    expect(describeEvent({ ...resorted, q: "дрель" }, dir, { previousSearch: prev })).toBe("Искал «дрель» — нашлось 12");
+    expect(describeEvent({ ...resorted, props: { sort: "price_asc", category: "instrumenty" } }, dir, { previousSearch: prev }))
+      .toBe("Искал «Перфоратор» в разделе «Инструменты» — нашлось 12");
+    // Та же сортировка, другая страница — листание.
+    expect(describeEvent({ ...first, props: { sort: "relevance", page: 2 } }, dir, { previousSearch: prev }))
+      .toBe("Искал «перфоратор» — нашлось 12 · стр. 2");
   });
 
   it("просмотр объявления — название из базы; удалённое — без названия", () => {

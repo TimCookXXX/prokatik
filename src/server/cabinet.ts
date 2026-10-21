@@ -86,8 +86,9 @@ export function cabinetRequestsWhere(userId: string, opts: CabinetRequestsOption
 /* Условие плитки «просмотров за неделю» — отдельной функцией, как у ленты
  * заявок: его свойства держит тест. Просмотр — событие view_listing своей
  * статистики (его пишет маяк страницы объявления, свою вещь владелец не
- * «просматривает»), только по вещам этого человека, без ботов и за срок.
- * Таблица visitors должна быть в запросе: признак бота — у браузера. */
+ * «просматривает»), только по вещам этого человека, без ботов и своих заходов
+ * (админ, проверяющий объявления, — не спрос покупателя) и за срок.
+ * Таблица visitors должна быть в запросе: признаки — у браузера. */
 export function cabinetViewsWhere(userId: string, since: Date) {
   const myListings = new QueryBuilder()
     .select({ id: listings.id })
@@ -97,6 +98,7 @@ export function cabinetViewsWhere(userId: string, since: Date) {
     eq(visitorEvents.type, "view_listing"),
     gte(visitorEvents.createdAt, since),
     eq(visitors.isBot, false),
+    eq(visitors.isInternal, false),
     inArray(visitorEvents.listingId, myListings),
   );
 }
