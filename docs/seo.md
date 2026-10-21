@@ -409,6 +409,9 @@ curl -s localhost:3000/manifest.webmanifest
   — вызовы копятся в очереди с потолком `GOAL_QUEUE_LIMIT`. Её отдаёт в
   счётчик `MetrikaGoals` внутри `YandexMetrika`. Где счётчика нет (dev без
   `YANDEX_METRIKA_ID`, документ, открытый в админке), цели никуда не уходят.
+  На публичной странице `MetrikaGoals` цели не выключает, даже если
+  `window.ym` ещё не заведён: ждёт его (`GOALS_ATTACH_TRIES`), а не дождавшись,
+  оставляет очередь с потолком.
 - **Цель на показ — один раз на показ.** `search_zero` и `listing_view` шлёт
   `GoalOnMount` с ключом показа: перерисовка страницы после Server Action или
   `router.refresh` и двойной эффект StrictMode цели не повторяют, новый ключ

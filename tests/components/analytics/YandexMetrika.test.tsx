@@ -12,10 +12,12 @@ const docNav = vi.hoisted(() => ({ loadDocument: vi.fn(), reloadDocument: vi.fn(
 vi.mock("@/components/analytics/document-nav", () => docNav);
 
 import {
-  MetrikaGoals, MetrikaPageHits, YandexMetrika, metrikaInitSnippet, pageViewKey,
+  GOALS_ATTACH_STEP_MS, GOALS_ATTACH_TRIES, MetrikaGoals, MetrikaPageHits, YandexMetrika, metrikaInitSnippet, pageViewKey,
 } from "@/components/analytics/YandexMetrika";
 import { isMetrikaSkipped, metrikaSafeHref } from "@/components/analytics/metrika-url";
-import { _pendingGoalsForTests, _resetGoalsForTests, reachGoal } from "@/components/analytics/goals";
+import {
+  GOAL_QUEUE_LIMIT, _pendingGoalsForTests, _resetGoalsForTests, reachGoal,
+} from "@/components/analytics/goals";
 
 const origin = window.location.origin;
 
@@ -288,11 +290,42 @@ describe("<MetrikaGoals>", () => {
     expect(_pendingGoalsForTests()).toEqual([]);
   });
 
-  it("сниппет не поднял счётчик — цели не уходят и не копятся", () => {
-    delete window.ym;
-    reachGoal("listing_view");
-    render(<MetrikaGoals id={42} />);
-    reachGoal("listing_view");
-    expect(_pendingGoalsForTests()).toEqual([]);
+  // Порядок эффектов — <Script> раньше MetrikaGoals — юнит-тестом не поймать:
+  // jsdom исполняет вставленный скрипт в своём глобальном объекте. Поэтому
+  // проверяется не порядок, а то, что его сбой не теряет цели.
+  it("на публичной странице ждёт счётчик, а не выключает цели", () => {
+    vi.useFakeTimers();
+    try {
+      delete window.ym;
+      reachGoal("listing_view");
+      render(<MetrikaGoals id={42} />);
+      reachGoal("booking_click", { authed: false });
+      expect(_pendingGoalsForTests()).toHaveLength(2);
+
+      window.ym = ym;
+      vi.advanceTimersByTime(GOALS_ATTACH_STEP_MS);
+      expect(ym.mock.calls).toEqual([
+        [42, "reachGoal", "listing_view"],
+        [42, "reachGoal", "booking_click", { authed: false }],
+      ]);
+      reachGoal("booking_sent");
+      expect(ym).toHaveBeenLastCalledWith(42, "reachGoal", "booking_sent");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("счётчик так и не поднялся — очередь ждёт со своим потолком", () => {
+    vi.useFakeTimers();
+    try {
+      delete window.ym;
+      render(<MetrikaGoals id={42} />);
+      vi.advanceTimersByTime(GOALS_ATTACH_TRIES * GOALS_ATTACH_STEP_MS * 2);
+      for (let i = 0; i < GOAL_QUEUE_LIMIT + 5; i++) reachGoal("listing_view");
+      expect(_pendingGoalsForTests()).toHaveLength(GOAL_QUEUE_LIMIT);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

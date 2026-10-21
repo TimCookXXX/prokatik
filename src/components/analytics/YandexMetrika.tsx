@@ -74,15 +74,32 @@ export function YandexMetrika({ counterId }: Props) {
   );
 }
 
+/** Сколько раз и с каким шагом MetrikaGoals ждёт window.ym на публичной странице. */
+export const GOALS_ATTACH_TRIES = 20;
+export const GOALS_ATTACH_STEP_MS = 100;
+
 // Очередь целей (goals.ts) уходит в счётчик, когда он поднят. Компонент стоит
 // следом за <Script>: эффекты соседей идут по порядку, а Script исполняет
-// инлайн-сниппет синхронно в своём эффекте — к этому моменту window.ym уже
-// заведён, если счётчик на этой загрузке документа есть. Нет его (админка) —
-// цели отбрасываются до следующей загрузки документа.
+// инлайн-сниппет синхронно в своём эффекте — обычно к этому моменту window.ym
+// уже заведён. Выключаются цели только там, где счётчика на этой загрузке
+// документа точно не будет, — в админке, по пути. На публичной странице ym
+// ждём, а не выключаем: сменись порядок эффектов, ошибка стоила бы задержки, а
+// не всех целей до следующей загрузки. Не дождались — очередь остаётся
+// ждать со своим потолком.
 export function MetrikaGoals({ id }: { id: number }) {
   useEffect(() => {
-    if (typeof window.ym === "function" && !isMetrikaSkipped(window.location.pathname)) startGoals(id);
-    else stopGoals();
+    if (isMetrikaSkipped(window.location.pathname)) {
+      stopGoals();
+      return;
+    }
+    let tries = 0;
+    let timer: number | undefined;
+    const attach = () => {
+      if (typeof window.ym === "function") startGoals(id);
+      else if (++tries < GOALS_ATTACH_TRIES) timer = window.setTimeout(attach, GOALS_ATTACH_STEP_MS);
+    };
+    attach();
+    return () => window.clearTimeout(timer);
   }, [id]);
   return null;
 }
