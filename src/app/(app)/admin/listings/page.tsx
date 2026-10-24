@@ -3,7 +3,7 @@ import Link from "next/link";
 import { adminListListings } from "@/server/admin";
 import { adminSetListingStatus } from "@/server/actions/admin";
 import { ActionButton } from "@/components/admin/ActionButton";
-import { formatPrice } from "@/lib/catalog/format";
+import { formatUnitPriceSlash, primaryPrice } from "@/lib/catalog/tariff";
 import { listingPath } from "@/lib/catalog/listing-path";
 
 export const dynamic = "force-dynamic";
@@ -33,7 +33,7 @@ export default async function AdminListingsPage() {
               </Link>
               <p className="text-sm text-muted-foreground">
                 {ownerName ?? "—"}
-                {` · ${formatPrice(listing.priceDay)}/сутки`}
+                {primaryPrice(listing) ? ` · ${formatUnitPriceSlash(primaryPrice(listing)!)}` : ""}
                 {" · "}{STATUS_LABEL[listing.status] ?? listing.status}
                 {listing.hiddenByBan ? " (баном)" : ""}
               </p>

@@ -8,6 +8,9 @@ const base = {
   depositType: "none" as const,
   quantity: 1,
   priceDay: 500,
+  priceWeek: "",
+  priceMonth: "",
+  minDays: "1",
   handoverPickup: true,
   handoverDelivery: false,
   address: { mode: "keep" },
@@ -27,26 +30,63 @@ describe("listingFormSchema", () => {
     expect(r.data).not.toHaveProperty("location");
   });
 
-  // Цена за сутки — единственная: аренда посуточная, других тарифов у брони
-  // нет. Пустое поле и ноль разводятся по сообщениям: форма шлёт строки, и
-  // «» без обработки стало бы нулём, то есть незаполненная цена жаловалась бы
-  // на величину вместо отсутствия.
-  it("требует цену за сутки и отличает пустое поле от нуля", () => {
-    const { priceDay: _p, ...withoutPrice } = base;
-    // null и пробелы — тоже «не заполнено»: Number() сводит их к нулю, и без
-    // обработки человек получил бы жалобу на величину вместо отсутствия.
-    // Из формы такое не придёт, но payload мутации приходит извне.
-    const empty = [withoutPrice, { ...base, priceDay: "" }, { ...base, priceDay: null },
-      { ...base, priceDay: "   " }];
+  // Хоть одна цена из трёх. Пустое поле и ноль разводятся по сообщениям: форма
+  // шлёт строки, и «» без обработки стало бы нулём, то есть незаполненная цена
+  // жаловалась бы на величину вместо отсутствия.
+  it("требует хоть одну цену и отличает пустое поле от нуля", () => {
+    // null и пробелы — тоже «не заполнено». Из формы такое не придёт, но
+    // payload мутации приходит извне.
+    const empty = [{ ...base, priceDay: "" }, { ...base, priceDay: null }, { ...base, priceDay: "   " }];
     for (const input of empty) {
       const r = listingFormSchema.safeParse(input);
       expect(r.success).toBe(false);
-      expect(r.error?.issues[0]?.message).toBe("Укажите цену за сутки");
+      expect(r.error?.issues[0]?.message).toBe("Укажите цену за сутки, неделю или месяц");
     }
 
     const zero = listingFormSchema.safeParse({ ...base, priceDay: 0 });
     expect(zero.success).toBe(false);
     expect(zero.error?.issues[0]?.message).toBe("Цена должна быть больше нуля");
+  });
+
+  // Ключи тарифов обязательны, значения — нет: старая вкладка, где полей
+  // недели и месяца ещё нет, шлёт форму без них, и updateListing обнулил бы
+  // недельную цену, выставленную в новой. Пусть лучше запрос не пройдёт.
+  it("payload без ключей тарифов — устаревшая форма, а не «цены нет»", () => {
+    for (const key of ["priceDay", "priceWeek", "priceMonth", "minDays"] as const) {
+      const { [key]: _drop, ...without } = base;
+      const r = listingFormSchema.safeParse(without);
+      expect(r.success).toBe(false);
+      expect(r.error?.issues[0]?.message).toBe("Форма устарела — обновите страницу");
+    }
+  });
+
+  it("только недельная цена — от 7 дней, только месячная — от 30", () => {
+    const week = { ...base, priceDay: "", priceWeek: "2250" };
+    const short = listingFormSchema.safeParse({ ...week, minDays: "3" });
+    expect(short.success).toBe(false);
+    expect(short.error?.issues[0]?.message).toBe("Без цены за сутки минимальный срок — от 7 дней");
+    const ok = listingFormSchema.safeParse({ ...week, minDays: "7" });
+    expect(ok.success).toBe(true);
+    expect(ok.data).toMatchObject({ priceDay: null, priceWeek: 2250, priceMonth: null, minDays: 7 });
+
+    const month = { ...base, priceDay: "", priceMonth: "7000" };
+    const notMonth = listingFormSchema.safeParse({ ...month, minDays: "7" });
+    expect(notMonth.error?.issues[0]?.message).toBe("Без цены за сутки и за неделю минимальный срок — от 30 дней");
+    expect(listingFormSchema.safeParse({ ...month, minDays: "30" }).success).toBe(true);
+  });
+
+  it("кривая цена — одна ошибка про цену, без лишней про срок", () => {
+    const r = listingFormSchema.safeParse({ ...base, priceDay: "", priceWeek: "abc" });
+    expect(r.error?.issues.map((i) => i.message)).toEqual(["Цена — целое число рублей"]);
+  });
+
+  it("минимальный срок: пусто — один день, вне 1…90 — отказ", () => {
+    expect(listingFormSchema.safeParse({ ...base, minDays: "" }).data?.minDays).toBe(1);
+    for (const minDays of ["0", "91", "2.5", "abc"]) {
+      const r = listingFormSchema.safeParse({ ...base, minDays });
+      expect(r.success).toBe(false);
+      expect(r.error?.issues[0]?.message).toBe("Минимальный срок — от 1 до 90 дней");
+    }
   });
 
   // Цена приходит из формы строкой — приведение обязано её принять.

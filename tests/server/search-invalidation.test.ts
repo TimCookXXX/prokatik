@@ -94,7 +94,7 @@ const admin = { user: { id: "admin", role: "admin", bannedAt: null } };
 
 const form = {
   title: "Перфоратор Bosch", categoryId: "cat", cityId: "city", description: "",
-  priceDay: 500, depositType: "none", quantity: 1,
+  priceDay: 500, priceWeek: "", priceMonth: "", minDays: "1", depositType: "none", quantity: 1,
   handoverPickup: true, handoverDelivery: false, photos: [],
   address: { mode: "keep" },
 };

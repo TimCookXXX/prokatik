@@ -119,6 +119,15 @@ describe("requestNoteRows", () => {
   const value = (m: ChatSystemMeta | null, term: string) =>
     flat(requestNoteRows(m).find((r) => r.term === term)?.value ?? "");
 
+  // Сумма — той же лестницей тарифов, что в шторке: 12–21 сентября — десять
+  // суток по недельной доле, а у записи без суточной — только по неделе.
+  it("стоимость по тарифам из снимка", () => {
+    const long = { from: "2026-09-12", to: "2026-09-21", priceDay: 500, priceWeek: 1400 };
+    expect(value(long, "Стоимость")).toBe("≈ 2 000 ₽");
+    const weekOnly = { from: "2026-09-12", to: "2026-09-18", priceWeek: 2250 };
+    expect(value(weekOnly, "Стоимость")).toBe("≈ 2 250 ₽");
+  });
+
   it("полная запись даёт все четыре строки в заданном порядке", () => {
     expect(terms(full)).toEqual(["Даты", "Сколько", "Стоимость", "Залог"]);
   });

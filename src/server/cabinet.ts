@@ -35,8 +35,11 @@ export interface CabinetRequestRow {
   /* Условия сделки на момент заявки, а не сегодняшние условия вещи. Владелец
    * вправе поменять цену в любой день, и без снимка стоимость старой заявки
    * ползла бы вслед за ней — человек видел бы не ту сумму, на которую
-   * соглашался. Снимок лежит колонками самой заявки, см. drizzle/schema.ts. */
-  priceDay: number;
+   * соглашался. Снимок лежит колонками самой заявки, см. drizzle/schema.ts.
+   * Тарифы — все три: сумма за срок считается по лестнице (lib/catalog/tariff). */
+  priceDay: number | null;
+  priceWeek: number | null;
+  priceMonth: number | null;
   depositType: DepositType;
   depositAmount: number | null;
   /** Всё, что нужно ссылке на вещь: публичный контур закрывают и статус, и бан
@@ -142,6 +145,8 @@ export async function getCabinetRequests(
       // не тянем.
       listingImage: sql<string | null>`${listings.photosJson}->0->>'url'`,
       priceDay: bookingRequests.priceDay,
+      priceWeek: bookingRequests.priceWeek,
+      priceMonth: bookingRequests.priceMonth,
       depositType: bookingRequests.depositType,
       depositAmount: bookingRequests.depositAmount,
       listerBannedAt: lister.bannedAt,
@@ -198,6 +203,8 @@ export async function getCabinetRequests(
       expiresAt: r.expiresAt,
       customerComment: r.customerComment,
       priceDay: r.priceDay,
+      priceWeek: r.priceWeek,
+      priceMonth: r.priceMonth,
       depositType: r.depositType,
       depositAmount: r.depositAmount,
       listing: {

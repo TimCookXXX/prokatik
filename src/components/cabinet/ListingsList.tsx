@@ -15,6 +15,7 @@ import Image from "next/image";
 import { ImageOff, MapPin } from "lucide-react";
 import { content } from "@theme/content";
 import { formatDeposit, formatPrice } from "@/lib/catalog/format";
+import { formatUnitPrice, minDaysShort, primaryPrice } from "@/lib/catalog/tariff";
 import { ListingRowActions } from "@/components/cabinet/ListingRowActions";
 
 export interface ListingRow {
@@ -22,7 +23,10 @@ export interface ListingRow {
   title: string;
   photoUrl: string | null;
   categoryName: string | null;
-  priceDay: number;
+  priceDay: number | null;
+  priceWeek: number | null;
+  priceMonth: number | null;
+  minDays: number;
   depositType: "money" | "document" | "none";
   depositAmount: number | null;
   status: "active" | "hidden" | "archived";
@@ -106,13 +110,18 @@ function Pending({ n, labelled }: { n: number; labelled?: boolean }) {
 }
 
 function Price({ row }: { row: ListingRow }) {
+  const primary = primaryPrice(row);
   return (
     <>
-      <span className="whitespace-nowrap font-medium tabular-nums">
-        {formatPrice(row.priceDay)}
-        {/* Единицу не теряем: «4 242 ₽» без неё читается как цена вещи. */}
-        <span className="ml-1 text-2xs font-normal text-muted-foreground">в сутки</span>
-      </span>
+      {primary && (
+        <span className="whitespace-nowrap font-medium tabular-nums">
+          {formatPrice(primary.amount)}
+          {/* Единицу не теряем: «4 242 ₽» без неё читается как цена вещи. */}
+          <span className="ml-1 text-2xs font-normal text-muted-foreground">
+            {content.tariff.per[primary.unit]}
+          </span>
+        </span>
+      )}
       <span className="block truncate text-2xs text-muted-foreground">
         {formatDeposit(row.depositType, row.depositAmount)}
       </span>
@@ -233,9 +242,12 @@ export function ListingsList({ rows }: { rows: ListingRow[] }) {
             <div className={`min-w-0 flex-1 ${row.status === "active" ? "" : "text-muted-foreground"}`}>
               <TitleLink row={row} className="text-sm" />
               <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-2xs text-muted-foreground">
-                <span className="whitespace-nowrap tabular-nums">
-                  {formatPrice(row.priceDay)} в сутки
-                </span>
+                {primaryPrice(row) && (
+                  <span className="whitespace-nowrap tabular-nums">
+                    {formatUnitPrice(primaryPrice(row)!)}
+                    {row.minDays > 1 ? ` · ${minDaysShort(row.minDays)}` : ""}
+                  </span>
+                )}
                 <span>{formatDeposit(row.depositType, row.depositAmount)}</span>
                 {row.status === "active"
                   ? <Today row={row} labelled />

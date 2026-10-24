@@ -112,7 +112,7 @@ const pickYab = {
 
 const form = (over: Record<string, unknown> = {}) => ({
   title: "Перфоратор Bosch", categoryId: "cat", cityId: "krd", description: "",
-  priceDay: 500, depositType: "none", quantity: 1,
+  priceDay: 500, priceWeek: "", priceMonth: "", minDays: "1", depositType: "none", quantity: 1,
   handoverPickup: true, handoverDelivery: false, photos: [],
   address: { mode: "keep" },
   ...over,
@@ -186,6 +186,13 @@ describe("updateListing: адрес", () => {
     expect(await updateListing("L1", form({ priceDay: 700 }))).toEqual({ ok: true, data: undefined });
     expect(state.updates[0]).toMatchObject({ priceDay: 700, cityId: "krd" });
     for (const c of ADDRESS_COLUMNS) expect(state.updates[0]).not.toHaveProperty(c);
+  });
+
+  it("тарифы и минимальный срок пишутся все, пустая суточная — NULL", async () => {
+    state.current = stored;
+    const r = await updateListing("L1", form({ priceDay: "", priceWeek: "2250", priceMonth: "7000", minDays: "7" }));
+    expect(r).toEqual({ ok: true, data: undefined });
+    expect(state.updates[0]).toMatchObject({ priceDay: null, priceWeek: 2250, priceMonth: 7000, minDays: 7 });
   });
 
   // Переимпорт геоданных меняет id и даже сами данные — keep от них не зависит.

@@ -5,6 +5,7 @@
 // Тип FeedRow импортируется только как тип — типы границу не пересекают.
 
 import { rentalDaysCount } from "@/lib/booking/params";
+import { quote } from "@/lib/catalog/tariff";
 import type { CabinetRequestRow } from "@/server/cabinet";
 import type { FeedRow } from "@/components/cabinet/RequestsFeed";
 
@@ -13,6 +14,8 @@ export function toFeedRow(r: CabinetRequestRow): FeedRow {
   // охряный призыв к действию у арендатора звал бы туда, где кнопок нет.
   const hot = r.side === "owner" && r.status === "new";
   const days = rentalDaysCount({ from: r.dateFrom, to: r.dateTo, qty: r.qty });
+  // Минимальный срок не передаётся: его в снимке нет, а заявка уже подана.
+  const q = days > 0 ? quote(r, days, r.qty) : null;
 
   return {
     ...r,
@@ -24,7 +27,8 @@ export function toFeedRow(r: CabinetRequestRow): FeedRow {
     // По цене из самой заявки, а не по сегодняшней цене вещи: иначе сумма
     // старой заявки ползла бы вслед за прайсом владельца, и человек видел бы
     // не то, на что соглашался. Снимок — в drizzle/schema.ts.
-    estimate: days > 0 ? r.priceDay * days * r.qty : null,
+    estimate: q?.ok ? q.total : null,
+    estimateBasis: q?.ok ? { unit: q.unit, rate: q.rate, capped: q.capped } : null,
   };
 }
 

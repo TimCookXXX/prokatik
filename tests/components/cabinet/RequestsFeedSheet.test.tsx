@@ -38,6 +38,8 @@ const row = (over: Partial<Row> = {}): Row => ({
   expiresAt: "2026-09-12T10:00:00.000Z",
   customerComment: null,
   priceDay: 500,
+  priceWeek: null,
+  priceMonth: null,
   depositType: "money",
   depositAmount: 2000,
   listing: {
@@ -49,6 +51,7 @@ const row = (over: Partial<Row> = {}): Row => ({
   peerPhone: null,
   hot: true,
   estimate: 500 * 3 * 2,
+  estimateBasis: { unit: "day", rate: 500, capped: false },
   ...over,
 });
 

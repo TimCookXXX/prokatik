@@ -18,6 +18,9 @@ import { headingCity, type CityNames } from "@/lib/catalog/city-locative";
 import {
   formatDeposit, formatPrice, listingsCountLabel, ownersCountLabel, type DepositType,
 } from "@/lib/catalog/format";
+import {
+  formatUnitPriceSlash, minDaysLabel, primaryPrice, type Tariff,
+} from "@/lib/catalog/tariff";
 
 /** Потолок заголовка карточки: длиннее выдача Яндекса и Google режет. */
 export const LISTING_TITLE_MAX = 65;
@@ -122,28 +125,42 @@ export function cityDescription(city: CityNames): string {
   return `Всё для аренды ${headingCity(city)}: инструмент, техника, спорт, одежда и другое. Каталог с ценами и заявкой на бронь онлайн.`;
 }
 
+/**
+ * Главная цена вещи с единицей: «700 ₽/сутки», а у вещи без суточной —
+ * «2 250 ₽/неделя». Приведённая к суткам цена в текст не идёт: у вещи, которую
+ * меньше чем на неделю не сдают, «322 ₽/сутки» — выдумка.
+ */
+function listingPrice(tariff: Tariff): string | null {
+  const p = primaryPrice(tariff);
+  return p ? formatUnitPriceSlash(p) : null;
+}
+
 /** Полная фраза о вещи без обрезки — для «Поделиться». */
-export function listingShareText(title: string, city: CityNames, priceDay: number): string {
-  return `${title} — аренда ${headingCity(city)}, ${perDay(priceDay)}`;
+export function listingShareText(title: string, city: CityNames, tariff: Tariff): string {
+  const price = listingPrice(tariff);
+  return `${title} — аренда ${headingCity(city)}${price ? `, ${price}` : ""}`;
 }
 
 /**
- * Title карточки: «{title} — аренда в Краснодаре, 700 ₽/сутки», не длиннее
+ * Title карточки: «{title} — аренда в Краснодаре, 700 ₽/сутки» (или
+ * «2 250 ₽/неделя» у вещи без суточной), не длиннее
  * LISTING_TITLE_MAX. Режется название вещи (по слову), а не хвост с городом и
  * ценой: ради них сниппет и читают. Если и хвост не оставляет места названию
  * (очень длинное имя города), город уходит из хвоста.
  */
-export function listingTitle(title: string, city: CityNames, priceDay: number): string {
+export function listingTitle(title: string, city: CityNames, tariff: Tariff): string {
   const MIN_TITLE = 16;
-  let suffix = ` — аренда ${headingCity(city)}, ${perDay(priceDay)}`;
-  if (LISTING_TITLE_MAX - suffix.length < MIN_TITLE) suffix = ` — аренда, ${perDay(priceDay)}`;
+  const price = listingPrice(tariff);
+  const tail = price ? `, ${price}` : "";
+  let suffix = ` — аренда ${headingCity(city)}${tail}`;
+  if (LISTING_TITLE_MAX - suffix.length < MIN_TITLE) suffix = ` — аренда${tail}`;
   return `${truncateWords(title, LISTING_TITLE_MAX - suffix.length)}${suffix}`;
 }
 
-export interface ListingFacts {
+export interface ListingFacts extends Tariff {
   title: string;
   description: string | null;
-  priceDay: number;
+  minDays: number;
   depositType: DepositType;
   depositAmount: number | null;
   handoverPickup: boolean;
@@ -167,7 +184,10 @@ export function listingDescription(listing: ListingFacts, city: CityNames): stri
     ? null
     : formatDeposit(listing.depositType, listing.depositAmount);
   const facts = [
-    perDay(listing.priceDay),
+    listingPrice(listing),
+    // Минимальный срок решает, подойдёт ли вещь вообще, — в сниппет он
+    // нужнее залога.
+    listing.minDays > 1 ? minDaysLabel(listing.minDays) : null,
     deposit,
     handoverFact(listing.handoverPickup, listing.handoverDelivery),
   ].filter(Boolean).join(", ");

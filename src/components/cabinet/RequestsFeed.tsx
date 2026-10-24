@@ -21,6 +21,7 @@ import { requestListingHref } from "@/lib/booking/listing-link";
 import { depositValue, formatPrice } from "@/lib/catalog/format";
 import { rentalDaysCount } from "@/lib/booking/params";
 import { ruPlural } from "@/lib/plural";
+import { content } from "@theme/content";
 import {
   isClosed, period, roleWord, StatusBadge, Thumb, TimeLeft, type FeedRow,
 } from "@/components/cabinet/request-row-bits";
@@ -36,6 +37,7 @@ function SheetContent({ row }: { row: FeedRow }) {
   const owner = row.side === "owner";
   // Диапазон включает обе границы, поэтому счёт суток — не разность дат.
   const days = rentalDaysCount({ from: row.dateFrom, to: row.dateTo, qty: row.qty });
+  const basis = row.estimateBasis;
   const publicHref = requestListingHref(row.listing, row.side);
   /* Комментарий один — тот, что клиент оставил при заявке. Владельцу это
    * чужие слова в момент решения, арендатору — свои. Комментария владельца
@@ -88,13 +90,24 @@ function SheetContent({ row }: { row: FeedRow }) {
                   * Каждый множитель неразрывен, переносится только по швам
                   * между ними: на 360px строка целиком не влезает, а рвать её
                   * посреди «3 дня» нельзя. */}
-                {days > 0 && (
+                {/* Посуточно — множителями. По неделе или месяцу множители
+                  * дробные («2 250 ₽ × 10/7»), и раскладка называет тариф. */}
+                {days > 0 && basis && (
                   <span className="ml-1.5 inline-flex flex-wrap gap-x-1 text-muted-foreground">
-                    <span className="whitespace-nowrap">({formatPrice(row.priceDay)}</span>
-                    <span className="whitespace-nowrap">
-                      × {days} {ruPlural(days, "день", "дня", "дней")}
-                      {row.qty > 1 ? "" : ")"}
-                    </span>
+                    {basis.unit === "day" && !basis.capped ? (
+                      <>
+                        <span className="whitespace-nowrap">({formatPrice(basis.rate)}</span>
+                        <span className="whitespace-nowrap">
+                          × {days} {ruPlural(days, "день", "дня", "дней")}
+                          {row.qty > 1 ? "" : ")"}
+                        </span>
+                      </>
+                    ) : (
+                      <span className="whitespace-nowrap">
+                        ({content.tariff.basis(formatPrice(basis.rate), content.tariff.per[basis.unit])}
+                        {row.qty > 1 ? "" : ")"}
+                      </span>
+                    )}
                     {row.qty > 1 && <span className="whitespace-nowrap">× {row.qty} шт.)</span>}
                   </span>
                 )}

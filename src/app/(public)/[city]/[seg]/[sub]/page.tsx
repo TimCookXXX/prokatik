@@ -15,6 +15,7 @@ import {
 import { canonicalHref, categoryPath, extractListingId, listingPath } from "@/lib/catalog/listing-path";
 import { carryParams } from "@/lib/catalog/filters";
 import { formatPrice } from "@/lib/catalog/format";
+import { primaryPrice } from "@/lib/catalog/tariff";
 import {
   catalogDescription, catalogHeading, catalogTitle, listingDescription, listingShareText, listingTitle,
 } from "@/lib/seo/titles";
@@ -121,7 +122,7 @@ export async function generateMetadata({ params }: Props, parent?: ResolvingMeta
     : (parent ? (await parent).openGraph?.images : undefined);
   return {
     // absolute, как у всех страниц каталога: см. src/lib/seo/titles.ts.
-    title: { absolute: listingTitle(r.listing.title, r.city, r.listing.priceDay) },
+    title: { absolute: listingTitle(r.listing.title, r.city, r.listing) },
     description: listingDescription(r.listing, r.city),
     alternates: { canonical },
     // og:title и og:description Next дописывает сам из title и description.
@@ -286,6 +287,8 @@ async function ListingPage({
   const weekDates = Array.from({ length: 7 }, (_, i) => addDaysStr(from, i));
   const available = weekDates.some((d) => freeQty(listing.quantity, map.get(d)) > 0);
   const canonicalPath = listingPath(city.slug, category.slug, listing.slug, listing.id);
+  const tariff = { priceDay: listing.priceDay, priceWeek: listing.priceWeek, priceMonth: listing.priceMonth };
+  const primary = primaryPrice(tariff);
 
   // Похожее: другие товары продавца и другие в этой категории (без текущего).
   const [sellerItemsAll, categoryItemsRes] = await Promise.all([
@@ -307,7 +310,7 @@ async function ListingPage({
       <JsonLd data={buildProductJsonLd({
         title: listing.title,
         description: listing.description,
-        priceDay: listing.priceDay,
+        price: primary,
         photoUrls: photos.map((p) => p.url),
         url: `${siteUrl()}${canonicalPath}`,
         sellerName,
@@ -326,7 +329,7 @@ async function ListingPage({
         <ShareButton
           url={`${siteUrl()}${canonicalPath}`}
           title={listing.title}
-          text={listingShareText(listing.title, city, listing.priceDay)}
+          text={listingShareText(listing.title, city, listing)}
         />
       </div>
 
@@ -416,7 +419,7 @@ async function ListingPage({
             maxDate={addDaysStr(from, BOOKING_HORIZON_DAYS)}
             availability={availabilityRecord}
             quantity={listing.quantity}
-            priceDay={listing.priceDay}
+            tariff={tariff}
             depositType={listing.depositType}
             depositAmount={listing.depositAmount}
             handoverPickup={listing.handoverPickup}

@@ -108,9 +108,13 @@ export async function createBookingRequest(
   // подать её на условиях, которых человек не видел, нельзя. Без этой проверки
   // поднятая за секунду до отправки цена замерзала бы в заявке как «то, на что
   // вы согласились» — ровно тот обман, от которого снимок и заводился.
-  if (form.priceDay !== undefined && listing.priceDay !== form.priceDay) {
-    return { ok: false, error: "price_stale" };
-  }
+  // Сверяются все три тарифа: сумма за срок зависит от каждого (quote).
+  const priceShifted = ([
+    [form.priceDay, listing.priceDay],
+    [form.priceWeek, listing.priceWeek],
+    [form.priceMonth, listing.priceMonth],
+  ] as const).some(([seen, now]) => seen !== undefined && seen !== now);
+  if (priceShifted) return { ok: false, error: "price_stale" };
 
   const availRows = await db.select().from(availability).where(and(
     eq(availability.listingId, listing.id),
@@ -139,6 +143,8 @@ export async function createBookingRequest(
         // вправе поменять цену завтра, и стоимость, которую человек видел,
         // выбирая даты, от этого меняться не должна.
         priceDay: listing.priceDay,
+        priceWeek: listing.priceWeek,
+        priceMonth: listing.priceMonth,
         depositType: listing.depositType,
         depositAmount: listing.depositAmount,
         status: "new",
@@ -173,7 +179,9 @@ export async function createBookingRequest(
         // обязаны называть одну сумму.
         meta: {
           requestId, from: sel.from, to: sel.to, qty: sel.qty,
-          priceDay: listing.priceDay,
+          priceDay: listing.priceDay ?? undefined,
+          priceWeek: listing.priceWeek ?? undefined,
+          priceMonth: listing.priceMonth ?? undefined,
           depositType: listing.depositType,
           depositAmount: listing.depositAmount ?? undefined,
           comment: form.comment || undefined,

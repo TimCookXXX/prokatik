@@ -17,6 +17,7 @@ import { field } from "@/components/ui/field";
 import { WEBVISOR_NO_KEYS } from "@/components/analytics/webvisor";
 import { formatDayMonth } from "@/lib/catalog/dates";
 import { formatPrice } from "@/lib/catalog/format";
+import { quote, type Tariff } from "@/lib/catalog/tariff";
 import { reachGoal } from "@/components/analytics/goals";
 
 function humanError(code: string): string {
@@ -51,14 +52,14 @@ function humanError(code: string): string {
 }
 
 export function BookingFormDialog({
-  open, onOpenChange, listingId, listingTitle, sel, priceDay, initialPhone,
+  open, onOpenChange, listingId, listingTitle, sel, tariff, initialPhone,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   listingId: string;
   listingTitle: string;
   sel: BookingSelection;
-  priceDay: number;
+  tariff: Tariff;
   initialPhone: string;
 }) {
   const [phone, setPhone] = useState(initialPhone);
@@ -68,7 +69,8 @@ export function BookingFormDialog({
   const [pending, startTransition] = useTransition();
 
   const days = rentalDaysCount(sel);
-  const estimate = priceDay * days * sel.qty;
+  const q = quote(tariff, days, sel.qty);
+  const estimate = q.ok ? q.total : null;
   const period = sel.from === sel.to
     ? formatDayMonth(sel.from)
     : `${formatDayMonth(sel.from)} — ${formatDayMonth(sel.to)}`;
@@ -83,7 +85,10 @@ export function BookingFormDialog({
         from: sel.from,
         to: sel.to,
         qty: String(sel.qty),
-        priceDay: String(priceDay),
+        // Пустая строка — «этой цены нет»: сервер сверит и её отсутствие.
+        priceDay: tariff.priceDay?.toString() ?? "",
+        priceWeek: tariff.priceWeek?.toString() ?? "",
+        priceMonth: tariff.priceMonth?.toString() ?? "",
         phone,
         comment,
         website,

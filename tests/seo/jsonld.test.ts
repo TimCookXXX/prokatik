@@ -7,7 +7,7 @@ describe("buildProductJsonLd()", () => {
   const base = {
     title: "Перфоратор Bosch",
     description: "Мощный перфоратор.",
-    priceDay: 500,
+    price: { amount: 500, unit: "day" as const },
     photoUrls: ["https://img.example/1.webp"],
     url: "https://inrenta.example/kazan/elektroinstrument/perforator-01ARZ3NDEKTSV4RRFFQ69G5FAV",
     sellerName: "Артём",

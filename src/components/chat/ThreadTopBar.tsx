@@ -8,11 +8,22 @@ import Image from "next/image";
 import { ChatPersonLink } from "@/components/chat/ChatPersonLink";
 import { ThreadBackButton } from "@/components/chat/ThreadBackButton";
 import { listingPath } from "@/lib/catalog/listing-path";
-import { formatDeposit, formatPrice } from "@/lib/catalog/format";
+import { formatDeposit } from "@/lib/catalog/format";
+import { formatUnitPriceSlash, primaryPrice } from "@/lib/catalog/tariff";
 import { content } from "@theme/content";
 import type { ThreadHeader } from "@/server/chat";
 
 const t = content.chat;
+
+// Главная цена вещи с единицей: «500 ₽/сутки» или «2 250 ₽/неделя».
+function headerPrice(header: ThreadHeader): string {
+  const p = primaryPrice({
+    priceDay: header.listingPriceDay,
+    priceWeek: header.listingPriceWeek,
+    priceMonth: header.listingPriceMonth,
+  });
+  return p ? formatUnitPriceSlash(p) : "";
+}
 
 export function ThreadTopBar({ header }: { header: ThreadHeader }) {
   const name = header.counterpartName ?? "Собеседник";
@@ -25,7 +36,7 @@ export function ThreadTopBar({ header }: { header: ThreadHeader }) {
 
   // Цена и залог собираются общими форматтерами: второй реализации денежного
   // формата в проекте быть не должно. Залог бывает трёх видов, не только суммой.
-  const price = `${formatPrice(header.listingPriceDay)}/сутки`;
+  const price = headerPrice(header);
   const deposit = formatDeposit(header.listingDepositType, header.listingDepositAmount);
 
   const chipInner = (
@@ -44,7 +55,7 @@ export function ThreadTopBar({ header }: { header: ThreadHeader }) {
           {header.listingTitle}
         </span>
         <span className="block font-mark text-2xs text-muted-foreground">
-          {[price, deposit].join(" · ")}
+          {[price, deposit].filter(Boolean).join(" · ")}
         </span>
       </span>
     </>
@@ -104,9 +115,9 @@ export function ThreadListingBar({ header }: { header: ThreadHeader }) {
         <p className="truncate text-xs font-medium">{header.listingTitle}</p>
         <p className="font-mark text-2xs text-muted-foreground">
           {[
-            `${formatPrice(header.listingPriceDay)}/сутки`,
+            headerPrice(header),
             formatDeposit(header.listingDepositType, header.listingDepositAmount),
-          ].join(" · ")}
+          ].filter(Boolean).join(" · ")}
         </p>
       </div>
       {header.listingStatus === "active" && (

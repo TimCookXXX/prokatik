@@ -62,7 +62,7 @@ function widgetWith(pickup: boolean, delivery: boolean) {
     maxDate="2027-03-03"
     availability={{}}
     quantity={1}
-    priceDay={500}
+    tariff={{ priceDay: 500, priceWeek: null, priceMonth: null }}
     depositType="none"
     depositAmount={null}
     handoverPickup={pickup}

@@ -54,7 +54,7 @@ beforeEach(() => {
     {
       listing: {
         id: "l1", ownerUserId: "u2", status: "active", quantity: 1,
-        priceDay: PRICE, depositType: "money", depositAmount: 2000,
+        priceDay: PRICE, priceWeek: null, priceMonth: null, minDays: 1, depositType: "money", depositAmount: 2000,
       },
       ownerBannedAt: null,
     },
@@ -101,6 +101,15 @@ describe("createBookingRequest: устаревшая цена", () => {
 
   // Подделать цену снизу тоже нельзя: экшен доступен по сети мимо интерфейса,
   // и без сверки с объявлением заявка ушла бы по цене, назначенной клиентом.
+  // Недельная цена меняет сумму так же, как суточная: появилась или сдвинулась,
+  // пока форма открыта, — тот же отказ. Пустая строка значит «её нет».
+  it("сверяет и недельную с месячной", async () => {
+    const r = await createBookingRequest({ ...form(TODAY, TODAY), priceWeek: "2000" });
+    expect(r).toEqual({ ok: false, error: "price_stale" });
+    const same = await createBookingRequest({ ...form(TODAY, TODAY), priceWeek: "", priceMonth: "" });
+    expect(same).not.toEqual({ ok: false, error: "price_stale" });
+  });
+
   it("цену из запроса не берёт на веру", async () => {
     const r = await createBookingRequest({ ...form(TODAY, TODAY), priceDay: 1 });
     expect(r).toEqual({ ok: false, error: "price_stale" });
@@ -132,7 +141,7 @@ describe("createBookingRequest: своё объявление", () => {
     listingLimit.mockResolvedValue([
       { listing: {
         id: "l1", ownerUserId: "u1", status: "active", quantity: 1,
-        priceDay: PRICE, depositType: "money", depositAmount: 2000,
+        priceDay: PRICE, priceWeek: null, priceMonth: null, minDays: 1, depositType: "money", depositAmount: 2000,
       }, ownerBannedAt: null },
     ]);
     const res = await createBookingRequest(form(TODAY, TODAY));
@@ -146,7 +155,7 @@ describe("createBookingRequest: своё объявление", () => {
     listingLimit.mockResolvedValue([
       { listing: {
         id: "l1", ownerUserId: "u1", status: "hidden", quantity: 1,
-        priceDay: PRICE, depositType: "money", depositAmount: 2000,
+        priceDay: PRICE, priceWeek: null, priceMonth: null, minDays: 1, depositType: "money", depositAmount: 2000,
       }, ownerBannedAt: null },
     ]);
     const res = await createBookingRequest(form(TODAY, TODAY));
@@ -167,7 +176,7 @@ describe("createBookingRequest: количество", () => {
     listingLimit.mockResolvedValue([{
       listing: {
         id: "l1", ownerUserId: "owner", status: "active", quantity: 1,
-        priceDay: PRICE, depositType: "money", depositAmount: 2000,
+        priceDay: PRICE, priceWeek: null, priceMonth: null, minDays: 1, depositType: "money", depositAmount: 2000,
       },
       ownerBannedAt: null,
     }]);
@@ -181,7 +190,7 @@ describe("createBookingRequest: количество", () => {
     listingLimit.mockResolvedValue([{
       listing: {
         id: "l1", ownerUserId: "owner", status: "active", quantity: 5,
-        priceDay: PRICE, depositType: "money", depositAmount: 2000,
+        priceDay: PRICE, priceWeek: null, priceMonth: null, minDays: 1, depositType: "money", depositAmount: 2000,
       },
       ownerBannedAt: null,
     }]);
@@ -201,7 +210,7 @@ describe("createBookingRequest: журнал сделки", () => {
     listingLimit.mockResolvedValue([{
       listing: {
         id: "l1", ownerUserId: "owner", status: "active", quantity: 1,
-        priceDay: PRICE, depositType: "money", depositAmount: 2000,
+        priceDay: PRICE, priceWeek: null, priceMonth: null, minDays: 1, depositType: "money", depositAmount: 2000,
       },
       ownerBannedAt: null,
     }]);
@@ -234,9 +243,10 @@ describe("createBookingRequest: журнал сделки", () => {
    * чтобы этого не делать. */
   it("кладёт в запись условия на момент заявки", async () => {
     await createBookingRequest(form(TODAY, TODAY));
-    expect(dealNoteMock.mock.calls[0][1].meta).toMatchObject({
-      priceDay: PRICE, depositType: "money", depositAmount: 2000,
-    });
+    const meta = dealNoteMock.mock.calls[0][1].meta;
+    expect(meta).toMatchObject({ priceDay: PRICE, depositType: "money", depositAmount: 2000 });
+    // Пустые тарифы в meta не кладутся вовсе: jsonb не тащит null-ключи.
+    expect(meta).not.toHaveProperty("priceWeek", null);
   });
 
   /* И теми же значениями — в саму заявку. Расхождение этих двух записей
@@ -268,7 +278,7 @@ describe("createBookingRequest: дубль", () => {
     listingLimit.mockResolvedValue([{
       listing: {
         id: "l1", ownerUserId: "owner", status: "active", quantity: 1,
-        priceDay: PRICE, depositType: "money", depositAmount: 2000,
+        priceDay: PRICE, priceWeek: null, priceMonth: null, minDays: 1, depositType: "money", depositAmount: 2000,
       },
       ownerBannedAt: null,
     }]);

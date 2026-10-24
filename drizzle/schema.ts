@@ -172,8 +172,14 @@ export const listings = pgTable("listings", {
   lat: doublePrecision("lat"),
   lon: doublePrecision("lon"),
   geoPrecision: listingGeoPrecision("geo_precision").notNull().default("city"),
-  // Цена одна: аренда посуточная — см. docs/BACKLOG.md о снятых тарифах.
-  priceDay: integer("price_day").notNull(),
+  // Тарифы за сутки, неделю и месяц; NULL — за этот срок не сдаётся. Бронь
+  // остаётся посуточной: неделя и месяц — ступени цены за длинный срок, а не
+  // другие единицы занятости (lib/catalog/tariff.ts, ADR 0026).
+  priceDay: integer("price_day"),
+  priceWeek: integer("price_week"),
+  priceMonth: integer("price_month"),
+  // Минимальный срок аренды в днях, обе границы диапазона включительно.
+  minDays: integer("min_days").notNull().default(1),
   depositAmount: integer("deposit_amount"),
   depositType: depositType("deposit_type").notNull().default("none"),
   quantity: integer("quantity").notNull().default(1),
@@ -197,6 +203,17 @@ export const listings = pgTable("listings", {
   ownerIdx: index("listings_owner_idx").on(t.ownerUserId),
   // Точка — пара, а не половина: расстояние считается только по обеим.
   pointPair: check("listings_point_pair", sql`(${t.lat} is null) = (${t.lon} is null)`),
+  // Хоть одна цена задана, и каждая заданная больше нуля: ноль — это старое
+  // «цены нет» в новой обёртке.
+  pricePresent: check("listings_price_present", sql`coalesce(${t.priceDay}, ${t.priceWeek}, ${t.priceMonth}) is not null`),
+  pricePositive: check("listings_price_positive", sql`coalesce(${t.priceDay}, 1) > 0
+    and coalesce(${t.priceWeek}, 1) > 0 and coalesce(${t.priceMonth}, 1) > 0`),
+  minDaysRange: check("listings_min_days_range", sql`${t.minDays} between 1 and 90`),
+  // Короче ступени, у которой нет цены, бронь не бывает: без суточной — от
+  // недели, без суточной и недельной — от месяца. Иначе сумму за срок нечем
+  // посчитать (lib/catalog/tariff.ts, requiredMinDays).
+  minDaysPriced: check("listings_min_days_priced", sql`${t.priceDay} is not null
+    or (${t.minDays} >= 7 and (${t.priceWeek} is not null or ${t.minDays} >= 30))`),
 }));
 
 // availability — по строке на (listing, дата). Свободно = quantity - booked - blocked.
@@ -237,8 +254,14 @@ export const bookingRequests = pgTable("booking_requests", {
    * дат; смотреть на вещь вправе только чип «вот эта вещь стоит столько».
    *
    * Сервис денег не проводит, так что это не договор, а честная запись о том,
-   * из чего человек исходил. Она же уезжает копией в журнал сделки. */
-  priceDay: integer("price_day").notNull(),
+   * из чего человек исходил. Она же уезжает копией в журнал сделки.
+   *
+   * Тарифы — все три, как у объявления: сумма за срок выводится из них
+   * (quote в lib/catalog/tariff.ts), а не хранится. У заявок до тарифов
+   * задана только суточная — и считаются они, как раньше. */
+  priceDay: integer("price_day"),
+  priceWeek: integer("price_week"),
+  priceMonth: integer("price_month"),
   depositType: depositType("deposit_type").notNull().default("none"),
   depositAmount: integer("deposit_amount"),
   status: bookingStatus("status").notNull().default("new"),
@@ -287,6 +310,7 @@ export const bookingRequests = pgTable("booking_requests", {
   liveDupUq: uniqueIndex("booking_requests_live_dup_uq")
     .on(t.listingId, t.customerUserId, t.dateFrom, t.dateTo)
     .where(sql`${t.status} = 'new'`),
+  pricePresent: check("booking_requests_price_present", sql`coalesce(${t.priceDay}, ${t.priceWeek}, ${t.priceMonth}) is not null`),
 }));
 
 // events — журнал сделок: submit_request, cancel_request, request_declined.

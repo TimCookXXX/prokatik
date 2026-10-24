@@ -2,6 +2,11 @@
 // <script type="application/ld+json"> на публичных страницах каталога.
 // Возвращают plain objects; сериализует вызывающий (components/seo/JsonLd).
 
+import type { PriceUnit, UnitPrice } from "@/lib/catalog/tariff";
+
+/** Коды единиц UN/CEFACT: сутки, неделя, месяц. */
+const UNIT_CODE: Record<PriceUnit, string> = { day: "DAY", week: "WEE", month: "MON" };
+
 export interface JsonLd {
   "@context": "https://schema.org";
   "@type": string;
@@ -15,7 +20,9 @@ const stripSlash = (s: string) => s.replace(/\/$/, "");
 export function buildProductJsonLd(input: {
   title: string;
   description: string | null;
-  priceDay: number;
+  /** Главная цена с единицей (primaryPrice): за сутки, иначе за неделю или
+   *  месяц. null — цен нет (база этого не допускает): offers не ставится. */
+  price: UnitPrice | null;
   photoUrls: string[];
   url: string;            // абсолютный URL карточки позиции
   sellerName: string;
@@ -29,19 +36,20 @@ export function buildProductJsonLd(input: {
   };
   if (input.description) ld.description = input.description;
   if (input.photoUrls.length > 0) ld.image = input.photoUrls;
+  if (!input.price) return ld;
   ld.offers = {
     "@type": "Offer",
-    price: input.priceDay,
+    price: input.price.amount,
     priceCurrency: "RUB",
-    // Аренда посуточная: цена за день, бизнес-модель LeaseOut. Голая price
-    // читается как цена покупки — за что она, говорит priceSpecification:
-    // unitCode DAY (код UN/CEFACT) за одни сутки.
+    // Аренда: цена за срок, бизнес-модель LeaseOut. Голая price читается как
+    // цена покупки — за что она, говорит priceSpecification: unitCode DAY, WEE
+    // или MON (коды UN/CEFACT) за одну единицу срока.
     priceSpecification: {
       "@type": "UnitPriceSpecification",
-      price: input.priceDay,
+      price: input.price.amount,
       priceCurrency: "RUB",
-      unitCode: "DAY",
-      referenceQuantity: { "@type": "QuantitativeValue", value: 1, unitCode: "DAY" },
+      unitCode: UNIT_CODE[input.price.unit],
+      referenceQuantity: { "@type": "QuantitativeValue", value: 1, unitCode: UNIT_CODE[input.price.unit] },
     },
     // itemCondition не ставится: поля «новое / б/у» в объявлении нет, а
     // угаданное состояние — ложь в разметке.

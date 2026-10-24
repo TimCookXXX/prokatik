@@ -13,6 +13,7 @@ import { Clock, ImageOff } from "lucide-react";
 import { STATUS_BADGE_CLASSES, STATUS_LABELS } from "@/lib/booking/status-labels";
 import { formatDayMonthNum, formatTimeLeft } from "@/lib/catalog/dates";
 import type { CabinetRequestRow } from "@/server/cabinet";
+import type { PriceUnit } from "@/lib/catalog/tariff";
 
 export type FeedRow = Omit<CabinetRequestRow, "createdAt" | "expiresAt"> & {
   createdAt: string;
@@ -22,6 +23,8 @@ export type FeedRow = Omit<CabinetRequestRow, "createdAt" | "expiresAt"> & {
   /** ≈ стоимость: сутки и цену сервер уже свёл. Цена — снимок из самой заявки,
    *  а не сегодняшняя цена вещи (ADR 0019). */
   estimate: number | null;
+  /** По какой ступени тарифа посчитано (quote). null — суммы нет. */
+  estimateBasis: { unit: PriceUnit; rate: number; capped: boolean } | null;
   /** Непрочитанное в переписке по этой вещи. Счёт по ТРЕДУ, а не по заявке:
    *  тред — пара (вещь, арендатор), и у двух заявок одного человека на одну
    *  вещь число будет общим. Пусто там, где треда ещё нет. */

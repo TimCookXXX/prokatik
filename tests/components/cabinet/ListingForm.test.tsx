@@ -67,7 +67,8 @@ const catalogLine = () => screen.getByText(A.catalogCity, { exact: false }).text
 
 const initial = (cityId: string): Props["initial"] => ({
   title: "Перфоратор Bosch", cityId, categoryId: "cat", description: "",
-  priceDay: "500", depositType: "none", depositAmount: "", quantity: "1",
+  priceDay: "500", priceWeek: "", priceMonth: "", minDays: "1",
+  depositType: "none", depositAmount: "", quantity: "1",
   handoverPickup: true, handoverDelivery: false, photos: [],
 });
 
@@ -341,5 +342,21 @@ describe("ListingForm: адрес выдачи", () => {
     const coarse = await screen.findByText(content.address.tooCoarse);
     expect(coarse).toHaveAttribute("id", "listing-address-error");
     expect(combobox()).toHaveAttribute("aria-invalid", "true");
+  });
+});
+
+describe("ListingForm: тарифы", () => {
+  // Ключи тарифов уходят всегда, даже пустые: сервер отличает «цены нет» от
+  // формы старой версии, где этих полей ещё не было.
+  it("три цены и минимальный срок уходят строками, суточная необязательна", async () => {
+    renderForm({ mode: "edit", listingId: "L1", cityId: "c-kzn", savedAddress: { label: "ул. Баумана", precision: "city", point: null } });
+    fireEvent.change(screen.getByLabelText(content.tariff.fieldDay), { target: { value: "" } });
+    fireEvent.change(screen.getByLabelText(content.tariff.fieldWeek), { target: { value: "2250" } });
+    fireEvent.change(screen.getByLabelText(content.tariff.fieldMinDays), { target: { value: "7" } });
+    submit();
+    await waitFor(() => expect(updateListing).toHaveBeenCalled());
+    expect(updateListing.mock.calls[0][1]).toMatchObject({
+      priceDay: "", priceWeek: "2250", priceMonth: "", minDays: "7",
+    });
   });
 });

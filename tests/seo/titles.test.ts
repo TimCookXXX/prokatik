@@ -98,13 +98,15 @@ describe("заголовки разделов", () => {
   });
 });
 
+const day = (priceDay: number) => ({ priceDay, priceWeek: null, priceMonth: null });
+
 describe("listingTitle", () => {
   it("короткое название — целиком, с городом и ценой", () => {
-    expect(plain(listingTitle("Дрель Bosch", krasnodar, 700))).toBe("Дрель Bosch — аренда в Краснодаре, 700 ₽/сутки");
+    expect(plain(listingTitle("Дрель Bosch", krasnodar, day(700)))).toBe("Дрель Bosch — аренда в Краснодаре, 700 ₽/сутки");
   });
 
   it("длинное название режется по слову, хвост с городом и ценой цел, ≤ 65", () => {
-    const t = listingTitle("Виброшлифмашина Makita BO3711 с пылесборником и запасными листами", { name: "Яблоновский", nameLocative: "Яблоновском" }, 1500);
+    const t = listingTitle("Виброшлифмашина Makita BO3711 с пылесборником и запасными листами", { name: "Яблоновский", nameLocative: "Яблоновском" }, day(1500));
     expect(t.length).toBeLessThanOrEqual(LISTING_TITLE_MAX);
     expect(plain(t)).toMatch(/^Виброшлифмашина Makita[^—]*… — аренда в Яблоновском, 1 500 ₽\/сутки$/);
     // Обрезка именно по слову: перед «…» — целое слово названия.
@@ -114,27 +116,36 @@ describe("listingTitle", () => {
   });
 
   it("город без падежа — «· Казань», без « ,»", () => {
-    const t = listingTitle("Палатка", kazan, 500);
+    const t = listingTitle("Палатка", kazan, day(500));
     expect(plain(t)).toBe("Палатка — аренда · Казань, 500 ₽/сутки");
     expect(t).not.toContain(" ,");
   });
 
   it("город с очень длинным именем не съедает название", () => {
     const long = { name: "Петропавловск-Камчатский", nameLocative: "Петропавловске-Камчатском районного подчинения" };
-    const t = listingTitle("Лодка надувная ПВХ с мотором", long, 3000);
+    const t = listingTitle("Лодка надувная ПВХ с мотором", long, day(3000));
     expect(t.length).toBeLessThanOrEqual(LISTING_TITLE_MAX);
     expect(t.startsWith("Лодка надувная")).toBe(true);
   });
 
   it("текст «Поделиться» — та же фраза без обрезки", () => {
     const title = "Виброшлифмашина Makita BO3711 с пылесборником и запасными листами";
-    expect(plain(listingShareText(title, krasnodar, 300))).toBe(`${title} — аренда в Краснодаре, 300 ₽/сутки`);
+    expect(plain(listingShareText(title, krasnodar, day(300)))).toBe(`${title} — аренда в Краснодаре, 300 ₽/сутки`);
+  });
+
+  it("без суточной — главная цена со своей единицей, а не выдуманная доля", () => {
+    const week = { priceDay: null, priceWeek: 2250, priceMonth: 7000 };
+    expect(plain(listingTitle("Электровелосипед Kugoo", krasnodar, week)))
+      .toBe("Электровелосипед Kugoo — аренда в Краснодаре, 2 250 ₽/неделя");
+    expect(plain(listingShareText("Электровелосипед", krasnodar, { ...week, priceWeek: null })))
+      .toBe("Электровелосипед — аренда в Краснодаре, 7 000 ₽/месяц");
   });
 });
 
 describe("listingDescription", () => {
   const base = {
-    title: "Дрель", description: null as string | null, priceDay: 700,
+    title: "Дрель", description: null as string | null,
+    priceDay: 700 as number | null, priceWeek: null as number | null, priceMonth: null, minDays: 1,
     depositType: "none" as const, depositAmount: null as number | null,
     handoverPickup: true, handoverDelivery: false,
   };
@@ -151,6 +162,11 @@ describe("listingDescription", () => {
   it("залог без суммы не выдаётся за «не указан»", () => {
     const d = listingDescription({ ...base, depositType: "money", depositAmount: null }, krasnodar);
     expect(plain(d)).toBe("Аренда в Краснодаре: 700 ₽/сутки, самовывоз.");
+  });
+
+  it("минимальный срок — после цены, единица — главной цены", () => {
+    const d = listingDescription({ ...base, priceDay: null, priceWeek: 2250, minDays: 7 }, krasnodar);
+    expect(plain(d)).toBe("Аренда в Краснодаре: 2 250 ₽/неделя, от 7 дней, без залога, самовывоз.");
   });
 
   it("потом текст владельца, всё вместе ≤ 160 с обрезкой по слову", () => {

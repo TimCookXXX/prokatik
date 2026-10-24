@@ -14,6 +14,13 @@ export function normalizePhone(raw: string): string {
   return `+${plusless}`;
 }
 
+/* Цена, показанная в момент выбора: undefined — поле не прислано (старый
+ * клиент, сверки нет), null — «этой цены у вещи нет», число — сама цена. */
+const snapshotPrice = z.preprocess(
+  (v) => (v === null || (typeof v === "string" && v.trim() === "") ? null : v),
+  z.coerce.number().int().positive().nullable().optional(),
+);
+
 export const bookingFormSchema = z.object({
   listingId: z.string().min(1),
   from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
@@ -30,7 +37,12 @@ export const bookingFormSchema = z.object({
    * Пропуск безопасен: снимок в заявку кладётся из объявления в любом случае,
    * клиент на него не влияет. Без цены теряется только предупреждение о её
    * сдвиге — ровно то поведение, что было до этого поля. */
-  priceDay: z.coerce.number().int().positive().optional(),
+  priceDay: snapshotPrice,
+  /* Недельная и месячная — той же сверкой. Пустая строка значит «у вещи этой
+   * цены нет», и сверяется тоже: появившаяся за время открытой формы недельная
+   * цена меняет сумму так же, как поднятая суточная. */
+  priceWeek: snapshotPrice,
+  priceMonth: snapshotPrice,
   phone: z.string().transform(normalizePhone).refine((p) => p.length > 0, {
     message: "Укажите телефон в формате +7 900 000-00-00",
   }),

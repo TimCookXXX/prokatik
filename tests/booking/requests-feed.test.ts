@@ -15,6 +15,8 @@ const row = (over: Partial<CabinetRequestRow> = {}): CabinetRequestRow => ({
   expiresAt: new Date("2026-09-10T10:00:00Z"),
   customerComment: null,
   priceDay: 300,
+  priceWeek: null,
+  priceMonth: null,
   depositType: "none",
   depositAmount: null,
   listing: {
@@ -33,6 +35,19 @@ describe("toFeedRow", () => {
   it("считает стоимость по включительным суткам", () => {
     expect(toFeedRow(row()).estimate).toBe(300 * 3);
     expect(toFeedRow(row({ qty: 2 })).estimate).toBe(300 * 3 * 2);
+  });
+
+  // Снимок тарифов — та же лестница, что у виджета: 12–21 сентября — десять
+  // суток, считаются по недельной доле, а не по суточной.
+  it("длинный срок — по недельной ступени, и раскладка это называет", () => {
+    const r = toFeedRow(row({ dateTo: "2026-09-21", priceWeek: 1400 }));
+    expect(r.estimate).toBe(2000);
+    expect(r.estimateBasis).toEqual({ unit: "week", rate: 1400, capped: false });
+  });
+
+  it("заявка без суточной в снимке считается по недельной", () => {
+    const r = toFeedRow(row({ dateTo: "2026-09-18", priceDay: null, priceWeek: 2100 }));
+    expect(r.estimate).toBe(2100);
   });
 
   it("горит только новая заявка владельцу", () => {

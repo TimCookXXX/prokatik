@@ -24,7 +24,8 @@ const A = content.address.listing;
 const cities: Props["cities"] = [{ id: "c-kzn", name: "Казань", slug: "kazan", geo: null }];
 const initial: Props["initial"] = {
   title: "", cityId: "c-kzn", categoryId: "cat", description: "",
-  priceDay: "500", depositType: "none", depositAmount: "", quantity: "1",
+  priceDay: "500", priceWeek: "", priceMonth: "", minDays: "1",
+  depositType: "none", depositAmount: "", quantity: "1",
   handoverPickup: true, handoverDelivery: false, photos: [],
 };
 

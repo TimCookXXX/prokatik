@@ -28,7 +28,7 @@ const base = {
   maxDate: "2027-03-03",
   availability: {},
   quantity: 1,
-  priceDay: 500,
+  tariff: { priceDay: 500, priceWeek: null, priceMonth: null },
   depositType: "none" as const,
   depositAmount: null,
   sellerName: "Артём",
@@ -76,7 +76,7 @@ describe("цель booking_sent", () => {
     <BookingFormDialog
       open onOpenChange={() => {}}
       listingId={base.listingId} listingTitle={base.listingTitle}
-      sel={base.initial} priceDay={500} initialPhone={base.initialPhone}
+      sel={base.initial} tariff={base.tariff} initialPhone={base.initialPhone}
     />,
   );
   const form = () => document.querySelector<HTMLFormElement>('form[name="booking"]')!;

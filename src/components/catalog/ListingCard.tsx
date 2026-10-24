@@ -4,6 +4,8 @@ import { BadgeCheck, ImageOff } from "lucide-react";
 import { listingPhotos, type Listing, type ListingWithOwner } from "@/server/catalog";
 import { formatDeposit, formatHandoverShort, formatPrice } from "@/lib/catalog/format";
 import { listingPath } from "@/lib/catalog/listing-path";
+import { primaryPrice } from "@/lib/catalog/tariff";
+import { content } from "@theme/content";
 import { eachDate, freeQty, type AvailabilityMap } from "@/lib/catalog/availability";
 import { DISTANCE_TITLE, distanceLabel } from "@/lib/geo/distance";
 import { Avatar } from "@/components/ui/Avatar";
@@ -55,7 +57,8 @@ export function ListingCard({
   const photo = listingPhotos(listing)[0];
   const path = listingPath(citySlug, categorySlug, listing.slug, listing.id);
   const href = hrefQuery ? `${path}?${hrefQuery}` : path;
-  const price = formatPrice(listing.priceDay);
+  // Главная цена с её единицей: у вещи без суточной — «2 250 ₽ в неделю».
+  const primary = primaryPrice(listing);
   // Сколько единиц свободно на ВСЕ дни периода — минимум по дням: аренде
   // нужна одна и та же вещь с первого дня по последний. Дату «свободно с»
   // карточка не показывает, календарь на самой позиции скажет точнее.
@@ -218,10 +221,10 @@ export function ListingCard({
           * обрезается многоточием. */}
         <p className="mt-1 flex items-baseline gap-x-1.5">
           <span className="shrink-0 font-mark text-lg font-bold leading-snug tracking-mark sm:text-xl">
-            {price}
+            {primary ? formatPrice(primary.amount) : ""}
           </span>
           <span className="truncate text-xs text-muted-foreground sm:text-sm">
-            в сутки
+            {primary ? content.tariff.per[primary.unit] : ""}
           </span>
         </p>
         <p className="truncate text-xs text-muted-foreground sm:text-sm">

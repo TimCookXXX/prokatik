@@ -12,6 +12,7 @@ import { content } from "@theme/content";
 import { formatDayMonth, formatDayMonthNum } from "@/lib/catalog/dates";
 import { depositValue, formatPrice, type DepositType } from "@/lib/catalog/format";
 import { rentalDaysCount } from "@/lib/booking/params";
+import { quote } from "@/lib/catalog/tariff";
 import { ruPlural } from "@/lib/plural";
 
 export const CHAT_SYSTEM_KINDS = [
@@ -52,6 +53,8 @@ export type ChatSystemMeta = {
    * заявку. Не ссылка на вещь: владелец поменяет цену, и журнал переписался бы
    * задним числом, а он на то и журнал, чтобы этого не делать. */
   priceDay?: number;
+  priceWeek?: number;
+  priceMonth?: number;
   depositType?: DepositType;
   depositAmount?: number;
 };
@@ -133,10 +136,16 @@ export function requestNoteRows(meta: ChatSystemMeta | null): NoteRow[] {
   const qty = typeof m.qty === "number" && m.qty > 0 ? m.qty : 1;
   if (qty > 1) rows.push({ term: labels.qty, value: `${qty} шт.` });
 
-  // Сумма выводится, а не хранится: слагаемые — факты, произведение из них
-  // следует. Нужны все три, иначе строки не будет вовсе.
-  if (typeof m.priceDay === "number" && days > 0) {
-    rows.push({ term: labels.price, value: `≈ ${formatPrice(m.priceDay * days * qty)}` });
+  // Сумма выводится, а не хранится: слагаемые — факты, сумма из них следует
+  // той же лестницей тарифов, что в шторке (quote). Нужны даты и хоть одна
+  // цена, иначе строки не будет вовсе. Записи до тарифов несут одну суточную —
+  // и считаются, как раньше.
+  const num = (v: unknown) => (typeof v === "number" && v > 0 ? v : null);
+  const q = days > 0
+    ? quote({ priceDay: num(m.priceDay), priceWeek: num(m.priceWeek), priceMonth: num(m.priceMonth) }, days, qty)
+    : null;
+  if (q?.ok) {
+    rows.push({ term: labels.price, value: `≈ ${formatPrice(q.total)}` });
   }
 
   /* Тип залога — из закрытого списка, а не «любая непустая строка»: чужое

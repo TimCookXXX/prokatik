@@ -162,6 +162,13 @@
       "when": 1792605140366,
       "tag": "0022_visitor_analytics",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1792839229881,
+      "tag": "0023_listing_tariffs",
+      "breakpoints": true
     }
   ]
 }

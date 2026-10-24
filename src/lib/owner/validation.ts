@@ -2,30 +2,53 @@
 
 import { z } from "zod";
 import { content } from "@theme/content";
+import { MIN_DAYS_MAX, requiredMinDays } from "@/lib/catalog/tariff";
 
 const priceField = z.union([z.literal(""), z.coerce.number().int().min(0).max(10_000_000)])
   .optional()
   .transform((v) => (v === "" || v === undefined ? null : v));
 
-// Цена за сутки обязательна и строго больше нуля. preprocess сводит все формы
-// «не заполнено» к undefined, чтобы они дошли до required_error: форма шлёт
-// строки, а z.coerce.number() превращает и "", и " ", и null в ноль — человек
-// с пустым полем получил бы «должна быть больше нуля» вместо «укажите цену».
+const P = content.tariff;
+
+// Цена срока. Пустое поле — «за этот срок не сдаю» (null); отсутствующий ключ
+// — бандл формы, где поля ещё не было: updateListing пишет .set() всеми
+// полями, и молча обнулить недельную цену за старую вкладку нельзя — пусть
+// лучше запрос не пройдёт (тот же приём, что у handover).
 // Ноль запрещён намеренно: это старое «цены нет» в новой обёртке — такое
 // объявление утянуло бы вниз границу фильтра цены на весь раздел и уехало бы
 // в разметку для поисковиков как «бесплатно».
-const priceDayField = z.preprocess(
-  (v) => (v === null || v === undefined || (typeof v === "string" && v.trim() === "")
-    ? undefined
-    : v),
-  z.coerce.number({
-    required_error: "Укажите цену за сутки",
-    invalid_type_error: "Укажите цену за сутки",
-  })
-    .int("Цена — целое число рублей")
-    .min(1, "Цена должна быть больше нуля")
-    .max(10_000_000, "Слишком большая цена"),
-);
+//
+// Разбор руками, а не z.coerce: тот превращает и отсутствующий ключ, и пустую
+// строку в NaN или ноль, и человек с пустым полем получил бы «должна быть
+// больше нуля», а старая вкладка — «целое число» вместо «обновите страницу».
+const isBlank = (v: unknown) => v === null || (typeof v === "string" && v.trim() === "");
+
+const tariffPrice = z.any().transform((v, ctx): number | null => {
+  const fail = (message: string) => {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message });
+    return z.NEVER;
+  };
+  if (v === undefined) return fail(P.stale);
+  if (isBlank(v)) return null;
+  const n = typeof v === "number" ? v : typeof v === "string" ? Number(v.trim()) : NaN;
+  if (!Number.isInteger(n)) return fail(P.priceInteger);
+  if (n < 1) return fail(P.pricePositive);
+  if (n > 10_000_000) return fail(P.priceTooBig);
+  return n;
+});
+
+// Минимальный срок: пусто — один день, как у всех объявлений до этого поля.
+const minDaysField = z.any().transform((v, ctx): number => {
+  const fail = (message: string) => {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message });
+    return z.NEVER;
+  };
+  if (v === undefined) return fail(P.stale);
+  if (isBlank(v)) return 1;
+  const n = typeof v === "number" ? v : typeof v === "string" ? Number(v.trim()) : NaN;
+  if (!Number.isInteger(n) || n < 1 || n > MIN_DAYS_MAX) return fail(P.minDaysRange);
+  return n;
+});
 
 const handoverField = z.boolean({
   required_error: "Форма устарела — обновите страницу",
@@ -74,7 +97,12 @@ export const listingFormSchema = z.object({
   cityId: z.string().min(1, "Выберите город"),
   description: z.string().trim().max(3000).optional().default(""),
   address: listingAddressSchema,
-  priceDay: priceDayField,
+  // Ключ суточной был всегда, старая вкладка его шлёт; пустое значение больше
+  // не ошибка само по себе — достаточно недели или месяца.
+  priceDay: tariffPrice,
+  priceWeek: tariffPrice,
+  priceMonth: tariffPrice,
+  minDays: minDaysField,
   depositType: z.enum(["money", "document", "none"]),
   depositAmount: priceField,
   quantity: z.coerce.number().int().min(1).max(1000),
@@ -95,6 +123,25 @@ export const listingFormSchema = z.object({
 }).refine((v) => v.handoverPickup || v.handoverDelivery, {
   message: "Выберите хотя бы один способ получения",
   path: ["handoverPickup"],
+}).superRefine((v, ctx) => {
+  // Правило согласованности (ADR 0026): срок короче ступени, у которой нет
+  // цены, посчитать нечем. Тот же CHECK стоит в базе — listings_min_days_priced.
+  // Поле, не прошедшее разбор, уже дало свою ошибку; zod всё равно доходит
+  // сюда, и без проверки вторая ошибка была бы про срок, а не про цену.
+  const parsed = (x: unknown) => x === null || typeof x === "number";
+  if (![v.priceDay, v.priceWeek, v.priceMonth, v.minDays].every(parsed)) return;
+  if (v.priceDay === null && v.priceWeek === null && v.priceMonth === null) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: P.priceRequired, path: ["priceDay"] });
+    return;
+  }
+  const need = requiredMinDays(v);
+  if (v.minDays < need) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: v.priceWeek === null ? P.minDaysNoWeek : P.minDaysNoDay,
+      path: ["minDays"],
+    });
+  }
 });
 
 export type ListingForm = z.output<typeof listingFormSchema>;

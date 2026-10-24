@@ -29,6 +29,9 @@ import {
 } from "@/lib/catalog/format";
 import { HandoverIcon } from "@/components/catalog/HandoverIcon";
 import { content } from "@theme/content";
+import {
+  formatUnitPriceSlash, primaryPrice, quote, type Tariff,
+} from "@/lib/catalog/tariff";
 import { track } from "@/components/analytics/track";
 
 const t = content.booking;
@@ -44,7 +47,8 @@ export interface BookingWidgetProps {
   // Занятость по дням на весь горизонт (plain object: Map не проходит RSC-границу).
   availability: Record<string, DayLoad>;
   quantity: number;
-  priceDay: number;
+  /** Цены за сутки, неделю и месяц; сумму за срок считает quote. */
+  tariff: Tariff;
   /* Залог исходными данными, а не готовой строкой. Строкой он сюда и
    * приезжал — и разбирался обратно регуляркой, потому что плитке нужно
    * значение без слова «залог». Форматирование живёт в lib/catalog/format,
@@ -119,8 +123,10 @@ export function BookingWidget(props: BookingWidgetProps) {
   const days = hasComplete ? rentalDaysCount(sel) : 0;
   const estimate = useMemo(() => {
     if (!hasComplete) return null;
-    return props.priceDay * days * sel.qty;
-  }, [props.priceDay, hasComplete, days, sel.qty]);
+    const q = quote(props.tariff, days, sel.qty);
+    return q.ok ? q.total : null;
+  }, [props.tariff, hasComplete, days, sel.qty]);
+  const primary = primaryPrice(props.tariff);
 
   // Дни выбранного диапазона, где не набирается qty свободных единиц.
   const conflicts = useMemo(() => {
@@ -198,11 +204,11 @@ export function BookingWidget(props: BookingWidgetProps) {
   };
 
   // Цена и залог — блоками внизу (как у Hygglo). Значения — уже строки.
-  // Обе плитки безусловны: цена за сутки у объявления обязательна, а залог
-  // «без залога» тоже показывается — это ответ на вопрос, а не его отсутствие.
+  // Залог «без залога» тоже показывается — это ответ на вопрос, а не его
+  // отсутствие.
   const priceBoxes: { value: string; label: string }[] = [
-    { value: formatPrice(props.priceDay), label: "сутки" },
-    { value: depositValue(props.depositType, props.depositAmount), label: "залог" },
+    ...(primary ? [{ value: formatPrice(primary.amount), label: content.tariff.tile[primary.unit] }] : []),
+    { value: depositValue(props.depositType, props.depositAmount), label: t.depositTile },
   ];
 
   return (
@@ -337,7 +343,7 @@ export function BookingWidget(props: BookingWidgetProps) {
             <span className="block font-mark text-base font-bold">
               {estimate !== null
                 ? `≈ ${formatPrice(estimate)}`
-                : `${formatPrice(props.priceDay)}/сутки`}
+                : primary ? formatUnitPriceSlash(primary) : ""}
             </span>
             {hasComplete && (
               <span className="block text-2xs text-muted-foreground">
@@ -362,7 +368,7 @@ export function BookingWidget(props: BookingWidgetProps) {
         listingId={props.listingId}
         listingTitle={props.listingTitle}
         sel={sel}
-        priceDay={props.priceDay}
+        tariff={props.tariff}
         initialPhone={props.initialPhone}
       />
     </>

@@ -22,6 +22,8 @@ const header: Header = {
   listingStatus: "active",
   listingImage: null,
   listingPriceDay: 5000,
+  listingPriceWeek: null,
+  listingPriceMonth: null,
   listingDepositType: "money",
   listingDepositAmount: 15000,
   ownerUserId: "01THEM",

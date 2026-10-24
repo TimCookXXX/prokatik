@@ -65,7 +65,9 @@ export type ThreadHeader = {
    *  formatPrice/formatDeposit из lib/catalog/format — второй реализации
    *  денежного формата в проекте быть не должно. */
   listingImage: string | null;
-  listingPriceDay: number;
+  listingPriceDay: number | null;
+  listingPriceWeek: number | null;
+  listingPriceMonth: number | null;
   listingDepositType: "money" | "document" | "none";
   listingDepositAmount: number | null;
   ownerUserId: string;
@@ -318,6 +320,8 @@ export async function getThreadHeader(threadId: string, userId: string): Promise
     listingStatus: listings.status,
     listingImage: sql<string | null>`${listings.photosJson}->0->>'url'`,
     listingPriceDay: listings.priceDay,
+    listingPriceWeek: listings.priceWeek,
+    listingPriceMonth: listings.priceMonth,
     listingDepositType: listings.depositType,
     listingDepositAmount: listings.depositAmount,
   })
@@ -355,6 +359,8 @@ export async function getThreadHeader(threadId: string, userId: string): Promise
     listingStatus: row.listingStatus,
     listingImage: row.listingImage,
     listingPriceDay: row.listingPriceDay,
+    listingPriceWeek: row.listingPriceWeek,
+    listingPriceMonth: row.listingPriceMonth,
     listingDepositType: row.listingDepositType,
     listingDepositAmount: row.listingDepositAmount,
     ownerUserId: row.ownerUserId,

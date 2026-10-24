@@ -25,6 +25,9 @@ export interface ListingFormValues {
   categoryId: string;
   description: string;
   priceDay: string;
+  priceWeek: string;
+  priceMonth: string;
+  minDays: string;
   depositType: "money" | "document" | "none";
   depositAmount: string;
   quantity: string;
@@ -36,6 +39,7 @@ export interface ListingFormValues {
 const INPUT = `${field} h-11 px-3`;
 const MAX_PHOTOS = 10;
 const A = content.address.listing;
+const TT = content.tariff;
 
 /** Город в форме: гео-контекст решает, выбирается адрес из подсказок или пишется текстом. */
 export interface ListingFormCity {
@@ -264,7 +268,7 @@ export function ListingForm({
       [
         v.title.trim().length >= 3 && v.categoryId !== "",
         v.photos.length > 0,
-        Number(v.priceDay) > 0,
+        Number(v.priceDay) > 0 || Number(v.priceWeek) > 0 || Number(v.priceMonth) > 0,
         v.cityId !== "" && Number(v.quantity) > 0
           && (v.handoverPickup || v.handoverDelivery) && address.payload !== null,
       ].filter(Boolean).length,
@@ -378,12 +382,35 @@ export function ListingForm({
       </FormBlock>
 
       <FormBlock title="Цена и залог" hint="залог возвращается арендатору">
-        {/* Одно поле — обычный label, без fieldset: группировать нечего.
-          * Аренда посуточная, других тарифов у брони нет. */}
-        <label className="flex flex-col gap-1 text-sm">
-          Цена за сутки, ₽
-          <input type="number" min={1} required value={v.priceDay}
-            onChange={(e) => set({ priceDay: e.target.value })} className={INPUT} />
+        {/* Три цены за срок: хоть одна обязательна, сервер проверит. Сетка в
+          * три колонки только с sm: на 360px три поля с подписью «Цена за
+          * неделю, ₽» не помещаются рядом, и подписи ломались бы на две строки. */}
+        <fieldset className="flex flex-col gap-2 text-sm">
+          <legend className="sr-only">Цены</legend>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+            <label className="flex min-w-0 flex-col gap-1">
+              {TT.fieldDay}
+              <input type="number" min={1} inputMode="numeric" value={v.priceDay}
+                onChange={(e) => set({ priceDay: e.target.value })} className={INPUT} />
+            </label>
+            <label className="flex min-w-0 flex-col gap-1">
+              {TT.fieldWeek}
+              <input type="number" min={1} inputMode="numeric" value={v.priceWeek}
+                onChange={(e) => set({ priceWeek: e.target.value })} className={INPUT} />
+            </label>
+            <label className="flex min-w-0 flex-col gap-1">
+              {TT.fieldMonth}
+              <input type="number" min={1} inputMode="numeric" value={v.priceMonth}
+                onChange={(e) => set({ priceMonth: e.target.value })} className={INPUT} />
+            </label>
+          </div>
+          <p className="text-xs text-muted-foreground">{TT.formHint}</p>
+        </fieldset>
+
+        <label className="flex w-48 flex-col gap-1 text-sm">
+          {TT.fieldMinDays}
+          <input type="number" min={1} max={90} inputMode="numeric" value={v.minDays}
+            onChange={(e) => set({ minDays: e.target.value })} className={INPUT} />
         </label>
 
         <div className="flex flex-wrap gap-2">

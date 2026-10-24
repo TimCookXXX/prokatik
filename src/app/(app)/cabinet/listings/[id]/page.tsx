@@ -28,8 +28,10 @@ import { Avatar } from "@/components/ui/Avatar";
 import { addDaysStr, todayStr, formatDayMonth } from "@/lib/catalog/dates";
 import { ruPlural } from "@/lib/plural";
 import { formatDeposit, formatPrice } from "@/lib/catalog/format";
+import { formatUnitPrice, minDaysLabel, priceTiers } from "@/lib/catalog/tariff";
 import { occupancySummary, type AvailabilityMap } from "@/lib/catalog/availability";
 import { BOOKING_HORIZON_DAYS } from "@/lib/booking/params";
+import { content } from "@theme/content";
 
 export const dynamic = "force-dynamic";
 
@@ -126,7 +128,10 @@ export default async function CabinetListingPage({
             cityId: listing.cityId,
             categoryId: listing.categoryId,
             description: listing.description ?? "",
-            priceDay: String(listing.priceDay),
+            priceDay: listing.priceDay?.toString() ?? "",
+            priceWeek: listing.priceWeek?.toString() ?? "",
+            priceMonth: listing.priceMonth?.toString() ?? "",
+            minDays: String(listing.minDays),
             depositType: listing.depositType,
             depositAmount: listing.depositAmount?.toString() ?? "",
             quantity: String(listing.quantity),
@@ -159,6 +164,8 @@ export default async function CabinetListingPage({
   const summary = occupancySummary(listing.quantity, map, from, addDaysStr(from, 30));
   const feedRows = sortFeedRows(requests.map((r) => toFeedRow(r)));
   const photo = listingPhotos(listing)[0];
+  const tiers = priceTiers(listing);
+  const primary = tiers[0] ?? null;
 
   return (
     <main className="flex flex-col gap-4">
@@ -199,10 +206,22 @@ export default async function CabinetListingPage({
             ) : listing.title}
           </h2>
           <p className="mt-1 flex flex-wrap items-baseline gap-x-1.5 text-xs text-muted-foreground sm:mt-1.5 sm:text-sm">
-            <span className="font-mark text-base font-bold tracking-mark text-foreground sm:text-lg">
-              {formatPrice(listing.priceDay)}
-            </span>
-            <span>в сутки</span>
+            {primary && (
+              <>
+                <span className="font-mark text-base font-bold tracking-mark text-foreground sm:text-lg">
+                  {formatPrice(primary.amount)}
+                </span>
+                <span>{content.tariff.per[primary.unit]}</span>
+              </>
+            )}
+            {/* Остальные ступени и срок — следом, той же приглушённой строкой:
+              * владелец сверяет здесь то, что видят арендаторы. */}
+            {tiers.slice(1).map((p) => (
+              <span key={p.unit} className="whitespace-nowrap">· {formatUnitPrice(p)}</span>
+            ))}
+            {listing.minDays > 1 && (
+              <span className="whitespace-nowrap">· {minDaysLabel(listing.minDays)}</span>
+            )}
             {/* Залог целиком: без nowrap «залог» отрывался от суммы и уезжал
               * на свою строку. */}
             <span className="whitespace-nowrap">
