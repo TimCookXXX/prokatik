@@ -24,7 +24,10 @@ function glyphOf(container: HTMLElement): string {
   return GLYPHS.find((g) => svg?.classList.contains(g)) ?? "значка нет";
 }
 
-function cardWith(pickup: boolean, delivery: boolean) {
+// Строка списка показывает значок всегда, поэтому стык проверяется на ней. В
+// сетке значок есть только при доставке — самовывоз у почти всех и ничего не
+// различает; тот же значок, если он есть, проверяется ниже.
+function cardWith(pickup: boolean, delivery: boolean, view: "grid" | "list" = "list") {
   const item = {
     listing: {
       id: "01ARZ3NDEKTSV4RRFFQ69G5FAW",
@@ -47,7 +50,7 @@ function cardWith(pickup: boolean, delivery: boolean) {
     cityName: "Казань",
   } as never;
 
-  return <ListingCard item={item} citySlug="kazan" from="2026-09-04"
+  return <ListingCard item={item} citySlug="kazan" from="2026-09-04" view={view}
     availabilityMap={new Map() as AvailabilityMap} />;
 }
 
@@ -93,5 +96,15 @@ describe("значок способа получения", () => {
 
     expect(inCard).toBe(expected);
     expect(inWidget).toBe(inCard);
+  });
+
+  it.each([
+    ["оба способа", true, true, "lucide-arrow-left-right"],
+    ["только самовывоз", true, false, "значка нет"],
+    ["только доставка", false, true, "lucide-truck"],
+    ["ни одного способа", false, false, "значка нет"],
+  ])("%s — в сетке значок только при доставке, и тот же", (_name, pickup, delivery, expected) => {
+    const card = render(cardWith(pickup as boolean, delivery as boolean, "grid"));
+    expect(glyphOf(card.container)).toBe(expected);
   });
 });

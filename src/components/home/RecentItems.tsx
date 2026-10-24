@@ -3,7 +3,7 @@ import { content } from "@theme/content";
 import { getAvailabilityRows, type ListingWithOwner } from "@/server/catalog";
 import { buildAvailabilityByListing } from "@/lib/catalog/availability";
 import { addDaysStr, todayStr } from "@/lib/catalog/dates";
-import { ListingCard } from "@/components/catalog/ListingCard";
+import { ListingCard, cardsShowCity } from "@/components/catalog/ListingCard";
 
 export async function RecentItems({
   items,
@@ -22,6 +22,7 @@ export async function RecentItems({
     addDaysStr(from, 6),
   );
   const availByListing = buildAvailabilityByListing(availRows);
+  const showCity = cardsShowCity(items, citySlug);
 
   return (
     // Без панели: карточки — сами по себе поверхности, и на холсте они читаются
@@ -50,7 +51,7 @@ export async function RecentItems({
         * мало, и уводить половину за край экрана нечем оправдать. Две колонки
         * и зазоры на телефоне — те же, что в каталоге и поиске: карточка одна
         * на весь проект, и выдача под ней должна вести себя одинаково. */}
-      <div className="mt-6 grid grid-cols-2 gap-2.5 sm:gap-4 wide:grid-cols-4">
+      <div className="mt-6 grid grid-cols-2 gap-2.5 sm:gap-4 md:grid-cols-3 lg:grid-cols-4">
         {items.map((item) => (
           <ListingCard
             key={item.listing.id}
@@ -58,6 +59,7 @@ export async function RecentItems({
             citySlug={citySlug}
             availabilityMap={availByListing.get(item.listing.id) ?? new Map()}
             from={from}
+            showCity={showCity}
           />
         ))}
       </div>

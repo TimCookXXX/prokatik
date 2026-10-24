@@ -199,6 +199,29 @@ TS-двойник `effectiveDayPrice` в `src/lib/catalog/tariff.ts`. Прави
 одно, и меняются они вместе
 ([0026](decisions/0026-tariff-ladder-and-minimum-term.md)).
 
+### Карточка объявления
+
+Одна карточка на все публичные выдачи — `src/components/catalog/ListingCard.tsx`,
+серверная: главная, каталог, поиск, профиль продавца и ленты «Ещё у …» / «Ещё в
+категории» на странице объявления. Вид — сетка или строка списка (`view`);
+что на ней и почему — [0027](decisions/0027-grid-listing-card.md).
+
+- **Кликается целиком** через растянутую ссылку названия (`after:inset-0`).
+- **Листалка фото** — клиентский остров `CardPhotos.tsx`, только в сетке и
+  только при нескольких снимках; ленты выключают её `carousel={false}`. Остров
+  получает адреса снимков, подпись, ссылку, `sizes` и приоритет — не
+  объявление. Фото там — своя ссылка поверх растянутой (`z-10`, вне табуляции
+  и `aria-hidden`), стрелки — её соседи; сервер рисует один снимок, остальные
+  монтируются на первом намерении.
+- **Что решает страница:** `showCity` (`cardsShowCity` по своей выдаче),
+  `showOwner` (нет на профиле и в ленте «Ещё у …»), `sizes`
+  (`GRID_PHOTO_SIZES` / `RAIL_PHOTO_SIZES`) и `eager` по индексу карточки
+  (`cardEager`: две первые — `fetchPriority="high"`, остаток первого ряда —
+  `loading="eager"`). Приоритет ставят каталог и поиск, где первый ряд над
+  сгибом. Число колонок — у сетки страницы: при боковой панели фильтров их
+  меньше. Где какая сетка —
+  `grep -rn "grid-cols" src/components/catalog/CategoryListing.tsx src/components/catalog/SearchResults.tsx src/components/home/RecentItems.tsx "src/app/(public)/u/[id]/page.tsx"`.
+
 ## Middleware
 
 `src/middleware.ts` работает на edge и **не обращается к базе**. Делает три вещи:

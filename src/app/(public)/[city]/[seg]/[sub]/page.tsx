@@ -25,7 +25,7 @@ import { addDaysStr, todayStr } from "@/lib/catalog/dates";
 import type { AvailabilityMap } from "@/lib/catalog/availability";
 import { Breadcrumbs } from "@/components/catalog/Breadcrumbs";
 import { Gallery } from "@/components/catalog/Gallery";
-import { ListingCard } from "@/components/catalog/ListingCard";
+import { ListingCard, RAIL_PHOTO_SIZES, cardsShowCity } from "@/components/catalog/ListingCard";
 import { CategoryListing, type CategorySearchParams } from "@/components/catalog/CategoryListing";
 import { JsonLd } from "@/components/seo/JsonLd";
 import { buildBreadcrumbJsonLd, buildProductJsonLd } from "@/lib/jsonld";
@@ -449,14 +449,21 @@ async function ListingPage({
             Ещё у{" "}
             <Link href={sellerHref as never} className="text-accent hover:underline">{sellerName}</Link>
           </h2>
+          {/* Обёртка карточки — grid: единственная ячейка растягивает карточку
+            * на высоту ряда, и цены в ленте стоят на одной линии. */}
           <div className="flex gap-4 overflow-x-auto pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {moreFromSeller.map((item) => (
-              <div key={item.listing.id} className="w-[220px] shrink-0 sm:w-[240px]">
+              <div key={item.listing.id} className="grid w-[220px] shrink-0 sm:w-[240px]">
                 <ListingCard
                   item={item}
                   citySlug={item.citySlug}
                   availabilityMap={relatedAvail.get(item.listing.id) ?? new Map()}
                   from={from}
+                  showCity={cardsShowCity(moreFromSeller, city.slug)}
+                  // Владелец назван в заголовке ленты; свайп листает ленту, не фото.
+                  showOwner={false}
+                  carousel={false}
+                  sizes={RAIL_PHOTO_SIZES}
                 />
               </div>
             ))}
@@ -472,12 +479,16 @@ async function ListingPage({
           </h2>
           <div className="flex gap-4 overflow-x-auto pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {moreInCategory.map((item) => (
-              <div key={item.listing.id} className="w-[220px] shrink-0 sm:w-[240px]">
+              <div key={item.listing.id} className="grid w-[220px] shrink-0 sm:w-[240px]">
                 <ListingCard
                   item={item}
                   citySlug={city.slug}
                   availabilityMap={relatedAvail.get(item.listing.id) ?? new Map()}
                   from={from}
+                  showCity={cardsShowCity(moreInCategory, city.slug)}
+                  // Свайп листает ленту, не фото.
+                  carousel={false}
+                  sizes={RAIL_PHOTO_SIZES}
                 />
               </div>
             ))}

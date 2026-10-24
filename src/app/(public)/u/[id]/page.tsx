@@ -13,7 +13,7 @@ import { buildAvailabilityByListing } from "@/lib/catalog/availability";
 import { todayStr, addDaysStr, formatMonthYearGen } from "@/lib/catalog/dates";
 import { AvatarViewer } from "@/components/ui/AvatarViewer";
 import { Breadcrumbs } from "@/components/catalog/Breadcrumbs";
-import { ListingCard } from "@/components/catalog/ListingCard";
+import { ListingCard, cardsShowCity } from "@/components/catalog/ListingCard";
 import { Metric } from "@/components/ui/Metric";
 import { ProfileCover } from "@/components/account/ProfileCover";
 import { ruPlural } from "@/lib/plural";
@@ -170,7 +170,7 @@ export default async function SellerProfilePage({ params }: Props) {
           {items.length === 0 ? (
             <EmptyState className="min-h-[25svh]">У продавца пока нет активных объявлений.</EmptyState>
           ) : (
-            <div className="grid grid-cols-2 gap-2.5 sm:gap-4 lg:grid-cols-4">
+            <div className="grid grid-cols-2 gap-2.5 sm:gap-4 md:grid-cols-3 lg:grid-cols-4">
               {items.map((item) => (
                 <ListingCard
                   key={item.listing.id}
@@ -178,6 +178,9 @@ export default async function SellerProfilePage({ params }: Props) {
                   citySlug={item.citySlug}
                   availabilityMap={availByListing.get(item.listing.id) ?? new Map()}
                   from={from}
+                  showCity={cardsShowCity(items)}
+                  // Свой профиль: имя владельца на каждой карточке — повтор шапки.
+                  showOwner={false}
                 />
               ))}
             </div>

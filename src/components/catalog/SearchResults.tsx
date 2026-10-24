@@ -25,7 +25,7 @@ import {
 import { singleCityScope, type CityScope } from "@/lib/catalog/city-scope";
 import { todayStr, addDaysStr } from "@/lib/catalog/dates";
 import { buildAvailabilityByListing } from "@/lib/catalog/availability";
-import { ListingCard } from "@/components/catalog/ListingCard";
+import { ListingCard, cardEager, cardsShowCity } from "@/components/catalog/ListingCard";
 import { FilterForm, ListingFilters, type FilterState } from "@/components/catalog/ListingFilters";
 import { ResultsToolbar } from "@/components/catalog/ResultsToolbar";
 import { activeFilterCount } from "@/lib/catalog/filter-count";
@@ -85,6 +85,8 @@ export async function SearchResults({
   const to = filters.availableTo ?? addDaysStr(today, 6);
   const availRows = await getAvailabilityRows(items.map((i) => i.listing.id), from, to);
   const availByListing = buildAvailabilityByListing(availRows);
+  // Город на карточке — только когда выдача шире города страницы.
+  const showCity = cardsShowCity(items, city.slug);
   // Переносимые параметры (даты и «Где») — в ссылки карточек и скрытые поля фильтров.
   const carry = carryParams(searchParams, { today });
   const carryQuery = carry.toString();
@@ -298,7 +300,7 @@ export async function SearchResults({
             <div className={view === "list"
               ? "flex flex-col gap-3"
               : "grid grid-cols-2 gap-2.5 sm:gap-4 lg:grid-cols-3"}>
-              {items.map((item) => (
+              {items.map((item, i) => (
                 <ListingCard
                   key={item.listing.id}
                   item={item}
@@ -309,6 +311,9 @@ export async function SearchResults({
                   to={filters.availableTo}
                   hrefQuery={carryQuery}
                   view={view}
+                  showCity={showCity}
+                  // Первый ряд над сгибом: при боковой панели в нём до трёх карточек.
+                  eager={cardEager(i, view === "list" ? 2 : 3)}
                 />
               ))}
             </div>
