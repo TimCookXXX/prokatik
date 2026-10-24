@@ -156,19 +156,22 @@ export function listingShareText(title: string, city: CityNames, tariff: Tariff)
  * Название — главное в сниппете: модель и вариант («Kugoo Kirin V3 Pro, АКБ
  * 28,6 Ач») ищут дословно. Поэтому сперва отказываемся от хвостов, если без них
  * название влезает целиком: без цены, затем без города, затем оба. Если не
- * влезает и так — название режется по слову при полном хвосте (ради города и
- * цены сниппет тогда и читают); очень длинное имя города уходит из хвоста.
+ * влезает и так — название режется по слову под хвост с городом без цены;
+ * очень длинное имя города уходит из хвоста тоже.
  */
 export function listingTitle(title: string, city: CityNames, tariff: Tariff): string {
   const MIN_TITLE = 16;
+  title = title.replace(/\s+/g, " ").trim();
   const price = listingPrice(tariff);
   const tail = price ? `, ${price}` : "";
   const inCity = headingCity(city);
   const ladder = [` — аренда ${inCity}${tail}`, ` — аренда ${inCity}`, ` — аренда${tail}`, " — аренда"];
   const whole = ladder.find((suffix) => title.length + suffix.length <= LISTING_TITLE_MAX);
   if (whole !== undefined) return `${title}${whole}`;
-  let suffix = ladder[0]!;
-  if (LISTING_TITLE_MAX - suffix.length < MIN_TITLE) suffix = ` — аренда${tail}`;
+  // Целиком не влезает и так — режем название под хвост с городом, но без
+  // цены: так от названия остаётся больше; совсем длинный город уходит тоже.
+  let suffix = ladder[1]!;
+  if (LISTING_TITLE_MAX - suffix.length < MIN_TITLE) suffix = ladder[3]!;
   return `${truncateWords(title, LISTING_TITLE_MAX - suffix.length)}${suffix}`;
 }
 
