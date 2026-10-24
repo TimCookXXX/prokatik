@@ -69,6 +69,7 @@ export const SEED_CATEGORIES: SeedCategoryRoot[] = [
     children: [
       { name: "Велосипеды", keywords: ["велосипед"] },
       { name: "Электросамокаты", keywords: ["самокат", "электросамокат"] },
+      { name: "Электровелосипеды", keywords: ["электровелосипед", "электробайк"] },
       { name: "Автомобили", keywords: ["авто", "машина", "автомобиль"] },
       { name: "Прицепы", keywords: ["прицеп"] },
       { name: "Водный транспорт", keywords: ["лодка"] },

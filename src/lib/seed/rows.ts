@@ -14,6 +14,7 @@ import type { CsvRow } from "@/lib/csv";
 import { COVER_PRESETS } from "@/lib/covers";
 import type { GeoPrecision } from "@/lib/geo/precision";
 import { slugify } from "@/lib/slugify";
+import { MIN_DAYS_MAX, requiredMinDays } from "@/lib/catalog/tariff";
 import { allCategoryPaths, hasCategoryPath, parseCategoryPath } from "./categories";
 
 export type SeedDepositType = "money" | "document" | "none";
@@ -57,7 +58,12 @@ export interface SeedListingRow {
   lat: number | null;
   lon: number | null;
   precision: GeoPrecision;
-  priceDay: number;
+  /** Цены за сутки, неделю и месяц; NULL — за этот срок не сдаётся (хоть одна задана). */
+  priceDay: number | null;
+  priceWeek: number | null;
+  priceMonth: number | null;
+  /** Минимальный срок, дней; пустая ячейка — 1. */
+  minDays: number;
   depositType: SeedDepositType;
   depositAmount: number | null;
   quantity: number;
@@ -90,6 +96,9 @@ export const LISTING_COLUMNS = [
   "address", "lat", "lon", "precision", "price_day",
   "deposit_type", "deposit_amount", "quantity", "handover", "status", "photos",
 ];
+// Тарифы за неделю и месяц и минимальный срок — необязательные колонки: таблица
+// без них читается как раньше (только суточная, срок от одного дня).
+export const LISTING_OPTIONAL_COLUMNS = ["price_week", "price_month", "min_days"];
 
 /** Держится синхронно с формой объявления — src/lib/owner/validation.ts. */
 const MAX_PHOTOS = 10;
@@ -312,6 +321,48 @@ function parseListingPoint(
   return { lat, lon, precision };
 }
 
+/**
+ * Тарифы и минимальный срок. Правило то же, что у формы объявления и CHECK
+ * listings_min_days_priced: без суточной — от 7 дней, без суточной и недельной
+ * — от 30. Ячейка есть, но пуста — цены нет; колонки нет вовсе — тоже.
+ */
+function parseListingTariff(
+  row: CsvRow, push: (m: string) => void,
+): Pick<SeedListingRow, "priceDay" | "priceWeek" | "priceMonth" | "minDays"> | null {
+  const price = (column: "price_day" | "price_week" | "price_month"): number | null | undefined => {
+    if (blank(row[column])) return null;
+    const v = parseIntCell(row[column]);
+    if (v === null || v < 1) { push(`${column} — ожидается целое число от 1 или пусто`); return undefined; }
+    return v;
+  };
+  const priceDay = price("price_day");
+  const priceWeek = price("price_week");
+  const priceMonth = price("price_month");
+  if (priceDay === undefined || priceWeek === undefined || priceMonth === undefined) return null;
+  if (priceDay === null && priceWeek === null && priceMonth === null) {
+    push("нет ни одной цены — заполните price_day, price_week или price_month");
+    return null;
+  }
+
+  let minDays = 1;
+  if (!blank(row.min_days)) {
+    const v = parseIntCell(row.min_days);
+    if (v === null || v < 1 || v > MIN_DAYS_MAX) {
+      push(`min_days — ожидается целое число от 1 до ${MIN_DAYS_MAX} или пусто`);
+      return null;
+    }
+    minDays = v;
+  }
+  const need = requiredMinDays({ priceDay, priceWeek, priceMonth });
+  if (minDays < need) {
+    push(priceWeek === null
+      ? `без price_day и price_week min_days должен быть от ${need} — сумму короче месяца посчитать не из чего`
+      : `без price_day min_days должен быть от ${need} — сумму короче недели посчитать не из чего`);
+    return null;
+  }
+  return { priceDay, priceWeek, priceMonth, minDays };
+}
+
 function parseListingRow(row: CsvRow, push: (m: string) => void): SeedListingRow | null {
   const shape = listingShape.safeParse({
     title: row.title ?? "", location: row.location ?? "", address: row.address ?? "",
@@ -335,8 +386,8 @@ function parseListingRow(row: CsvRow, push: (m: string) => void): SeedListingRow
   }
   const path = parseCategoryPath(category)!;
 
-  const priceDay = parseIntCell(row.price_day ?? "");
-  if (priceDay === null || priceDay < 1) { push("price_day — ожидается целое число от 1"); return null; }
+  const tariff = parseListingTariff(row, push);
+  if (!tariff) return null;
 
   const quantity = parseIntCell(row.quantity ?? "");
   if (quantity === null || quantity < 1) { push("quantity — ожидается целое число от 1"); return null; }
@@ -398,7 +449,7 @@ function parseListingRow(row: CsvRow, push: (m: string) => void): SeedListingRow
     location: orNull(row.location),
     address: orNull(row.address),
     ...point,
-    priceDay, depositType, depositAmount, quantity,
+    ...tariff, depositType, depositAmount, quantity,
     handoverPickup: handover.pickup,
     handoverDelivery: handover.delivery,
     status,

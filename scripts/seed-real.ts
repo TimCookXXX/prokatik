@@ -3,6 +3,14 @@
 // тексты, цены и снимки, а не «Тестовый товар из сидов».
 //
 // Запуск: pnpm db:seed:real (нужен DATABASE_URL в .env, миграции применены).
+// Флаги (src/lib/seed/scope.ts):
+//   --dry-run          вся запись в транзакции, потом откат; отчёт — что было бы
+//                      создано и обновлено, по строкам и с именами полей;
+//   --owners k1,k2     только эти владельцы из users.csv и их объявления; города
+//                      не пишутся, разделы заводятся лишь нужные этим объявлениям,
+//                      dev-паролей нет даже вне прода.
+// На живом проде — сначала --owners … --dry-run, потом то же без --dry-run
+// (docs/DEPLOY.md, «Новые владельцы на живом проде»).
 // Ни исходников фотографий, ни доступа к бакету не требует: адреса и размеры
 // берутся из seed_real/photos.json, который пишет pnpm seed:photos. Поэтому
 // скрипт одинаково работает и локально, и на сервере — кроме сверки города
@@ -19,10 +27,13 @@
 // удаляются и не архивируются: на них могут висеть заявки и переписки.
 
 import { drizzle } from "drizzle-orm/node-postgres";
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import { TransactionRollbackError, and, eq, inArray, isNull } from "drizzle-orm";
 import { Pool } from "pg";
 import { users, cities, listings } from "../drizzle/schema";
 import type { SeedCityOfPoint, SeedData } from "../src/lib/seed/rows";
+import {
+  changedFields, emptyEntityReport, formatSeedReport, parseSeedArgs, scopeSeedData, type SeedReport,
+} from "../src/lib/seed/scope";
 import { createGeocoder, type Geocoder } from "../src/lib/geocoder";
 import { listingCityOf, storedAddressHit } from "../src/lib/geo/address";
 import { loadGeoIndexFromDb } from "../src/server/geocoder-index";
@@ -72,49 +83,81 @@ function resolvePhotos(data: SeedData, manifest: SeedPhotoManifest): Map<string,
 
 // ------------------------------------------------------------------ запись
 
-interface Stats {
-  cities: number; users: number; photos: number;
-  created: number; updated: number; unchanged: number;
+interface WriteOptions {
+  /** Режим --owners: города только читаются, разделы — лишь нужные объявлениям. */
+  ownersOnly: boolean;
 }
 
-/**
- * Отличаются ли поля, которые сид собирается записать, от того, что уже в базе.
- * Нужна не ради экономии запросов, а ради честной идемпотентности: без неё
- * updatedAt у всех объявлений двигался бы при каждом прогоне, а это lastmod в
- * sitemap — поисковикам сообщалось бы, что обновилось разом вообще всё.
+/*
+ * Пишутся только поля, которые отличаются от базы (changedFields). Не ради
+ * экономии запросов, а ради честной идемпотентности: без сверки updatedAt у
+ * всех объявлений двигался бы при каждом прогоне, а это lastmod в sitemap —
+ * поисковикам сообщалось бы, что обновилось разом вообще всё. Те же имена
+ * полей уходят в отчёт: dry-run на живой базе показывает, что именно
+ * поменяется, а не одно число.
  */
-function differs(current: Record<string, unknown>, next: Record<string, unknown>): boolean {
-  return Object.keys(next).some(
-    (k) => JSON.stringify(current[k] ?? null) !== JSON.stringify(next[k] ?? null),
-  );
-}
+async function writeAll(
+  db: SeedDb, data: SeedData, photos: Map<string, Photo>, opts: WriteOptions,
+): Promise<Omit<SeedReport, "dryRun" | "devPasswords">> {
+  const report: Omit<SeedReport, "dryRun" | "devPasswords"> = {
+    ownersOnly: opts.ownersOnly,
+    categories: [],
+    cities: emptyEntityReport(),
+    users: emptyEntityReport(),
+    listings: emptyEntityReport(),
+    photos: 0,
+  };
 
-async function writeAll(db: SeedDb, data: SeedData, photos: Map<string, Photo>): Promise<Stats> {
-  const categoryIds = await ensureCategories(db);
+  const categoryIds = await ensureCategories(db, {
+    only: opts.ownersOnly
+      ? new Set(data.listings.map((l) => categoryPath(l.categoryRoot, l.categoryChild)))
+      : undefined,
+    onCreate: (path) => report.categories.push(path),
+  });
 
   const cityIds = new Map<string, string>();
-  for (const city of data.cities) {
-    // lat/lon и geo_region пишутся только заполненными: пустая ячейка означает
-    // «не знаю», а не «обнули». Иначе координаты и регион, проставленные в
-    // админке, стирались бы каждым прогоном. Обратная сторона: регион,
-    // выключенный в админке аварийно, заполненная ячейка вернёт. isActive не
-    // трогаем вовсе — отключение города решение админа.
-    const values = {
-      name: city.name, nameLocative: city.nameLocative, region: city.region,
-      ...(city.lat === null ? {} : { lat: city.lat }),
-      ...(city.lon === null ? {} : { lon: city.lon }),
-      ...(city.geoRegion === null ? {} : { geoRegion: city.geoRegion }),
-    };
-    const found = await db.select().from(cities).where(eq(cities.slug, city.slug)).limit(1);
-    if (found.length > 0) {
-      if (differs(found[0], values)) {
-        await db.update(cities).set(values).where(eq(cities.id, found[0].id));
+  if (opts.ownersOnly) {
+    // Города не пишутся вовсе: на живой базе их правят в админке, и прогон
+    // ради одного проката не должен возвращать им значения из таблицы. Нужен
+    // лишь id — и город обязан уже быть.
+    const needed = new Set([
+      ...data.users.flatMap((u) => (u.citySlug ? [u.citySlug] : [])),
+      ...data.listings.map((l) => l.city),
+    ]);
+    for (const slug of needed) {
+      const found = await db.select({ id: cities.id }).from(cities).where(eq(cities.slug, slug)).limit(1);
+      if (found.length === 0) {
+        throw new SeedAbort(`Города «${slug}» нет в базе. С --owners города не заводятся — заведите его в админке или прогоните сид без --owners.`);
       }
-      cityIds.set(city.slug, found[0].id);
-    } else {
-      const id = newId();
-      await db.insert(cities).values({ id, slug: city.slug, ...values });
-      cityIds.set(city.slug, id);
+      cityIds.set(slug, found[0].id);
+    }
+  } else {
+    for (const city of data.cities) {
+      // lat/lon и geo_region пишутся только заполненными: пустая ячейка означает
+      // «не знаю», а не «обнули». Иначе координаты и регион, проставленные в
+      // админке, стирались бы каждым прогоном. Обратная сторона: регион,
+      // выключенный в админке аварийно, заполненная ячейка вернёт. isActive не
+      // трогаем вовсе — отключение города решение админа.
+      const values = {
+        name: city.name, nameLocative: city.nameLocative, region: city.region,
+        ...(city.lat === null ? {} : { lat: city.lat }),
+        ...(city.lon === null ? {} : { lon: city.lon }),
+        ...(city.geoRegion === null ? {} : { geoRegion: city.geoRegion }),
+      };
+      const found = await db.select().from(cities).where(eq(cities.slug, city.slug)).limit(1);
+      if (found.length > 0) {
+        const fields = changedFields(found[0], values);
+        if (fields.length > 0) {
+          await db.update(cities).set(values).where(eq(cities.id, found[0].id));
+          report.cities.updated.push({ key: city.slug, fields });
+        } else report.cities.unchanged += 1;
+        cityIds.set(city.slug, found[0].id);
+      } else {
+        const id = newId();
+        await db.insert(cities).values({ id, slug: city.slug, ...values });
+        cityIds.set(city.slug, id);
+        report.cities.created.push(city.slug);
+      }
     }
   }
 
@@ -128,6 +171,7 @@ async function writeAll(db: SeedDb, data: SeedData, photos: Map<string, Photo>):
       cityId: user.citySlug ? cityIds.get(user.citySlug)! : null,
       isVerified: user.isVerified,
     };
+    const label = `${user.key} <${user.email}>`;
     const found = await db.select().from(users).where(eq(users.email, user.email)).limit(1);
     if (found.length > 0) {
       const current = found[0];
@@ -137,9 +181,11 @@ async function writeAll(db: SeedDb, data: SeedData, photos: Map<string, Photo>):
         ? (current.isVerified ? current.verifiedAt : new Date())
         : null;
       const next = { ...values, verifiedAt };
-      if (differs(current, next)) {
+      const fields = changedFields(current, next);
+      if (fields.length > 0) {
         await db.update(users).set(next).where(eq(users.id, current.id));
-      }
+        report.users.updated.push({ key: label, fields });
+      } else report.users.unchanged += 1;
       userIds.set(user.key, current.id);
     } else {
       const id = newId();
@@ -148,20 +194,16 @@ async function writeAll(db: SeedDb, data: SeedData, photos: Map<string, Photo>):
         verifiedAt: user.isVerified ? new Date() : null,
       });
       userIds.set(user.key, id);
+      report.users.created.push(label);
     }
   }
 
   const cityNames = new Map(data.cities.map((c) => [c.slug, c.name]));
 
-  let photoCount = 0;
-  let created = 0;
-  let updated = 0;
-  let unchanged = 0;
-
   for (const listing of data.listings) {
     const ownerUserId = userIds.get(listing.owner)!;
     const photosJson = listing.photos.map((source) => photos.get(source)!);
-    photoCount += photosJson.length;
+    report.photos += photosJson.length;
 
     const values = {
       cityId: cityIds.get(listing.city)!,
@@ -169,15 +211,18 @@ async function writeAll(db: SeedDb, data: SeedData, photos: Map<string, Photo>):
       title: listing.title,
       description: listing.description,
       // Адрес и точку ищет pnpm geo:backfill --csv, сид их только переносит —
-      // и сравнивает в differs() наравне с прочими полями. Пустой адрес бывает
-      // лишь в городе без геоданных: тогда он — подпись или сам город, как у
-      // формы, где адрес такого города вводится текстом.
+      // и сравнивает наравне с прочими полями. Пустой адрес бывает лишь в
+      // городе без геоданных: тогда он — подпись или сам город, как у формы,
+      // где адрес такого города вводится текстом.
       location: listing.location,
       address: listing.address ?? listing.location ?? cityNames.get(listing.city)!,
       lat: listing.lat,
       lon: listing.lon,
       geoPrecision: listing.precision,
       priceDay: listing.priceDay,
+      priceWeek: listing.priceWeek,
+      priceMonth: listing.priceMonth,
+      minDays: listing.minDays,
       depositAmount: listing.depositAmount,
       depositType: listing.depositType,
       quantity: listing.quantity,
@@ -186,6 +231,7 @@ async function writeAll(db: SeedDb, data: SeedData, photos: Map<string, Photo>):
       photosJson,
       status: listing.status,
     };
+    const label = `${listing.owner} «${listing.title}»`;
 
     const found = await db.select().from(listings)
       .where(and(eq(listings.ownerUserId, ownerUserId), eq(listings.title, listing.title)))
@@ -193,7 +239,7 @@ async function writeAll(db: SeedDb, data: SeedData, photos: Map<string, Photo>):
 
     if (found.length === 0) {
       await db.insert(listings).values({ id: newId(), ownerUserId, slug: listing.slug, ...values });
-      created += 1;
+      report.listings.created.push(label);
       continue;
     }
 
@@ -203,28 +249,27 @@ async function writeAll(db: SeedDb, data: SeedData, photos: Map<string, Photo>):
     const current = found[0];
     const next = current.hiddenByBan ? { ...values, status: current.status } : values;
 
-    if (!differs(current, next)) { unchanged += 1; continue; }
+    const fields = changedFields(current, next);
+    if (fields.length === 0) { report.listings.unchanged += 1; continue; }
     await db.update(listings).set({ ...next, updatedAt: new Date() })
       .where(eq(listings.id, current.id));
-    updated += 1;
+    report.listings.updated.push({ key: label, fields });
   }
 
-  return {
-    cities: data.cities.length,
-    users: data.users.length,
-    photos: photoCount,
-    created, updated, unchanged,
-  };
+  return report;
 }
+
+/** Отказ с понятным текстом: печатается без стека, база не тронута. */
+class SeedAbort extends Error {}
 
 /**
  * Пароль владельцам — тот же механизм, что у демо-сида: вне прода и только тем,
  * у кого пароля ещё нет. Домен @seed.local сюда не зашит: ограничиваемся ровно
  * теми адресами, что перечислены в users.csv.
  */
-async function grantDevPasswords(db: SeedDb, data: SeedData): Promise<void> {
+async function grantDevPasswords(db: SeedDb, data: SeedData): Promise<number> {
   const hash = await devSeedPassword(process.env.NODE_ENV);
-  if (!hash) return;
+  if (!hash || data.users.length === 0) return 0;
 
   const updated = await db.update(users)
     .set({ passwordHash: hash, emailVerified: new Date() })
@@ -233,10 +278,7 @@ async function grantDevPasswords(db: SeedDb, data: SeedData): Promise<void> {
       isNull(users.passwordHash),
     ))
     .returning({ id: users.id });
-
-  if (updated.length > 0) {
-    console.log(`Владельцы получили dev-пароль (${updated.length}): ${DEV_SEED_PASSWORD}`);
-  }
+  return updated.length;
 }
 
 // ------------------------------------------------------- город по точке
@@ -275,28 +317,57 @@ async function cityOfPointCheck(pool: Pool): Promise<SeedCityOfPoint | undefined
 // -------------------------------------------------------------------- main
 
 async function main() {
+  const parsedArgs = parseSeedArgs(process.argv.slice(2));
+  if (!parsedArgs.ok) die(parsedArgs.error);
+  const { dryRun, owners } = parsedArgs.args;
+
   const url = process.env.DATABASE_URL;
   if (!url) die("DATABASE_URL is required");
 
   const pool = new Pool({ connectionString: url });
   const db = drizzle(pool);
   try {
-    const data = await readSeedData({ cityOfPoint: await cityOfPointCheck(pool) });
+    // Таблицы проверяются целиком и с --owners: ошибка в чужой строке —
+    // всё равно ошибка таблицы, которую потом прогонят без флага.
+    const all = await readSeedData({ cityOfPoint: await cityOfPointCheck(pool) });
+    const scoped = scopeSeedData(all, owners);
+    if (!scoped.ok) die(scoped.error);
+    const data = scoped.data;
     const photos = resolvePhotos(data, await readManifest());
 
     // Одна транзакция на всё: падение на тридцатом объявлении не должно
-    // оставлять базу наполовину заполненной.
-    const stats = await db.transaction(async (tx) => {
-      const written = await writeAll(tx, data, photos);
-      await grantDevPasswords(tx, data);
-      return written;
-    });
+    // оставлять базу наполовину заполненной. Dry-run проходит её целиком — с
+    // теми же запросами, ограничениями и триггерами, — и откатывает.
+    let report: SeedReport | null = null;
+    try {
+      await db.transaction(async (tx) => {
+        const written = await writeAll(tx, data, photos, { ownersOnly: owners !== null });
+        // С --owners пароли не раздаются вовсе, даже вне прода: этот режим —
+        // для живой базы, и забытый NODE_ENV=production не должен оставить
+        // новым аккаунтам публичный dev-пароль.
+        const devPasswords = owners === null ? await grantDevPasswords(tx, data) : 0;
+        report = { ...written, dryRun, devPasswords };
+        if (dryRun) tx.rollback();
+      });
+    } catch (err) {
+      if (!(dryRun && err instanceof TransactionRollbackError)) throw err;
+    }
+    const done = report as SeedReport | null;
+    if (!done) throw new Error("seed: транзакция завершилась без отчёта");
 
-    console.log(
-      `Seeded from seed_real: ${stats.cities} cities, ${stats.users} owners, ` +
-      `${stats.photos} photos; listings created ${stats.created}, ` +
-      `updated ${stats.updated}, unchanged ${stats.unchanged}`,
-    );
+    for (const line of formatSeedReport(done)) console.log(line);
+    if (done.devPasswords > 0) {
+      console.log(dryRun
+        ? `Владельцы получили бы dev-пароль (${done.devPasswords}): ${DEV_SEED_PASSWORD}`
+        : `Владельцы получили dev-пароль (${done.devPasswords}): ${DEV_SEED_PASSWORD}`);
+    }
+    if (!dryRun) {
+      console.log(
+        `Seeded from seed_real: ${owners ? "cities untouched" : `${data.cities.length} cities`}, ` +
+        `${data.users.length} owners, ${done.photos} photos; listings created ${done.listings.created.length}, ` +
+        `updated ${done.listings.updated.length}, unchanged ${done.listings.unchanged}`,
+      );
+    }
 
     const withoutPhotos = data.listings.filter((l) => l.photos.length === 0).length;
     if (withoutPhotos > 0) {
@@ -308,6 +379,9 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error(err);
+  if (err instanceof SeedAbort) {
+    console.error(err.message);
+    console.error("В базу не записано ничего.");
+  } else console.error(err);
   process.exit(1);
 });

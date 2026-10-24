@@ -431,3 +431,35 @@ describe("parsePhotos", () => {
     expect(parsePhotos("")).toEqual([]);
   });
 });
+
+describe("parseSeedData: тарифы и минимальный срок", () => {
+  it("колонок price_week, price_month, min_days может не быть — только суточная, срок от дня", () => {
+    const res = parse();
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.data.listings[0]).toMatchObject({ priceDay: 550, priceWeek: null, priceMonth: null, minDays: 1 });
+  });
+
+  it("недельная без суточной — при min_days от 7", () => {
+    const res = parse({ listings: [listing({ price_day: "", price_week: "2250", price_month: "7000", min_days: "7" })] });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.data.listings[0]).toMatchObject({ priceDay: null, priceWeek: 2250, priceMonth: 7000, minDays: 7 });
+  });
+
+  it("правило согласованности: без суточной — от 7, без суточной и недели — от 30", () => {
+    expect(messages(parse({ listings: [listing({ price_day: "", price_week: "2250", min_days: "3" })] })))
+      .toEqual([expect.stringContaining("без price_day min_days должен быть от 7")]);
+    expect(messages(parse({ listings: [listing({ price_day: "", price_month: "7000", min_days: "7" })] })))
+      .toEqual([expect.stringContaining("без price_day и price_week min_days должен быть от 30")]);
+    expect(messages(parse({ listings: [listing({ price_day: "", price_week: "", price_month: "" })] })))
+      .toEqual([expect.stringContaining("нет ни одной цены")]);
+  });
+
+  it("мусор в тарифах и сроке — построчные ошибки", () => {
+    expect(messages(parse({ listings: [listing({ price_week: "0" })] })))
+      .toEqual([expect.stringContaining("price_week — ожидается целое число от 1")]);
+    expect(messages(parse({ listings: [listing({ min_days: "91" })] })))
+      .toEqual([expect.stringContaining("min_days — ожидается целое число от 1 до 90")]);
+  });
+});

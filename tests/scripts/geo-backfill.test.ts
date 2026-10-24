@@ -195,3 +195,16 @@ describe("formatReport", () => {
     expect(text).toMatch(/Не найдено 1:[\s\S]*Зузузу/);
   });
 });
+
+describe("csvColumns: необязательные тарифы", () => {
+  // Тарифы стоят сразу за price_day, как их ставит человек: иначе backfill
+  // переставлял бы шапку и переписывал файл целиком.
+  it("price_week, price_month, min_days — за price_day, незнакомые — в конце", () => {
+    const row = Object.fromEntries([...LISTING_COLUMNS, "price_week", "min_days", "note"].map((c) => [c, ""]));
+    const cols = csvColumns([row]);
+    const at = cols.indexOf("price_day");
+    expect(cols.slice(at, at + 3)).toEqual(["price_day", "price_week", "min_days"]);
+    expect(cols.at(-1)).toBe("note");
+    expect(cols).not.toContain("price_month");
+  });
+});

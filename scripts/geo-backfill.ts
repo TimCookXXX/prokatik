@@ -41,7 +41,7 @@ import { eq, isNotNull, isNull } from "drizzle-orm";
 import { Pool } from "pg";
 import { cities, listings } from "../drizzle/schema";
 import { parseCsv, stringifyCsv, type CsvRow } from "../src/lib/csv";
-import { LISTING_COLUMNS } from "../src/lib/seed/rows";
+import { LISTING_COLUMNS, LISTING_OPTIONAL_COLUMNS } from "../src/lib/seed/rows";
 import { createGeocoder, type Geocoder } from "../src/lib/geocoder";
 import type { AddressHit } from "../src/lib/geocoder/types";
 import { haversineKm, type GeoPoint } from "../src/lib/geo/point";
@@ -116,10 +116,20 @@ export function geocodeListingLabel(
 const blank = (v: string | undefined) => (v ?? "").trim() === "";
 const coord = (x: number) => String(Math.round(x * 1e6) / 1e6);
 
-/** Колонки таблицы на запись: порядок сида, а незнакомые — в конце, как были. */
+/**
+ * Колонки таблицы на запись: порядок сида, необязательные тарифы — сразу за
+ * price_day, если они в таблице есть, а незнакомые — в конце, как были. Иначе
+ * backfill переставлял бы шапку и переписывал файл целиком.
+ */
 export function csvColumns(rows: CsvRow[]): string[] {
   const present = rows.length > 0 ? Object.keys(rows[0]) : [];
-  return [...LISTING_COLUMNS, ...present.filter((c) => !LISTING_COLUMNS.includes(c))];
+  const optional = LISTING_OPTIONAL_COLUMNS.filter((c) => present.includes(c));
+  const known = [...LISTING_COLUMNS, ...optional];
+  const at = LISTING_COLUMNS.indexOf("price_day") + 1;
+  return [
+    ...LISTING_COLUMNS.slice(0, at), ...optional, ...LISTING_COLUMNS.slice(at),
+    ...present.filter((c) => !known.includes(c)),
+  ];
 }
 
 /**
