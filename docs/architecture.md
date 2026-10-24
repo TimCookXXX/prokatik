@@ -193,6 +193,12 @@ grep -rn "safe-area-inset" src/
 (`src/lib/catalog/filter-count.ts`); цену — только когда она сужает границы
 раздела.
 
+Фильтр цены, сортировка по цене и границы слайдера идут по цене, приведённой к
+суткам: SQL-выражение `effectivePriceSql` в `src/server/catalog.ts` и его
+TS-двойник `effectiveDayPrice` в `src/lib/catalog/tariff.ts`. Правило у них
+одно, и меняются они вместе
+([0026](decisions/0026-tariff-ladder-and-minimum-term.md)).
+
 ## Middleware
 
 `src/middleware.ts` работает на edge и **не обращается к базе**. Делает три вещи:
@@ -221,7 +227,9 @@ grep -rn "safe-area-inset" src/
 - **Подключение:** `src/lib/db.ts`, ленивый синглтон `getDb()`.
 - **ID:** ULID (`newId()` в `src/lib/id.ts`), лексикографически сортируемый —
   поэтому сортировка по id совпадает с сортировкой по времени создания.
-- **Деньги:** целые рубли, `integer`. Дробей и валют нет.
+- **Деньги:** целые рубли, `integer`. Дробей и валют нет. Сумма за срок не
+  хранится, а выводится из цен одной функцией — `quote` в
+  `src/lib/catalog/tariff.ts`, общей для клиента и сервера.
 - **Даты занятости:** строки `YYYY-MM-DD`, как их отдаёт Postgres `date`.
 
 Смысл данных и бизнес-правила — в [domain.md](domain.md).
