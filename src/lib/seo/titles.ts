@@ -24,7 +24,7 @@ import {
 } from "@/lib/catalog/tariff";
 
 /** Потолок заголовка карточки: длиннее выдача Яндекса и Google режет. */
-export const LISTING_TITLE_MAX = 65;
+export const LISTING_TITLE_MAX = 70;
 /** Потолок описания: дальше сниппет всё равно обрезается. */
 export const DESCRIPTION_MAX = 160;
 
@@ -152,16 +152,22 @@ export function listingShareText(title: string, city: CityNames, tariff: Tariff)
 
 /**
  * Title карточки: «{title} — аренда в Краснодаре, 700 ₽/сутки» (или
- * «2 250 ₽/неделя» у вещи без суточной), не длиннее
- * LISTING_TITLE_MAX. Режется название вещи (по слову), а не хвост с городом и
- * ценой: ради них сниппет и читают. Если и хвост не оставляет места названию
- * (очень длинное имя города), город уходит из хвоста.
+ * «2 250 ₽/неделя» у вещи без суточной), не длиннее LISTING_TITLE_MAX.
+ * Название — главное в сниппете: модель и вариант («Kugoo Kirin V3 Pro, АКБ
+ * 28,6 Ач») ищут дословно. Поэтому сперва отказываемся от хвостов, если без них
+ * название влезает целиком: без цены, затем без города, затем оба. Если не
+ * влезает и так — название режется по слову при полном хвосте (ради города и
+ * цены сниппет тогда и читают); очень длинное имя города уходит из хвоста.
  */
 export function listingTitle(title: string, city: CityNames, tariff: Tariff): string {
   const MIN_TITLE = 16;
   const price = listingPrice(tariff);
   const tail = price ? `, ${price}` : "";
-  let suffix = ` — аренда ${headingCity(city)}${tail}`;
+  const inCity = headingCity(city);
+  const ladder = [` — аренда ${inCity}${tail}`, ` — аренда ${inCity}`, ` — аренда${tail}`, " — аренда"];
+  const whole = ladder.find((suffix) => title.length + suffix.length <= LISTING_TITLE_MAX);
+  if (whole !== undefined) return `${title}${whole}`;
+  let suffix = ladder[0]!;
   if (LISTING_TITLE_MAX - suffix.length < MIN_TITLE) suffix = ` — аренда${tail}`;
   return `${truncateWords(title, LISTING_TITLE_MAX - suffix.length)}${suffix}`;
 }

@@ -72,6 +72,19 @@ describe("заголовки разделов", () => {
     expect(long).toBe("Аксессуары для электроники — аренда и прокат в Краснодаре");
     expect(long.length).toBeLessThanOrEqual(CATALOG_TITLE_MAX);
   });
+  it("модель целиком важнее цены: без цены, если так название влезает", () => {
+    const t = listingTitle("Электровелосипед Kugoo Kirin V3 Pro, АКБ 28,6 Ач", krasnodar, { priceDay: null, priceWeek: 2500, priceMonth: null });
+    expect(plain(t)).toBe("Электровелосипед Kugoo Kirin V3 Pro, АКБ 28,6 Ач — аренда в Краснодаре");
+    expect(t.length).toBeLessThanOrEqual(LISTING_TITLE_MAX);
+  });
+
+  it("если и без цены не влезает — без города, но с ценой", () => {
+    const name = "Электровелосипед Kugoo Kirin V3 Pro, две АКБ по 28,6 Ач";
+    const t = listingTitle(name, krasnodar, day(800));
+    expect(t.startsWith(name)).toBe(true);
+    expect(t.length).toBeLessThanOrEqual(LISTING_TITLE_MAX);
+  });
+
   it("город без падежа — «· Казань», без « ,»", () => {
     const title = catalogTitle("Дрели", kazan, dayFrom(500));
     expect(plain(title)).toBe("Дрели — аренда и прокат · Казань, от 500 ₽/сутки");
@@ -115,7 +128,7 @@ describe("listingTitle", () => {
     expect(plain(listingTitle("Дрель Bosch", krasnodar, day(700)))).toBe("Дрель Bosch — аренда в Краснодаре, 700 ₽/сутки");
   });
 
-  it("длинное название режется по слову, хвост с городом и ценой цел, ≤ 65", () => {
+  it("длинное название режется по слову, хвост с городом и ценой цел, ≤ LISTING_TITLE_MAX", () => {
     const t = listingTitle("Виброшлифмашина Makita BO3711 с пылесборником и запасными листами", { name: "Яблоновский", nameLocative: "Яблоновском" }, day(1500));
     expect(t.length).toBeLessThanOrEqual(LISTING_TITLE_MAX);
     expect(plain(t)).toMatch(/^Виброшлифмашина Makita[^—]*… — аренда в Яблоновском, 1 500 ₽\/сутки$/);
@@ -123,6 +136,19 @@ describe("listingTitle", () => {
     const head = t.split("…")[0]!;
     expect("Виброшлифмашина Makita BO3711 с пылесборником и запасными листами".startsWith(head)).toBe(true);
     expect([" ", undefined]).toContain("Виброшлифмашина Makita BO3711 с пылесборником и запасными листами"[head.length]);
+  });
+
+  it("модель целиком важнее цены: без цены, если так название влезает", () => {
+    const t = listingTitle("Электровелосипед Kugoo Kirin V3 Pro, АКБ 28,6 Ач", krasnodar, { priceDay: null, priceWeek: 2500, priceMonth: null });
+    expect(plain(t)).toBe("Электровелосипед Kugoo Kirin V3 Pro, АКБ 28,6 Ач — аренда в Краснодаре");
+    expect(t.length).toBeLessThanOrEqual(LISTING_TITLE_MAX);
+  });
+
+  it("если и без цены не влезает — без города, но с ценой", () => {
+    const name = "Электровелосипед Kugoo Kirin V3 Pro, две АКБ по 28,6 Ач";
+    const t = listingTitle(name, krasnodar, day(800));
+    expect(t.startsWith(name)).toBe(true);
+    expect(t.length).toBeLessThanOrEqual(LISTING_TITLE_MAX);
   });
 
   it("город без падежа — «· Казань», без « ,»", () => {
