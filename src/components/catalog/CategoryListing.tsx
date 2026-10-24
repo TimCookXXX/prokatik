@@ -19,6 +19,7 @@ import { todayStr, addDaysStr } from "@/lib/catalog/dates";
 import { formatPrice, listingsCountLabel, ownersFromLabel } from "@/lib/catalog/format";
 import { buildAvailabilityByListing } from "@/lib/catalog/availability";
 import { ListingCard } from "@/components/catalog/ListingCard";
+import { content } from "@theme/content";
 import { FilterForm, ListingFilters, type FilterState } from "@/components/catalog/ListingFilters";
 import { ResultsToolbar } from "@/components/catalog/ResultsToolbar";
 import { activeFilterCount } from "@/lib/catalog/filter-count";
@@ -61,7 +62,7 @@ export async function CategoryListing({
   // двигать нечего, панель покажет обычные поля ввода.
   const priceBounds =
     stats.minPriceDay !== null && stats.maxPriceDay !== null && stats.maxPriceDay > stats.minPriceDay
-      ? { min: stats.minPriceDay, max: stats.maxPriceDay }
+      ? { min: stats.minPriceDay, max: stats.maxPriceDay, converted: stats.converted }
       : undefined;
 
   // Занятость всех карточек страницы одним запросом: на выбранные даты, а без
@@ -138,12 +139,13 @@ export async function CategoryListing({
       {stats.listingCount > 0 && (
         <p className="text-sm text-muted-foreground">
           {listingsCountLabel(stats.listingCount)} {ownersFromLabel(stats.ownerCount)}
-          {stats.minPriceDay !== null && (
+          {/* Цены — с настоящей единицей: суточные, а без них — главная цена
+            * раздела (priceSummary), не приведённая к суткам. */}
+          {stats.price && (
             <>
-              , цены от {formatPrice(stats.minPriceDay)}
-              {stats.maxPriceDay !== null && stats.maxPriceDay !== stats.minPriceDay && (
-                <> до {formatPrice(stats.maxPriceDay)}</>
-              )} за сутки
+              , цены от {formatPrice(stats.price.min)}
+              {stats.price.max !== stats.price.min && <> до {formatPrice(stats.price.max)}</>}
+              {" "}{content.tariff.per[stats.price.unit]}
             </>
           )}
           {stats.avgDeposit !== null && <>, средний залог {formatPrice(stats.avgDeposit)}</>}.

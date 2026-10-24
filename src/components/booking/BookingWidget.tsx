@@ -30,7 +30,7 @@ import {
 import { HandoverIcon } from "@/components/catalog/HandoverIcon";
 import { content } from "@theme/content";
 import {
-  daysLabel, formatUnitPriceSlash, primaryPrice, quote, type Tariff,
+  daysLabel, formatUnitPriceSlash, primaryPrice, priceTiers, quote, type Tariff,
 } from "@/lib/catalog/tariff";
 import { track } from "@/components/analytics/track";
 
@@ -239,10 +239,14 @@ export function BookingWidget(props: BookingWidgetProps) {
   // Цена и залог — блоками внизу (как у Hygglo). Значения — уже строки.
   // Залог «без залога» тоже показывается — это ответ на вопрос, а не его
   // отсутствие.
+  // Плиток цены столько, сколько задано ступеней: сутки, неделя, месяц.
   const priceBoxes: { value: string; label: string }[] = [
-    ...(primary ? [{ value: formatPrice(primary.amount), label: content.tariff.tile[primary.unit] }] : []),
+    ...priceTiers(props.tariff).map((p) => ({ value: formatPrice(p.amount), label: content.tariff.tile[p.unit] })),
     { value: depositValue(props.depositType, props.depositAmount), label: t.depositTile },
   ];
+  // До трёх плиток — в ряд; четыре (три цены и залог) — сеткой два на два:
+  // в ряд на 360px «10 000 ₽» в четверти ширины уже не помещается.
+  const boxCols = priceBoxes.length >= 4 ? "grid-cols-2" : priceBoxes.length === 3 ? "grid-cols-3" : "grid-cols-2";
 
   return (
     <>
@@ -330,11 +334,11 @@ export function BookingWidget(props: BookingWidgetProps) {
       {/* Цена и залог — отдельным блоком под виджетом (не на подложке) */}
       <div className="mt-2">
         <div className="mb-2 text-center font-mono text-2xs font-medium uppercase tracking-mono text-muted-foreground">
-          Цена и залог
+          {t.pricesHeading}
         </div>
-        <div className="flex gap-2">
+        <div className={`grid gap-2 ${boxCols}`}>
           {priceBoxes.map((b) => (
-            <div key={b.label} className="flex-1 rounded-lg border border-border bg-card p-3 text-center">
+            <div key={b.label} className="min-w-0 rounded-lg border border-border bg-card p-3 text-center">
               <div className="font-mark font-bold">{b.value}</div>
               <div className="text-xs text-muted-foreground">{b.label}</div>
             </div>
@@ -343,13 +347,23 @@ export function BookingWidget(props: BookingWidgetProps) {
       </div>
 
       {/* Способ получения — своим блоком под виджетом, как и цены: это свойство
-        * самой вещи, а не параметр брони, и в ряд плиток он не встаёт — там
-        * flex-1 без min-w-0, и текстовое значение на узком экране распёрло бы
-        * ряд до горизонтального скролла.
+        * самой вещи, а не параметр брони, и в ряд плиток он не встаёт —
+        * текстовое значение «Самовывоз или доставка» в плитку шириной в треть
+        * виджета не помещается.
         * Значение не приглушено: способ получения решает, подойдёт ли вещь
         * вообще. Значок — общий HandoverIcon, тот же, что в карточке выдачи:
         * человек приходит сюда прямо оттуда и не должен опознавать свойство
         * заново. */}
+      {/* Минимальный срок — той же строкой-фактом, что получение: свойство
+        * вещи, а не выбор в календаре. Подсказка над календарём говорит о нём
+        * в момент выбора, эта строка — когда человек сверяет условия. */}
+      {props.minDays > 1 && (
+        <div className="mt-2 flex items-center justify-between gap-2 rounded-lg border border-border bg-card p-3 text-sm">
+          <span className="text-muted-foreground">{t.minTermRow}</span>
+          <span className="font-semibold text-foreground">{daysLabel(props.minDays)}</span>
+        </div>
+      )}
+
       <div className="mt-2 flex items-center justify-between gap-2 rounded-lg border border-border bg-card p-3 text-sm">
         <span className="text-muted-foreground">Получение</span>
         <span className="flex min-w-0 items-center gap-1.5 font-semibold text-foreground">

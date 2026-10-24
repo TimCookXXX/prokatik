@@ -25,6 +25,16 @@ describe("buildProductJsonLd()", () => {
     expect(ld.offers.seller.name).toBe("Артём");
   });
 
+  // Вещь без суточной — цена за неделю или месяц, коды UN/CEFACT WEE и MON.
+  it("недельная и месячная цена — unitCode WEE и MON", () => {
+    const week = buildProductJsonLd({ ...base, price: { amount: 2250, unit: "week" } }).offers;
+    expect(week.price).toBe(2250);
+    expect(week.priceSpecification.unitCode).toBe("WEE");
+    expect(week.priceSpecification.referenceQuantity.unitCode).toBe("WEE");
+    const month = buildProductJsonLd({ ...base, price: { amount: 7000, unit: "month" } }).offers;
+    expect(month.priceSpecification.unitCode).toBe("MON");
+  });
+
   // Голая price читается как цена покупки; за что она — говорит спецификация.
   it("цена — за сутки: UnitPriceSpecification с unitCode DAY", () => {
     const spec = buildProductJsonLd(base).offers.priceSpecification;

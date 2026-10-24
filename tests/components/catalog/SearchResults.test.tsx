@@ -51,7 +51,7 @@ beforeEach(() => {
   vi.mocked(getAvailabilityRows).mockResolvedValue([]);
   vi.mocked(getAllCategories).mockResolvedValue([]);
   vi.mocked(getSearchFacets).mockResolvedValue({
-    countsByCategory: new Map(), minPriceDay: null, maxPriceDay: null,
+    countsByCategory: new Map(), minPriceDay: null, maxPriceDay: null, converted: false,
   });
   vi.mocked(rankListingIds).mockReset();
   vi.mocked(rankListingIds).mockResolvedValue({ ids: [], usedQuery: "", dropped: [] });
@@ -105,7 +105,7 @@ describe("SearchResults", () => {
     vi.mocked(getAllCategories).mockResolvedValue([root]);
     vi.mocked(getSearchFacets).mockResolvedValue({
       countsByCategory: new Map([["cat1", 7]]),
-      minPriceDay: null, maxPriceDay: null,
+      minPriceDay: null, maxPriceDay: null, converted: false,
     });
 
     render(await SearchResults({ city, q: "", searchParams: {} }));

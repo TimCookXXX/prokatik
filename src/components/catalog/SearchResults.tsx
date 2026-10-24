@@ -96,7 +96,7 @@ export async function SearchResults({
   const priceBounds =
     facets.minPriceDay !== null && facets.maxPriceDay !== null
       && facets.maxPriceDay > facets.minPriceDay
-      ? { min: facets.minPriceDay, max: facets.maxPriceDay }
+      ? { min: facets.minPriceDay, max: facets.maxPriceDay, converted: facets.converted }
       : undefined;
 
   // Счётчики разделов — роллап прямых счётчиков на корни, как в дереве каталога.

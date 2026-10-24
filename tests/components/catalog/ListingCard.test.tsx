@@ -24,6 +24,9 @@ function card(over: Record<string, unknown> = {}, props: Record<string, unknown>
       title: "Перфоратор Bosch GBH 2-26",
       quantity: 3,
       priceDay: 500,
+      priceWeek: null,
+      priceMonth: null,
+      minDays: 1,
       depositType: "money",
       depositAmount: 3000,
       location: "Ново-Савиновский",
@@ -88,6 +91,26 @@ describe("ListingCard", () => {
     expect(screen.getByText("500 ₽")).toBeInTheDocument();
     expect(screen.getByText("в сутки")).toBeInTheDocument();
     expect(screen.getByText("залог 3 000 ₽")).toBeInTheDocument();
+  });
+
+  // Вещь без суточной — главная цена со своей единицей, минимальный срок — в
+  // той же строке: третьей строки у карточки нет. В узкой сетке (ниже sm) в
+  // строку он не помещается и показывается плашкой на фото.
+  it("недельная цена и минимальный срок — в строке единицы, в узкой сетке — на фото", () => {
+    render(card({ priceDay: null, priceWeek: 2250, minDays: 7 }));
+    expect(screen.getByText("2 250 ₽")).toBeInTheDocument();
+    const unit = screen.getByText((_, el) => el?.textContent === "в неделю · от 7 дн." && el.tagName === "SPAN");
+    expect(unit.querySelector("span")).toHaveClass("max-sm:hidden");
+    const plate = screen.getAllByText("от 7 дн.").find((el) => el.className.includes("glass-photo"));
+    expect(plate).toHaveClass("sm:hidden");
+    expect(screen.queryByText(/в сутки/)).toBeNull();
+  });
+
+  it("списком срок всегда в строке единицы, плашки на фото нет", () => {
+    render(card({ priceDay: null, priceWeek: 2250, minDays: 7 }, { view: "list" }));
+    const unit = screen.getByText((_, el) => el?.textContent === "в неделю · от 7 дн." && el.tagName === "SPAN");
+    expect(unit.querySelector("span")).not.toHaveClass("max-sm:hidden");
+    expect(document.querySelector(".glass-photo.sm\\:hidden")).toBeNull();
   });
 
   // Три служебные строки и кнопка съедали высоту, ничего не решая: остаток

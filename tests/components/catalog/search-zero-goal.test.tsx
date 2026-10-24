@@ -48,7 +48,7 @@ beforeEach(() => {
   vi.mocked(searchListings).mockResolvedValue({ items: [], total: 0 });
   vi.mocked(getAvailabilityRows).mockResolvedValue([]);
   vi.mocked(getAllCategories).mockResolvedValue([]);
-  vi.mocked(getSearchFacets).mockResolvedValue({ countsByCategory: new Map(), minPriceDay: null, maxPriceDay: null });
+  vi.mocked(getSearchFacets).mockResolvedValue({ countsByCategory: new Map(), minPriceDay: null, maxPriceDay: null, converted: false });
   vi.mocked(rankListingIds).mockReset();
   vi.mocked(rankListingIds).mockResolvedValue({ ids: [], usedQuery: "каяк", dropped: [] });
 });

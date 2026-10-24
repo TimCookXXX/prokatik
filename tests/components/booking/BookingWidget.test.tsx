@@ -304,6 +304,16 @@ describe("BookingWidget — минимальный срок", () => {
     expect(dayBtn("2026-09-25")).toBeDisabled();
   });
 
+  // Плиток столько, сколько ступеней задано, и залог; минимальный срок —
+  // отдельной строкой-фактом рядом с получением.
+  it("плитки цен по заданным ступеням и строка минимального срока", () => {
+    window.history.replaceState(null, "", base.pathname);
+    render(<BookingWidget {...weekly} tariff={{ priceDay: null, priceWeek: 2250, priceMonth: 7000 }} />);
+    const tiles = screen.getByText("Цена и залог").nextElementSibling!;
+    expect(flat(tiles.textContent)).toBe("2 250 ₽неделя7 000 ₽месяцНе нужензалог");
+    expect(screen.getByText("Минимальный срок").nextElementSibling).toHaveTextContent("7 дней");
+  });
+
   it("без минимума подсказки нет", () => {
     window.history.replaceState(null, "", base.pathname);
     render(<BookingWidget {...base} handoverPickup handoverDelivery={false} />);

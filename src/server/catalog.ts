@@ -11,6 +11,7 @@ import { todayStr } from "@/lib/catalog/dates";
 import type { GeoPoint } from "@/lib/geo/point";
 import type { UserPoint } from "@/lib/geo/location";
 import { isApprox } from "@/lib/geo/precision";
+import { priceSummary, type PriceSummary } from "@/lib/catalog/tariff";
 import {
   availability, bookingRequests, categories, cities, listings, users,
 } from "@db/schema";
@@ -185,6 +186,31 @@ export interface ListingFilters {
   pageSize?: number;
 }
 
+/**
+ * Цена, приведённая к суткам (ADR 0026): суточная, иначе недельная/7, иначе
+ * месячная/30 — с округлением вверх. Только для фильтра, сортировки и границ
+ * слайдера цены; показывается всегда главная цена со своей единицей. То же
+ * правило в TS — effectiveDayPrice в lib/catalog/tariff.ts.
+ */
+export const effectivePriceSql = sql<number | null>`coalesce(${listings.priceDay},
+  ceil(${listings.priceWeek} / 7.0)::int, ceil(${listings.priceMonth} / 30.0)::int)`;
+
+/**
+ * Агрегаты цен для заголовков и вводного блока (priceSummary): суточные — как
+ * есть, недельные — только у объявлений без суточной, месячные — только у
+ * объявлений без суточной и недельной. `converted` — сколько объявлений в
+ * наборе без суточной: фильтру цены есть что сказать о пересчёте.
+ */
+const priceAggregateColumns = {
+  dayMin: sql<number | null>`min(${listings.priceDay})::int`,
+  dayMax: sql<number | null>`max(${listings.priceDay})::int`,
+  weekMin: sql<number | null>`(min(${listings.priceWeek}) filter (where ${listings.priceDay} is null))::int`,
+  weekMax: sql<number | null>`(max(${listings.priceWeek}) filter (where ${listings.priceDay} is null))::int`,
+  monthMin: sql<number | null>`(min(${listings.priceMonth}) filter (where ${listings.priceDay} is null and ${listings.priceWeek} is null))::int`,
+  monthMax: sql<number | null>`(max(${listings.priceMonth}) filter (where ${listings.priceDay} is null and ${listings.priceWeek} is null))::int`,
+  converted: sql<number>`(count(*) filter (where ${listings.priceDay} is null))::int`,
+};
+
 // «Свободна во все дни диапазона»: ни одного дня, где занято всё количество.
 // Отсутствие строки в availability = день полностью свободен, поэтому условие
 // написано через NOT EXISTS, а не через подсчёт совпадений.
@@ -202,8 +228,8 @@ function freeInRange(from: string, to: string) {
 // verifiedOnly ссылается на users, поэтому join обязателен и в счётном запросе.
 function filterConditions(f: ListingFilters) {
   const conds = [];
-  if (f.priceMin !== undefined) conds.push(gte(listings.priceDay, f.priceMin));
-  if (f.priceMax !== undefined) conds.push(lte(listings.priceDay, f.priceMax));
+  if (f.priceMin !== undefined) conds.push(gte(effectivePriceSql, f.priceMin));
+  if (f.priceMax !== undefined) conds.push(lte(effectivePriceSql, f.priceMax));
   if (f.deposit !== undefined) conds.push(eq(listings.depositType, f.deposit));
   if (f.handover === "pickup") conds.push(eq(listings.handoverPickup, true));
   if (f.handover === "delivery") conds.push(eq(listings.handoverDelivery, true));
@@ -245,8 +271,11 @@ function orderBy(f: ListingFilters, today: string, ids?: readonly string[]) {
     return sql`array_position(${sql.param([...ids])}::text[], ${listings.id})`;
   }
   if (f.sort === "near" && f.near) return sql`${distanceKm(f.near.point)} asc nulls last`;
-  if (f.sort === "price_asc") return asc(listings.priceDay);
-  if (f.sort === "price_desc") return desc(listings.priceDay);
+  // NULLS LAST в обе стороны: цены нет — не «дешевле всех» и не «дороже всех».
+  // CHECK listings_price_present такого не допускает, но порядок не должен
+  // зависеть от того, что база права.
+  if (f.sort === "price_asc") return sql`${effectivePriceSql} asc nulls last`;
+  if (f.sort === "price_desc") return sql`${effectivePriceSql} desc nulls last`;
   if (f.sort === "free") {
     const from = f.availableFrom ?? today;
     const to = f.availableTo ?? from;
@@ -387,8 +416,11 @@ export async function getListingsForCategories(
 // между ними было бы нельзя.
 export interface SearchFacets {
   countsByCategory: Map<string, number>;
+  /** Границы слайдера — по цене, приведённой к суткам (effectivePriceSql). */
   minPriceDay: number | null;
   maxPriceDay: number | null;
+  /** В выдаче есть объявления без суточной: их цена в слайдере пересчитана. */
+  converted: boolean;
 }
 
 /**
@@ -425,7 +457,7 @@ export async function getSearchFacets(
   filters: ListingFilters = {},
 ): Promise<SearchFacets> {
   if (noMatches(match) || cityIds.length === 0) {
-    return { countsByCategory: new Map(), minPriceDay: null, maxPriceDay: null };
+    return { countsByCategory: new Map(), minPriceDay: null, maxPriceDay: null, converted: false };
   }
   const base = [
     inCities(cityIds),
@@ -435,8 +467,9 @@ export async function getSearchFacets(
 
   const db = getDb();
   const priceColumns = {
-    minPrice: sql<number | null>`min(${listings.priceDay})::int`,
-    maxPrice: sql<number | null>`max(${listings.priceDay})::int`,
+    minPrice: sql<number | null>`min(${effectivePriceSql})::int`,
+    maxPrice: sql<number | null>`max(${effectivePriceSql})::int`,
+    converted: priceAggregateColumns.converted,
   };
 
   const rowsPromise = db
@@ -476,6 +509,7 @@ export async function getSearchFacets(
     countsByCategory: new Map(rows.map((r) => [r.categoryId, r.cnt])),
     minPriceDay: prices.length ? Math.min(...prices) : null,
     maxPriceDay: prices.length ? Math.max(...prices) : null,
+    converted: (boundsRows ?? rows).some((r) => r.converted > 0),
   };
 }
 
@@ -527,8 +561,13 @@ export async function searchListings(
 export interface CategoryStats {
   listingCount: number;
   ownerCount: number;
+  /** Границы слайдера — по цене, приведённой к суткам (effectivePriceSql). */
   minPriceDay: number | null;
   maxPriceDay: number | null;
+  /** В разделе есть объявления без суточной: их цена в слайдере пересчитана. */
+  converted: boolean;
+  /** Цены для заголовков и вводного блока — с настоящей единицей (priceSummary). */
+  price: PriceSummary | null;
   avgDeposit: number | null;
 }
 
@@ -543,14 +582,18 @@ const categoryStatsByKey = cache(async (cityKey: string, categoryKey: string): P
   const cityIds = cityKey ? cityKey.split(",") : [];
   const categoryIds = categoryKey ? categoryKey.split(",") : [];
   if (categoryIds.length === 0 || cityIds.length === 0) {
-    return { listingCount: 0, ownerCount: 0, minPriceDay: null, maxPriceDay: null, avgDeposit: null };
+    return {
+      listingCount: 0, ownerCount: 0, minPriceDay: null, maxPriceDay: null,
+      converted: false, price: null, avgDeposit: null,
+    };
   }
   const rows = await getDb()
     .select({
       listingCount: sql<number>`count(*)::int`,
       ownerCount: sql<number>`count(distinct ${listings.ownerUserId})::int`,
-      minPriceDay: sql<number | null>`min(${listings.priceDay})::int`,
-      maxPriceDay: sql<number | null>`max(${listings.priceDay})::int`,
+      minPriceDay: sql<number | null>`min(${effectivePriceSql})::int`,
+      maxPriceDay: sql<number | null>`max(${effectivePriceSql})::int`,
+      ...priceAggregateColumns,
       avgDeposit: sql<number | null>`round(avg(${listings.depositAmount}))::int`,
     })
     .from(listings)
@@ -559,7 +602,16 @@ const categoryStatsByKey = cache(async (cityKey: string, categoryKey: string): P
       eq(listings.status, "active"),
       inArray(listings.categoryId, categoryIds),
     ));
-  return rows[0];
+  const r = rows[0];
+  return {
+    listingCount: r.listingCount,
+    ownerCount: r.ownerCount,
+    minPriceDay: r.minPriceDay,
+    maxPriceDay: r.maxPriceDay,
+    converted: r.converted > 0,
+    price: priceSummary(r),
+    avgDeposit: r.avgDeposit,
+  };
 });
 
 // Активные товары продавца — для профиля /u/{id}.

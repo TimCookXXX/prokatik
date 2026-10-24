@@ -18,8 +18,9 @@ import { headingCity, type CityNames } from "@/lib/catalog/city-locative";
 import {
   formatDeposit, formatPrice, listingsCountLabel, ownersCountLabel, type DepositType,
 } from "@/lib/catalog/format";
+import { content } from "@theme/content";
 import {
-  formatUnitPriceSlash, minDaysLabel, primaryPrice, type Tariff,
+  formatUnitPriceSlash, minDaysLabel, primaryPrice, type PriceSummary, type Tariff,
 } from "@/lib/catalog/tariff";
 
 /** Потолок заголовка карточки: длиннее выдача Яндекса и Google режет. */
@@ -27,7 +28,8 @@ export const LISTING_TITLE_MAX = 65;
 /** Потолок описания: дальше сниппет всё равно обрезается. */
 export const DESCRIPTION_MAX = 160;
 
-const perDay = (rub: number) => `${formatPrice(rub)}/сутки`;
+/** «от 700 ₽/сутки» — нижняя цена раздела со своей единицей. */
+const fromPrice = (p: PriceSummary) => `от ${formatUnitPriceSlash({ amount: p.min, unit: p.unit })}`;
 
 /**
  * Строчная первая буква — для имени раздела внутри фразы. Аббревиатура (вторая
@@ -80,22 +82,29 @@ export function catalogHeading(name: string, city: CityNames): string {
  */
 export const CATALOG_TITLE_MAX = 70;
 
-export function catalogTitle(name: string, city: CityNames, minPrice: number | null): string {
+/**
+ * Цена — суточная по сырой min(price_day); если суточных в разделе нет вовсе,
+ * — главная цена со своей единицей («от 2 250 ₽/неделя»), а не приведённая к
+ * суткам (priceSummary в lib/catalog/tariff.ts).
+ */
+export function catalogTitle(name: string, city: CityNames, price: PriceSummary | null): string {
   const head = catalogHeading(name, city);
-  if (minPrice == null) return head;
-  const full = `${head}, от ${perDay(minPrice)}`;
+  if (price == null) return head;
+  const full = `${head}, ${fromPrice(price)}`;
   return full.length <= CATALOG_TITLE_MAX ? full : head;
 }
 
 export interface CatalogStats {
   listingCount: number;
   ownerCount: number;
-  minPriceDay: number | null;
-  maxPriceDay: number | null;
+  price: PriceSummary | null;
 }
 
-function priceRange(min: number, max: number): string {
-  return min === max ? perDay(min) : `от ${formatPrice(min)} до ${perDay(max)}`;
+function priceRange(p: PriceSummary): string {
+  const slash = content.tariff.slash[p.unit];
+  return p.min === p.max
+    ? `${formatPrice(p.min)}${slash}`
+    : `от ${formatPrice(p.min)} до ${formatPrice(p.max)}${slash}`;
 }
 
 /**
@@ -105,20 +114,20 @@ function priceRange(min: number, max: number): string {
 export function catalogDescription(name: string, city: CityNames, stats: CatalogStats): string {
   const where = `${lowerFirst(name)} напрокат ${headingCity(city)}`;
   const tail = "Залог, даты и заявка на бронь онлайн.";
-  if (stats.listingCount === 0 || stats.minPriceDay == null || stats.maxPriceDay == null) {
+  if (stats.listingCount === 0 || stats.price == null) {
     return truncateWords(`${name} напрокат ${headingCity(city)}: цены, залоги и календарь занятости. ${tail}`, DESCRIPTION_MAX);
   }
   const counts = `${listingsCountLabel(stats.listingCount)}, ${ownersCountLabel(stats.ownerCount)}`;
   return truncateWords(
-    `${counts}: ${where}, ${priceRange(stats.minPriceDay, stats.maxPriceDay)}. ${tail}`,
+    `${counts}: ${where}, ${priceRange(stats.price)}. ${tail}`,
     DESCRIPTION_MAX,
   );
 }
 
 /** Title витрины города: «Аренда и прокат вещей в Краснодаре — от 150 ₽/сутки». */
-export function cityTitle(city: CityNames, minPrice: number | null): string {
+export function cityTitle(city: CityNames, price: PriceSummary | null): string {
   const head = `Аренда и прокат вещей ${headingCity(city)}`;
-  return minPrice == null ? head : `${head} — от ${perDay(minPrice)}`;
+  return price == null ? head : `${head} — ${fromPrice(price)}`;
 }
 
 export function cityDescription(city: CityNames): string {

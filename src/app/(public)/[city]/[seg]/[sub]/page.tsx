@@ -106,7 +106,7 @@ export async function generateMetadata({ params }: Props, parent?: ResolvingMeta
     // Цена «от» и счётчики — по самому городу: страница без своих позиций — 404.
     const stats = await getCategoryStats([r.city.id], [r.sub.id]);
     return {
-      title: { absolute: catalogTitle(r.sub.name, r.city, stats.minPriceDay) },
+      title: { absolute: catalogTitle(r.sub.name, r.city, stats.price) },
       description: catalogDescription(r.sub.name, r.city, stats),
       alternates: { canonical: `${siteUrl()}${categoryPath(r.city.slug, r.sub, r.root)}` },
     };

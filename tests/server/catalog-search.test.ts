@@ -79,7 +79,16 @@ describe("searchListings", () => {
     const { text } = itemsQuery();
     expect(text).toMatch(/"listings"\."id" in \(/);
     expect(text).not.toMatch(/array_position/);
-    expect(text).toMatch(/order by "listings"\."price_day" asc/);
+    // По цене, приведённой к суткам: вещь без суточной сортируется по
+    // недельной/7, а не проваливается в NULL (ADR 0026).
+    expect(text).toMatch(/order by coalesce\("listings"\."price_day",\s+ceil\("listings"\."price_week" \/ 7\.0\)::int, ceil\("listings"\."price_month" \/ 30\.0\)::int\) asc nulls last/);
+  });
+
+  it("фильтр цены — по той же приведённой цене", async () => {
+    await searchListings([CITY], { ids: ["A"] }, { priceMin: 300, priceMax: 900 });
+    const { text } = itemsQuery();
+    expect(text).toMatch(/coalesce\("listings"\."price_day",[^)]*\)[^>]*>= \$\d+/);
+    expect(text).not.toMatch(/"listings"\."price_day" >= /);
   });
 
   it("answers an empty id set without going to the database", async () => {
@@ -150,7 +159,7 @@ describe("getSearchFacets", () => {
 
   it("answers an empty id set without going to the database", async () => {
     const res = await getSearchFacets([CITY], { ids: [] });
-    expect(res).toEqual({ countsByCategory: new Map(), minPriceDay: null, maxPriceDay: null });
+    expect(res).toEqual({ countsByCategory: new Map(), minPriceDay: null, maxPriceDay: null, converted: false });
     expect(queries).toHaveLength(0);
   });
 

@@ -30,7 +30,8 @@ const run = (page: string | undefined) => CategoryListing({
 
 beforeEach(() => {
   vi.mocked(getCategoryStats).mockResolvedValue({
-    listingCount: 0, ownerCount: 0, minPriceDay: null, maxPriceDay: null, avgDeposit: null,
+    listingCount: 0, ownerCount: 0, minPriceDay: null, maxPriceDay: null,
+    converted: false, price: null, avgDeposit: null,
   });
   vi.mocked(getAllCategories).mockResolvedValue([]);
   vi.mocked(getListingCountsByCategory).mockResolvedValue(new Map());

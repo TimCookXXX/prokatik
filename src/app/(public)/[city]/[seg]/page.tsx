@@ -71,7 +71,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   // Цена «от» и счётчики — по самому городу, как у canonical без точки «Где».
   const stats = await getCategoryStats([r.city.id], await withChildren(cat));
   return {
-    title: { absolute: catalogTitle(cat.name, r.city, stats.minPriceDay) },
+    title: { absolute: catalogTitle(cat.name, r.city, stats.price) },
     description: catalogDescription(cat.name, r.city, stats),
     alternates: { canonical },
     ...(emptyInCity ? { robots: { index: false, follow: true } } : {}),

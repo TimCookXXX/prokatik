@@ -12,6 +12,7 @@ import { Banknote, FileText, Ban } from "lucide-react";
 import { HandoverIcon } from "@/components/catalog/HandoverIcon";
 import { Button } from "@/components/ui/button";
 import { PriceRange } from "@/components/catalog/PriceRange";
+import { content } from "@theme/content";
 
 export interface FilterState {
   priceMin?: number;
@@ -73,7 +74,8 @@ export function FilterForm({
   basePath: string;
   state: FilterState;
   hidden?: Record<string, string>;
-  priceBounds?: { min: number; max: number };
+  /** converted — в наборе есть цены за неделю или месяц, пересчитанные на сутки. */
+  priceBounds?: { min: number; max: number; converted?: boolean };
 }) {
   const hiddenEntries = Object.entries(hidden ?? {}).filter(([, v]) => v !== "");
   // «Сбросить» очищает только фильтры этой панели (цена, залог, способ
@@ -110,7 +112,13 @@ export function FilterForm({
       {priceBounds && (
         <>
           <fieldset className="border-0 p-0">
-            <SectionLabel>Цена в сутки</SectionLabel>
+            <SectionLabel>{content.tariff.filterLabel}</SectionLabel>
+            {/* Подпись остаётся «в сутки»: так сравнимы все объявления. У
+              * сдающих от недели цена приведена к суткам, и об этом сказано —
+              * иначе «2 250 ₽ в неделю» в выдаче спорило бы со слайдером. */}
+            {priceBounds.converted && (
+              <p className="-mt-1 mb-2 text-xs text-muted-foreground">{content.tariff.filterConverted}</p>
+            )}
             <PriceRange
               min={priceBounds.min}
               max={priceBounds.max}
@@ -202,7 +210,8 @@ export function ListingFilters({
   // Навигация по разделам: в каталоге это дерево категорий, на /search —
   // фасеты с числом находок. Разная разметка, одно и то же место в панели.
   categoryNav?: React.ReactNode;
-  priceBounds?: { min: number; max: number };
+  /** converted — в наборе есть цены за неделю или месяц, пересчитанные на сутки. */
+  priceBounds?: { min: number; max: number; converted?: boolean };
 }) {
   return (
     <div className="surface flex flex-col">

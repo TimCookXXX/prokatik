@@ -1,4 +1,4 @@
-import { fireEvent, render } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { renderToString } from "react-dom/server";
 import { describe, it, expect } from "vitest";
 import { FilterForm, ListingFilters } from "@/components/catalog/ListingFilters";
@@ -154,6 +154,16 @@ describe("ListingFilters", () => {
         target: { value: "900" },
       });
       expect(sent()).not.toContain("price_max");
+    });
+
+    // Подпись слайдера — «в сутки»; если в наборе есть сдающие от недели или
+    // месяца, сказано, что их цена приведена к суткам.
+    it("пересчёт недельных цен назван, только когда он был", () => {
+      const { unmount } = render(<FilterForm basePath="/kazan/tools" state={{}} priceBounds={bounds} />);
+      expect(screen.queryByText("Цены за неделю и месяц пересчитаны на сутки")).toBeNull();
+      unmount();
+      render(<FilterForm basePath="/kazan/tools" state={{}} priceBounds={{ ...bounds, converted: true }} />);
+      expect(screen.getByText("Цены за неделю и месяц пересчитаны на сутки")).toBeInTheDocument();
     });
 
     // Без JS гидрации не будет: серверная разметка — единственный ввод цены,

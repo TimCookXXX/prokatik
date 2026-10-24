@@ -37,7 +37,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const stats = await getCategoryStats([city.id], cats.map((c) => c.id));
   return {
     // absolute, как у всех страниц каталога: см. src/lib/seo/titles.ts.
-    title: { absolute: cityTitle(city, stats.minPriceDay) },
+    title: { absolute: cityTitle(city, stats.price) },
     description: cityDescription(city),
     alternates: { canonical: `${siteUrl()}/${city.slug}` },
     ...(empty ? { robots: { index: false, follow: true } } : {}),

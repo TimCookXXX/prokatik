@@ -56,28 +56,30 @@ describe("truncateWords", () => {
   });
 });
 
+const dayFrom = (min: number) => ({ unit: "day" as const, min, max: min });
+
 describe("заголовки разделов", () => {
   it("H1 и title по шаблону, регистр имени сохранён", () => {
     expect(catalogHeading("VR", krasnodar)).toBe("VR — аренда и прокат в Краснодаре");
-    expect(plain(catalogTitle("VR", krasnodar, 1000))).toBe("VR — аренда и прокат в Краснодаре, от 1 000 ₽/сутки");
+    expect(plain(catalogTitle("VR", krasnodar, dayFrom(1000)))).toBe("VR — аренда и прокат в Краснодаре, от 1 000 ₽/сутки");
   });
   it("без цены — без хвоста «от»", () => {
     expect(catalogTitle("Экшн-камеры", krasnodar, null)).toBe("Экшн-камеры — аренда и прокат в Краснодаре");
   });
 
   it("drops the price when the title would exceed the limit", () => {
-    const long = catalogTitle("Аксессуары для электроники", krasnodar, 1200);
+    const long = catalogTitle("Аксессуары для электроники", krasnodar, dayFrom(1200));
     expect(long).toBe("Аксессуары для электроники — аренда и прокат в Краснодаре");
     expect(long.length).toBeLessThanOrEqual(CATALOG_TITLE_MAX);
   });
   it("город без падежа — «· Казань», без « ,»", () => {
-    const title = catalogTitle("Дрели", kazan, 500);
+    const title = catalogTitle("Дрели", kazan, dayFrom(500));
     expect(plain(title)).toBe("Дрели — аренда и прокат · Казань, от 500 ₽/сутки");
     expect(title).not.toContain(" ,");
   });
   it("описание из данных: счётчики, раздел строчной, диапазон цен", () => {
     const d = catalogDescription("Экшн-камеры", krasnodar, {
-      listingCount: 12, ownerCount: 5, minPriceDay: 700, maxPriceDay: 1500,
+      listingCount: 12, ownerCount: 5, price: { unit: "day", min: 700, max: 1500 },
     });
     expect(plain(d)).toBe(
       "12 позиций, 5 продавцов: экшн-камеры напрокат в Краснодаре, от 700 ₽ до 1 500 ₽/сутки. Залог, даты и заявка на бронь онлайн.",
@@ -85,15 +87,23 @@ describe("заголовки разделов", () => {
     expect(d.length).toBeLessThanOrEqual(DESCRIPTION_MAX);
   });
   it("одна цена — без «от … до»", () => {
-    const d = catalogDescription("VR", krasnodar, { listingCount: 1, ownerCount: 1, minPriceDay: 1000, maxPriceDay: 1000 });
+    const d = catalogDescription("VR", krasnodar, { listingCount: 1, ownerCount: 1, price: dayFrom(1000) });
     expect(plain(d)).toContain("1 позиция, 1 продавец: VR напрокат в Краснодаре, 1 000 ₽/сутки.");
   });
   it("пустой раздел — описание без чисел", () => {
-    const d = catalogDescription("Коляски", kazan, { listingCount: 0, ownerCount: 0, minPriceDay: null, maxPriceDay: null });
+    const d = catalogDescription("Коляски", kazan, { listingCount: 0, ownerCount: 0, price: null });
     expect(d).toBe("Коляски напрокат · Казань: цены, залоги и календарь занятости. Залог, даты и заявка на бронь онлайн.");
   });
+  // Суточных в разделе нет — цена со своей единицей, а не выдуманная доля.
+  it("раздел без суточных — «от 2 250 ₽/неделя»", () => {
+    const week = { unit: "week" as const, min: 2250, max: 3000 };
+    expect(plain(catalogTitle("Электровелосипеды", krasnodar, week)))
+      .toBe("Электровелосипеды — аренда и прокат в Краснодаре, от 2 250 ₽/неделя");
+    const d = catalogDescription("Электровелосипеды", krasnodar, { listingCount: 3, ownerCount: 2, price: week });
+    expect(plain(d)).toContain("от 2 250 ₽ до 3 000 ₽/неделя.");
+  });
   it("витрина города", () => {
-    expect(plain(cityTitle(krasnodar, 150))).toBe("Аренда и прокат вещей в Краснодаре — от 150 ₽/сутки");
+    expect(plain(cityTitle(krasnodar, dayFrom(150)))).toBe("Аренда и прокат вещей в Краснодаре — от 150 ₽/сутки");
     expect(cityTitle(kazan, null)).toBe("Аренда и прокат вещей · Казань");
   });
 });

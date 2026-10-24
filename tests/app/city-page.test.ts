@@ -27,6 +27,7 @@ beforeEach(() => {
   catalog.getAllCategories.mockResolvedValue([{ id: "K1", parentId: null }, { id: "K2", parentId: "K1" }]);
   catalog.getCategoryStats.mockResolvedValue({
     listingCount: 3, ownerCount: 2, minPriceDay: 150, maxPriceDay: 900, avgDeposit: null,
+    converted: false, price: { unit: "day", min: 150, max: 900 },
   });
   city.getCityScope.mockResolvedValue({ region: false, near: null, cityIds: [krasnodar.id], nearby: false });
 });

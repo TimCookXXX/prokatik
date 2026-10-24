@@ -4,7 +4,7 @@ import { BadgeCheck, ImageOff } from "lucide-react";
 import { listingPhotos, type Listing, type ListingWithOwner } from "@/server/catalog";
 import { formatDeposit, formatHandoverShort, formatPrice } from "@/lib/catalog/format";
 import { listingPath } from "@/lib/catalog/listing-path";
-import { primaryPrice } from "@/lib/catalog/tariff";
+import { minDaysShort, primaryPrice } from "@/lib/catalog/tariff";
 import { content } from "@theme/content";
 import { eachDate, freeQty, type AvailabilityMap } from "@/lib/catalog/availability";
 import { DISTANCE_TITLE, distanceLabel } from "@/lib/geo/distance";
@@ -59,6 +59,7 @@ export function ListingCard({
   const href = hrefQuery ? `${path}?${hrefQuery}` : path;
   // Главная цена с её единицей: у вещи без суточной — «2 250 ₽ в неделю».
   const primary = primaryPrice(listing);
+  const minTerm = listing.minDays > 1 ? minDaysShort(listing.minDays) : null;
   // Сколько единиц свободно на ВСЕ дни периода — минимум по дням: аренде
   // нужна одна и та же вещь с первого дня по последний. Дату «свободно с»
   // карточка не показывает, календарь на самой позиции скажет точнее.
@@ -151,6 +152,15 @@ export function ListingCard({
           <span className={`truncate ${tone}`}>{busy ? "Занято" : "Свободно"}</span>
         </span>
 
+        {/* Минимальный срок на фото — только в узкой сетке, где строке цены
+          * его не вместить (см. строку единицы ниже). Справа сверху: слева
+          * стоит свобода, снизу — продавец. */}
+        {minTerm && !list && (
+          <span className="glass-photo pointer-events-none absolute right-2 top-2 inline-flex items-center rounded-sm px-2 py-0.5 text-micro font-medium sm:hidden">
+            {minTerm}
+          </span>
+        )}
+
         {/* max-w и truncate: длинное имя режется многоточием, а не распирает
           * плашку за край фотографии.
           *
@@ -216,7 +226,11 @@ export function ListingCard({
           * они не помещаются на реальных числах — «3 334 ₽ в сутки · залог
           * 3 242 ₽» переносило залог, и высота карточек в ряду начинала
           * зависеть от длины суммы. Единица остаётся при сумме: «в сутки»
-          * относится к ней, а залог — отдельный факт.
+          * относится к ней, а залог — отдельный факт. Минимальный срок —
+          * в той же строке единицы («в неделю · от 7 дн.»): третьей строки
+          * карточка не получает, и в поиске на пару дней вещь не прячется, а
+          * помечается. В сетке ниже sm строка в ~133 px не вмещает и цену,
+          * и «в неделю · от 7 дн.» — там срок уезжает плашкой на фото.
           * Строка суммы не переносится (flex без wrap), длинная единица
           * обрезается многоточием. */}
         <p className="mt-1 flex items-baseline gap-x-1.5">
@@ -225,6 +239,7 @@ export function ListingCard({
           </span>
           <span className="truncate text-xs text-muted-foreground sm:text-sm">
             {primary ? content.tariff.per[primary.unit] : ""}
+            {minTerm && <span className={list ? undefined : "max-sm:hidden"}> · {minTerm}</span>}
           </span>
         </p>
         <p className="truncate text-xs text-muted-foreground sm:text-sm">

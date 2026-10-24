@@ -75,6 +75,7 @@ beforeEach(() => {
   city.getCityScope.mockImplementation(async (_c: unknown, sp: { loc?: string }) => (sp.loc ? withPoint : noPoint));
   catalog.getCategoryStats.mockResolvedValue({
     listingCount: 4, ownerCount: 2, minPriceDay: 700, maxPriceDay: 1500, avgDeposit: null,
+    converted: false, price: { unit: "day", min: 700, max: 1500 },
   });
 });
 
