@@ -174,6 +174,11 @@
     "width": 682,
     "height": 1200
   },
+  "giylin-gts-1.png": {
+    "key": "seed/giylin-gts-1-1918cc0c.webp",
+    "width": 1680,
+    "height": 1260
+  },
   "grill-charcoal-1.webp": {
     "key": "seed/grill-charcoal-1-712876f2.webp",
     "width": 670,
@@ -199,10 +204,20 @@
     "width": 894,
     "height": 1200
   },
+  "hiper-engine-b54-1.jpg": {
+    "key": "seed/hiper-engine-b54-1-e7e59cd4.webp",
+    "width": 1280,
+    "height": 942
+  },
   "jigsaw-1.webp": {
     "key": "seed/jigsaw-1-04a831c2.webp",
     "width": 902,
     "height": 1216
+  },
+  "k80-1.jpg": {
+    "key": "seed/k80-1-34372bd4.webp",
+    "width": 756,
+    "height": 562
   },
   "kayak-1.webp": {
     "key": "seed/kayak-1-e3433fcc.webp",
@@ -229,6 +244,56 @@
     "width": 1438,
     "height": 1124
   },
+  "kkbike-1.png": {
+    "key": "seed/kkbike-1-4c852d4c.webp",
+    "width": 2000,
+    "height": 2000
+  },
+  "kkbike-2.png": {
+    "key": "seed/kkbike-2-449b7423.webp",
+    "width": 1000,
+    "height": 1000
+  },
+  "kolkhoznik-1.jpg": {
+    "key": "seed/kolkhoznik-1-7492cb99.webp",
+    "width": 800,
+    "height": 721
+  },
+  "kolkhoznik-2.jpg": {
+    "key": "seed/kolkhoznik-2-1c3dc22e.webp",
+    "width": 800,
+    "height": 685
+  },
+  "kolkhoznik-3.jpg": {
+    "key": "seed/kolkhoznik-3-ed68fa6a.webp",
+    "width": 745,
+    "height": 800
+  },
+  "kugoo-kirin-v3-pro-1.jpg": {
+    "key": "seed/kugoo-kirin-v3-pro-1-e68ed38c.webp",
+    "width": 2000,
+    "height": 1788
+  },
+  "kugoo-kirin-v3-pro-2.jpg": {
+    "key": "seed/kugoo-kirin-v3-pro-2-0432afe3.webp",
+    "width": 2048,
+    "height": 1858
+  },
+  "kugoo-kirin-v3-pro-akbike.png": {
+    "key": "seed/kugoo-kirin-v3-pro-akbike-8d77b727.webp",
+    "width": 1000,
+    "height": 1000
+  },
+  "kugoo-kirin-v3-pro-elektrorent.jpg": {
+    "key": "seed/kugoo-kirin-v3-pro-elektrorent-ed867379.webp",
+    "width": 1280,
+    "height": 1109
+  },
+  "kugoo-u5-1.jpg": {
+    "key": "seed/kugoo-u5-1-7c9675e3.webp",
+    "width": 2048,
+    "height": 1554
+  },
   "ladder-1.webp": {
     "key": "seed/ladder-1-6b88f803.webp",
     "width": 672,
@@ -254,6 +319,21 @@
     "width": 680,
     "height": 1218
   },
+  "maikaolin-h10-1.jpg": {
+    "key": "seed/maikaolin-h10-1-417712a4.webp",
+    "width": 1920,
+    "height": 1421
+  },
+  "maikaolin-h12-1.jpg": {
+    "key": "seed/maikaolin-h12-1-65a08817.webp",
+    "width": 1920,
+    "height": 1440
+  },
+  "maikaolin-h8-1.webp": {
+    "key": "seed/maikaolin-h8-1-8553f844.webp",
+    "width": 1000,
+    "height": 1000
+  },
   "marquee-1.webp": {
     "key": "seed/marquee-1-ab33d384.webp",
     "width": 884,
@@ -268,6 +348,11 @@
     "key": "seed/mixer-1-b763b699.webp",
     "width": 686,
     "height": 1218
+  },
+  "monster-gt-v6-pro-1.jpg": {
+    "key": "seed/monster-gt-v6-pro-1-16244620.webp",
+    "width": 446,
+    "height": 493
   },
   "mtb-1.webp": {
     "key": "seed/mtb-1-75c99ab0.webp",
@@ -293,6 +378,11 @@
     "key": "seed/pressure-washer-2-c53ee8b5.webp",
     "width": 660,
     "height": 1212
+  },
+  "qronge-m3-pro-1.png": {
+    "key": "seed/qronge-m3-pro-1-d877ddce.webp",
+    "width": 614,
+    "height": 604
   },
   "sander-1.webp": {
     "key": "seed/sander-1-0f29dcbd.webp",
@@ -368,6 +458,11 @@
     "key": "seed/sup-double-2-cd98937f.webp",
     "width": 792,
     "height": 1214
+  },
+  "syccyba-impulse-5-1.jpg": {
+    "key": "seed/syccyba-impulse-5-1-c21635b0.webp",
+    "width": 1138,
+    "height": 940
   },
   "tent-2-1.webp": {
     "key": "seed/tent-2-1-d91d5306.webp",
