@@ -250,10 +250,18 @@ async function ListingPage({
   // Стартовый выбор по умолчанию — первый свободный день (бронь доступна сразу,
   // без действий пользователя; сегодня может быть занято).
   const horizonDates = Array.from({ length: BOOKING_HORIZON_DAYS + 1 }, (_, i) => addDaysStr(from, i));
-  const firstFree = horizonDates.find((d) => freeQty(listing.quantity, map.get(d)) > 0) ?? from;
+  // С минимальным сроком — первый день, с которого свободен весь минимум, и
+  // диапазон сразу на минимум: from..from+min−1 (ADR 0026). Даты из адреса не
+  // трогаются, даже короче минимума, — виджет скажет об этом сам.
+  const horizon = addDaysStr(from, BOOKING_HORIZON_DAYS);
+  const freeOn = (d: string) => freeQty(listing.quantity, map.get(d)) > 0;
+  const span = (d: string) => Array.from({ length: listing.minDays }, (_, i) => addDaysStr(d, i));
+  const firstFree = horizonDates.find((d) => span(d).every((x) => x <= horizon && freeOn(x)))
+    ?? horizonDates.find(freeOn) ?? from;
+  const defaultTo = addDaysStr(firstFree, listing.minDays - 1);
   const selection = searchParams.from
     ? parsedSelection
-    : { ...parsedSelection, from: firstFree, to: firstFree };
+    : { ...parsedSelection, from: firstFree, to: defaultTo > horizon ? horizon : defaultTo };
 
   // Показ чужого объявления — событие своей статистики и плитки «просмотров
   // за неделю» в кабинете владельца. Пишет его роут сбора по маяку после
@@ -420,6 +428,7 @@ async function ListingPage({
             availability={availabilityRecord}
             quantity={listing.quantity}
             tariff={tariff}
+            minDays={listing.minDays}
             depositType={listing.depositType}
             depositAmount={listing.depositAmount}
             handoverPickup={listing.handoverPickup}

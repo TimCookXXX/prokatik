@@ -20,7 +20,7 @@ import { BookingCalendar } from "@/components/booking/BookingCalendar";
 import {
   buildBookingQuery, mergeBookingQuery, rentalDaysCount, type BookingSelection,
 } from "@/lib/booking/params";
-import { pickRange } from "@/lib/booking/range-pick";
+import { extendToMin, pickRange } from "@/lib/booking/range-pick";
 import { unavailableDates, type DayLoad } from "@/lib/catalog/availability";
 import { field } from "@/components/ui/field";
 import { formatDayMonth } from "@/lib/catalog/dates";
@@ -30,7 +30,7 @@ import {
 import { HandoverIcon } from "@/components/catalog/HandoverIcon";
 import { content } from "@theme/content";
 import {
-  formatUnitPriceSlash, primaryPrice, quote, type Tariff,
+  daysLabel, formatUnitPriceSlash, primaryPrice, quote, type Tariff,
 } from "@/lib/catalog/tariff";
 import { track } from "@/components/analytics/track";
 
@@ -49,6 +49,8 @@ export interface BookingWidgetProps {
   quantity: number;
   /** Цены за сутки, неделю и месяц; сумму за срок считает quote. */
   tariff: Tariff;
+  /** Минимальный срок аренды, дней (ADR 0026). */
+  minDays: number;
   /* Залог исходными данными, а не готовой строкой. Строкой он сюда и
    * приезжал — и разбирался обратно регуляркой, потому что плитке нужно
    * значение без слова «залог». Форматирование живёт в lib/catalog/format,
@@ -85,14 +87,22 @@ export function BookingWidget(props: BookingWidgetProps) {
   // Дефолтная дата ведёт себя как «Забрать»: первый клик расширяет её в диапазон.
   // Дальше — обычный цикл pickRange, общий с полем «Когда» в поиске:
   // клик → новый «Забрать», ещё клик → «Вернуть».
+  //
+  // Минимальный срок: замкнутый диапазон короче него растягивается вперёд, и
+  // подсказка над календарём называет новую дату возврата. Отказывать на клик
+  // молча нельзя — выглядело бы поломкой календаря.
   const [touched, setTouched] = useState(false);
+  const [extendedTo, setExtendedTo] = useState<string | null>(null);
   const onDayPick = (day: string) => {
-    setSel((cur) => {
-      const next = pickRange(touched ? cur : { from: cur.from, to: null }, day);
-      return { ...cur, from: next.from, to: next.to ?? "" };
-    });
+    const picked = pickRange(touched ? sel : { from: sel.from, to: null }, day);
+    const next = extendToMin(picked, props.minDays, props.maxDate);
+    setSel((cur) => ({ ...cur, from: next.from, to: next.to ?? "" }));
+    setExtendedTo(next.extended ? next.to : null);
     if (!touched) setTouched(true);
   };
+  // Следующий клик замкнёт диапазон: начало есть, конца нет — или стоит
+  // стартовый выбор страницы, первый клик по которому выбирает «Вернуть».
+  const pickingEnd = Boolean(sel.from) && (!sel.to || !touched);
 
   // Адрес страницы с текущим выбором. Собирается из живого location.search, а
   // не с нуля: виджет не знает чужих параметров и не должен их стирать.
@@ -121,11 +131,15 @@ export function BookingWidget(props: BookingWidgetProps) {
   const [callbackUrl, setCallbackUrl] = useState(props.pathname);
 
   const days = hasComplete ? rentalDaysCount(sel) : 0;
+  // Диапазон короче минимума бывает только пришедшим извне — из «Когда» в
+  // поиске: свой выбор виджет растягивает сам. Сдвигать его молча нельзя (это
+  // даты, которые человек выбрал), поэтому — подсказка и неактивная бронь.
+  const tooShort = hasComplete && days < props.minDays;
   const estimate = useMemo(() => {
     if (!hasComplete) return null;
-    const q = quote(props.tariff, days, sel.qty);
+    const q = quote({ ...props.tariff, minDays: props.minDays }, days, sel.qty);
     return q.ok ? q.total : null;
-  }, [props.tariff, hasComplete, days, sel.qty]);
+  }, [props.tariff, props.minDays, hasComplete, days, sel.qty]);
   const primary = primaryPrice(props.tariff);
 
   // Дни выбранного диапазона, где не набирается qty свободных единиц.
@@ -135,7 +149,7 @@ export function BookingWidget(props: BookingWidgetProps) {
     return unavailableDates(props.quantity, map, sel.from, sel.to, sel.qty);
   }, [props.availability, props.quantity, sel, hasComplete]);
   const hasConflict = conflicts.length > 0;
-  const bookDisabled = !hasComplete || hasConflict;
+  const bookDisabled = !hasComplete || hasConflict || tooShort;
 
   // Календарь занятости — на самой странице, в виджете. Кнопка полосы на мобиле
   // ведёт к нему, пока бронировать нечего: второй календарь в шторке спорил бы
@@ -184,7 +198,7 @@ export function BookingWidget(props: BookingWidgetProps) {
   // или они заняты, она ведёт к календарю; бронирует — когда есть что.
   const barAction = !hasComplete
     ? <Button className="shrink-0" onClick={toCalendar}>{t.pickDates}</Button>
-    : hasConflict
+    : hasConflict || tooShort
       ? <Button className="shrink-0" onClick={toCalendar}>{t.changeDates}</Button>
       : <Button className="shrink-0" onClick={onBook}>{t.book}</Button>;
 
@@ -200,8 +214,27 @@ export function BookingWidget(props: BookingWidgetProps) {
 
   const clearDates = () => {
     setSel((cur) => ({ ...cur, from: "", to: "" }));
+    setExtendedTo(null);
     setTouched(true);
   };
+
+  // Минимальный срок — над календарём, заметно: курьерский велосипед на пару
+  // дней не сдают, и узнать это стоит до выбора дат, а не после отказа.
+  // Владельцу тоже показывается: он видит карточку глазами арендатора.
+  const minTermHint = props.minDays > 1 ? (
+    <p
+      role="status"
+      className={`mb-3 rounded-lg border bg-accent/10 px-3 py-2 text-sm ${
+        tooShort ? "border-accent" : "border-accent/40"
+      }`}
+    >
+      <span className="font-semibold">{t.minTerm(daysLabel(props.minDays))}</span>
+      {tooShort && !props.isOwn && <> {t.minTermShort}</>}
+      {!tooShort && extendedTo && sel.to === extendedTo && (
+        <> {t.minTermExtended(formatDayMonth(extendedTo))}</>
+      )}
+    </p>
+  ) : null;
 
   // Цена и залог — блоками внизу (как у Hygglo). Значения — уже строки.
   // Залог «без залога» тоже показывается — это ответ на вопрос, а не его
@@ -220,7 +253,10 @@ export function BookingWidget(props: BookingWidgetProps) {
         aria-label={t.calendar}
         className="surface scroll-mt-[calc(var(--header-total)+0.75rem)] p-4 focus-visible:[outline:none] focus-visible:ring-2 focus-visible:ring-ring sm:p-5"
       >
+        {minTermHint}
         <BookingCalendar
+          minDays={props.minDays}
+          pickingEnd={pickingEnd}
           from={sel.from}
           to={sel.to}
           onDayPick={onDayPick}

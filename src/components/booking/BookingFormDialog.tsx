@@ -17,7 +17,8 @@ import { field } from "@/components/ui/field";
 import { WEBVISOR_NO_KEYS } from "@/components/analytics/webvisor";
 import { formatDayMonth } from "@/lib/catalog/dates";
 import { formatPrice } from "@/lib/catalog/format";
-import { quote, type Tariff } from "@/lib/catalog/tariff";
+import { daysLabel, quote, type Tariff } from "@/lib/catalog/tariff";
+import { content } from "@theme/content";
 import { reachGoal } from "@/components/analytics/goals";
 
 function humanError(code: string): string {
@@ -35,6 +36,10 @@ function humanError(code: string): string {
   }
   if (code === "price_stale") {
     return "Пока форма была открыта, владелец изменил цену — обновите страницу.";
+  }
+  if (code.startsWith("min_days:")) {
+    const n = Number(code.split(":")[1]);
+    if (Number.isInteger(n) && n > 1) return content.booking.minDaysError(daysLabel(n));
   }
   if (code === "dates_stale") {
     return "Пока форма была открыта, начался новый день — обновите страницу и выберите даты заново.";

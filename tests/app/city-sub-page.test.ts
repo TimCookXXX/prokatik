@@ -57,7 +57,7 @@ beforeEach(() => {
   catalog.getCityById.mockImplementation(async (id: string) => cities.find((c) => c.id === id) ?? null);
   catalog.getActiveListingById.mockResolvedValue({
     id: LISTING_ID, slug: "drill", title: "Дрель", cityId: krasnodar.id, categoryId: "K1",
-    ownerUserId: "U1", status: "active", priceDay: 500, description: null,
+    ownerUserId: "U1", status: "active", priceDay: 500, priceWeek: null, priceMonth: null, minDays: 1, description: null,
   });
   catalog.getCategoryById.mockResolvedValue({ id: "K1", slug: "tools", parentId: null, name: "Инструменты" });
   catalog.getSellerById.mockResolvedValue({ id: "U1", name: "Полина", bannedAt: null });
@@ -78,7 +78,7 @@ describe("/{city}/{cat}/{slug}-{id} under a former city", () => {
     catalog.getCityById.mockResolvedValue(null);
     catalog.getActiveListingById.mockResolvedValue({
       id: LISTING_ID, slug: "drill", title: "Дрель", cityId: "C-OFF", categoryId: "K1",
-      ownerUserId: "U1", status: "active", priceDay: 500, description: null,
+      ownerUserId: "U1", status: "active", priceDay: 500, priceWeek: null, priceMonth: null, minDays: 1, description: null,
     });
     await expect(CitySubPage(props("yablonovskiy"))).rejects.toThrow("NEXT_NOT_FOUND");
   });
@@ -134,7 +134,7 @@ describe("listing in a subcategory", () => {
     city.getCityScope.mockResolvedValue({ region: false, near: null, cityIds: [krasnodar.id], nearby: false });
     catalog.getActiveListingById.mockResolvedValue({
       id: LISTING_ID, slug: "gopro", title: "GoPro", cityId: krasnodar.id, categoryId: "K2",
-      ownerUserId: "U1", status: "active", priceDay: 700, description: null, quantity: 1,
+      ownerUserId: "U1", status: "active", priceDay: 700, priceWeek: null, priceMonth: null, minDays: 1, description: null, quantity: 1,
       depositType: "none", depositAmount: null, handoverPickup: true, handoverDelivery: false,
     });
     catalog.getCategoryById.mockImplementation(async (id: string) => [root, sub].find((c) => c.id === id) ?? null);
@@ -193,7 +193,7 @@ describe("listing in a subcategory", () => {
   it("вещь прямо в корне — одна крошка раздела", async () => {
     catalog.getActiveListingById.mockResolvedValue({
       id: LISTING_ID, slug: "gopro", title: "GoPro", cityId: krasnodar.id, categoryId: "K1",
-      ownerUserId: "U1", status: "active", priceDay: 700, description: null, quantity: 1,
+      ownerUserId: "U1", status: "active", priceDay: 700, priceWeek: null, priceMonth: null, minDays: 1, description: null, quantity: 1,
       depositType: "none", depositAmount: null, handoverPickup: true, handoverDelivery: false,
     });
     const el = await CitySubPage({
@@ -215,7 +215,7 @@ describe("listing metadata and share", () => {
   const plain = (v: unknown) => JSON.parse(JSON.stringify(v).replace(/\u00a0/g, " "));
   const listing = {
     id: LISTING_ID, slug: "drill", title: "Дрель", cityId: krasnodar.id, categoryId: "K1",
-    ownerUserId: "U1", status: "active", priceDay: 500, quantity: 1,
+    ownerUserId: "U1", status: "active", priceDay: 500, priceWeek: null, priceMonth: null, minDays: 1, quantity: 1,
     description: "Ударная,  с кейсом.", depositType: "money", depositAmount: 3000,
     handoverPickup: true, handoverDelivery: true,
   };
@@ -321,6 +321,33 @@ describe("/{city}/{cat}/{slug}-{id}: событие view_listing", () => {
     expect(find(tree, TrackOnMount)).toEqual([]);
     const widget = find(tree, (await import("@/components/booking/BookingWidget")).BookingWidget)[0];
     expect(widget.props.trackToken).toBeUndefined();
+  });
+
+  // Минимальный срок: стартовый выбор сразу на минимум, а короткие даты из
+  // адреса не двигаются — их покажет виджет подсказкой.
+  it("стартовый выбор — from..from+min−1, даты из адреса как есть", async () => {
+    const { todayStr, addDaysStr } = await import("@/lib/catalog/dates");
+    const Widget = (await import("@/components/booking/BookingWidget")).BookingWidget;
+    catalog.getActiveListingById.mockResolvedValueOnce({
+      id: LISTING_ID, slug: "drill", title: "Дрель", cityId: krasnodar.id, categoryId: "K1",
+      ownerUserId: "U1", status: "active", priceDay: null, priceWeek: 2250, priceMonth: null, minDays: 7,
+      quantity: 1, description: null, depositType: "none", depositAmount: null,
+      handoverPickup: true, handoverDelivery: false,
+    });
+    const widget = find(await listingTree(), Widget)[0];
+    const today = todayStr();
+    expect(widget.props.initial).toEqual({ from: today, to: addDaysStr(today, 6), qty: 1 });
+    expect(widget.props.minDays).toBe(7);
+
+    catalog.getActiveListingById.mockResolvedValueOnce({
+      id: LISTING_ID, slug: "drill", title: "Дрель", cityId: krasnodar.id, categoryId: "K1",
+      ownerUserId: "U1", status: "active", priceDay: null, priceWeek: 2250, priceMonth: null, minDays: 7,
+      quantity: 1, description: null, depositType: "none", depositAmount: null,
+      handoverPickup: true, handoverDelivery: false,
+    });
+    const from = addDaysStr(today, 3);
+    const short = find(await listingTree({ from, to: addDaysStr(today, 4) }), Widget)[0];
+    expect(short.props.initial).toEqual({ from, to: addDaysStr(today, 4), qty: 1 });
   });
 
   // Прежняя запись events.view_listing при каждом рендере считала ботов,

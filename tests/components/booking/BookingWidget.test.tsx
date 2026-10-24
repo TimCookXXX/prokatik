@@ -35,6 +35,7 @@ const base = {
   availability: {},
   quantity: 1,
   tariff: { priceDay: 500, priceWeek: null, priceMonth: null },
+  minDays: 1,
   depositType: "none" as const,
   depositAmount: null,
   sellerName: "Артём",
@@ -243,5 +244,69 @@ describe("BookingWidget — кнопка нижней панели", () => {
     expect(bar()).toHaveClass("fixed", "inset-x-0", "bottom-0", "bg-card", "border-t");
     expect(bar().className).toContain("pb-[env(safe-area-inset-bottom)]");
     expect(bar().querySelector(".glass")).toBeNull();
+  });
+});
+
+describe("BookingWidget — минимальный срок", () => {
+  const dayBtn = (d: string) => document.querySelector<HTMLButtonElement>(`[data-day="${d}"] button`)!;
+  const weekly = {
+    ...base,
+    tariff: { priceDay: null, priceWeek: 2250, priceMonth: null },
+    minDays: 7,
+    initial: { from: "2026-09-04", to: "2026-09-10", qty: 1 },
+    handoverPickup: true,
+    handoverDelivery: false,
+  };
+  const hint = () => screen.getByText(/Минимальный срок —/).closest("p")!;
+  const flat = (s: string | null | undefined) => (s ?? "").replace(/[  ]/g, " ");
+
+  it("над календарём — минимальный срок, сумма за минимум — по неделе", () => {
+    window.history.replaceState(null, "", base.pathname);
+    render(<BookingWidget {...weekly} />);
+    expect(hint()).toHaveTextContent("Минимальный срок — 7 дней");
+    expect(flat(document.body.textContent)).toContain("2 250 ₽за 7 дн.");
+    expect(screen.getAllByRole("button", { name: "Забронировать" })[0]!).toBeEnabled();
+  });
+
+  // Короткий выбор не отклоняется молча: «Вернуть» сдвигается на минимум, и
+  // подсказка называет новую дату.
+  it("слишком короткий выбор растягивается до минимума с подсказкой", () => {
+    window.history.replaceState(null, "", base.pathname);
+    render(<BookingWidget {...weekly} />);
+    fireEvent.click(screen.getByRole("button", { name: "Очистить даты" }));
+    fireEvent.click(dayBtn("2026-09-12"));
+    // Пока ждём «Вернуть», дни ближе минимума помечены, но не отключены.
+    expect(dayBtn("2026-09-14").closest("[data-day]")).toHaveClass("rdp-short");
+    expect(dayBtn("2026-09-14")).toBeEnabled();
+    fireEvent.click(dayBtn("2026-09-14"));
+    expect(new URLSearchParams(window.location.search).get("to")).toBe("2026-09-18");
+    expect(hint()).toHaveTextContent("Дата возврата сдвинута на 18 сентября.");
+    expect(screen.getAllByRole("button", { name: "Забронировать" })[0]!).toBeEnabled();
+  });
+
+  // Даты пришли из «Когда» в поиске короче минимума: виджет их не двигает —
+  // это выбор человека, — но и бронировать не даёт.
+  it("короткий диапазон из поиска — подсказка и неактивная бронь", () => {
+    window.history.replaceState(null, "", `${base.pathname}?from=2026-09-04&to=2026-09-06`);
+    render(<BookingWidget {...weekly} initial={{ from: "2026-09-04", to: "2026-09-06", qty: 1 }} />);
+    expect(hint()).toHaveTextContent("Выбранные даты короче — выберите даты длиннее.");
+    expect(screen.getAllByRole("button", { name: "Забронировать" })[0]!).toBeDisabled();
+    const bar = document.querySelector<HTMLElement>("[data-booking-bar]")!;
+    expect(within(bar).getByRole("button")).toHaveTextContent("Изменить даты");
+  });
+
+  // Начать аренду позже, чем минимум помещается до горизонта, нельзя.
+  it("старт позже горизонта минус минимум отключён", () => {
+    window.history.replaceState(null, "", base.pathname);
+    render(<BookingWidget {...weekly} today="2026-09-04" maxDate="2026-09-30" />);
+    fireEvent.click(screen.getByRole("button", { name: "Очистить даты" }));
+    expect(dayBtn("2026-09-24")).toBeEnabled();
+    expect(dayBtn("2026-09-25")).toBeDisabled();
+  });
+
+  it("без минимума подсказки нет", () => {
+    window.history.replaceState(null, "", base.pathname);
+    render(<BookingWidget {...base} handoverPickup handoverDelivery={false} />);
+    expect(screen.queryByText(/Минимальный срок/)).toBeNull();
   });
 });

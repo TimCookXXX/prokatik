@@ -37,7 +37,7 @@ vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("@/server/booking-mail", () => ({ queueBookingMail: vi.fn() }));
 
 import { createBookingRequest } from "@/server/actions/booking";
-import { todayStr } from "@/lib/catalog/dates";
+import { addDaysStr, todayStr } from "@/lib/catalog/dates";
 
 const TODAY = todayStr();
 
@@ -108,6 +108,25 @@ describe("createBookingRequest: устаревшая цена", () => {
     expect(r).toEqual({ ok: false, error: "price_stale" });
     const same = await createBookingRequest({ ...form(TODAY, TODAY), priceWeek: "", priceMonth: "" });
     expect(same).not.toEqual({ ok: false, error: "price_stale" });
+  });
+
+  // Минимальный срок держит сервер: экшен доступен по сети мимо календаря.
+  it("срок короче минимального — min_days с числом, заявка не создаётся", async () => {
+    listingLimit.mockResolvedValue([{
+      listing: {
+        id: "l1", ownerUserId: "u2", status: "active", quantity: 1,
+        priceDay: null, priceWeek: 2250, priceMonth: null, minDays: 7,
+        depositType: "money", depositAmount: 2000,
+      },
+      ownerBannedAt: null,
+    }]);
+    const base = { ...form(TODAY, TODAY), priceDay: "", priceWeek: "2250", priceMonth: "" };
+    expect(await createBookingRequest({ ...base, to: addDaysStr(TODAY, 2) }))
+      .toEqual({ ok: false, error: "min_days:7" });
+    expect(transaction).not.toHaveBeenCalled();
+    // Ровно семь суток включительно — проходит дальше, до занятости и записи.
+    const r = await createBookingRequest({ ...base, to: addDaysStr(TODAY, 6) });
+    expect(r).not.toEqual({ ok: false, error: "min_days:7" });
   });
 
   it("цену из запроса не берёт на веру", async () => {

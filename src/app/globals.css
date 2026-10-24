@@ -804,6 +804,14 @@ html:has([data-hero-search]) [data-header-search][data-hero-pending]:not(:focus-
   border: 1px dashed var(--color-border);
   border-radius: var(--radius-sm);
 }
+/* Короче минимального срока: выбор такого дня концом аренды растянет её до
+ * минимума. Дни не отключены — нажать можно, — поэтому не серые, а с
+ * пунктиром снизу: «можно, но будет дольше». */
+.rdp-theme .rdp-short:not(.rdp-selected) .rdp-day_button {
+  color: var(--color-muted-fg);
+  text-decoration: underline dotted;
+  text-underline-offset: 4px;
+}
 /* Прошедшие дни — приглушённое зачёркивание (не красное, как «занято»). */
 .rdp-theme .rdp-past .rdp-day_button {
   text-decoration: line-through;

@@ -29,6 +29,7 @@ const base = {
   availability: {},
   quantity: 1,
   tariff: { priceDay: 500, priceWeek: null, priceMonth: null },
+  minDays: 1,
   depositType: "none" as const,
   depositAmount: null,
   sellerName: "Артём",
@@ -87,6 +88,15 @@ describe("цель booking_sent", () => {
     fireEvent.submit(form());
     await screen.findByText("Заявка отправлена");
     expect(goals("booking_sent")).toEqual([["booking_sent"]]);
+  });
+
+  // Отказ по минимальному сроку называет минимум словами, а не кодом.
+  it("min_days — понятный текст с числом", async () => {
+    createBookingRequest.mockResolvedValue({ ok: false, error: "min_days:7" });
+    dialog();
+    fireEvent.submit(form());
+    expect(await screen.findByRole("alert"))
+      .toHaveTextContent("Минимальный срок аренды — 7 дней. Выберите даты длиннее.");
   });
 
   it("отказ сервера — цели нет", async () => {

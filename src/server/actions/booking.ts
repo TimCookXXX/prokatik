@@ -21,7 +21,7 @@ import { auth } from "@/lib/auth";
 import { newId } from "@/lib/id";
 import { checkLimit } from "@/lib/rate-limit";
 import { bookingFormSchema } from "@/lib/booking/validation";
-import { isSelectionShifted, parseBookingParams } from "@/lib/booking/params";
+import { isSelectionShifted, parseBookingParams, rentalDaysCount } from "@/lib/booking/params";
 import { unavailableDates, type AvailabilityMap } from "@/lib/catalog/availability";
 import { isPubliclyVisible } from "@/lib/catalog/visibility";
 import { canTransition, availabilityDelta } from "@/lib/catalog/booking-status";
@@ -115,6 +115,12 @@ export async function createBookingRequest(
     [form.priceMonth, listing.priceMonth],
   ] as const).some(([seen, now]) => seen !== undefined && seen !== now);
   if (priceShifted) return { ok: false, error: "price_stale" };
+
+  // Минимальный срок — после клампа: проверяются ровно те даты, что уйдут в
+  // заявку. Свой код с числом, чтобы диалог назвал минимум словами.
+  if (rentalDaysCount(sel) < listing.minDays) {
+    return { ok: false, error: `min_days:${listing.minDays}` };
+  }
 
   const availRows = await db.select().from(availability).where(and(
     eq(availability.listingId, listing.id),
