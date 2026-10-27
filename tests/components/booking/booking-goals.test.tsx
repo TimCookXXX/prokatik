@@ -242,8 +242,63 @@ describe("запасная форма", () => {
     expect(submitLeadForm).toHaveBeenCalledWith(expect.objectContaining({
       listingId: base.listingId, from: "2026-09-04", to: "2026-09-04", qty: "1",
       priceDay: "500", priceWeek: "", priceMonth: "",
-      name: "Тимур", phone: "+7 900 123-45-67", website: "",
+      name: "Тимур", phone: "+7 (900) 123-45-67", website: "",
     }));
+  });
+
+  it("телефон форматируется маской по мере ввода", () => {
+    dialog();
+    const phone = screen.getByLabelText("Телефон") as HTMLInputElement;
+    fireEvent.change(phone, { target: { value: "8" } });
+    expect(phone.value).toBe("+7");
+    fireEvent.change(phone, { target: { value: "+79001" } });
+    expect(phone.value).toBe("+7 (900) 1");
+    fireEvent.change(phone, { target: { value: "8 900 123 45 67" } });
+    expect(phone.value).toBe("+7 (900) 123-45-67");
+  });
+
+  it("правка в середине — каретка остаётся у правленой цифры", () => {
+    dialog();
+    const phone = screen.getByLabelText("Телефон") as HTMLInputElement;
+    fireEvent.change(phone, { target: { value: "+7 (900) 123-45-6" } });
+    phone.focus();
+    // Вписали 9 после «1»: «+7 (900) 19|23-45-6».
+    fireEvent.change(phone, { target: { value: "+7 (900) 1923-45-6", selectionStart: 11, selectionEnd: 11 } });
+    expect(phone.value).toBe("+7 (900) 192-34-56");
+    expect(phone.selectionStart).toBe(11);
+  });
+
+  it("неполный номер не уходит на сервер, подсказка — до следующей правки", async () => {
+    dialog();
+    fireEvent.change(screen.getByLabelText("Имя"), { target: { value: "Тимур" } });
+    const phone = screen.getByLabelText("Телефон");
+    fireEvent.change(phone, { target: { value: "+7 900 123" } });
+    fireEvent.submit(form());
+    expect(await screen.findByRole("alert")).toHaveTextContent("Укажите номер полностью");
+    expect(phone).toHaveAttribute("aria-invalid", "true");
+    expect(submitLeadForm).not.toHaveBeenCalled();
+    fireEvent.change(phone, { target: { value: "+7 (900) 1234" } });
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("нецифра в середине — значение то же, каретка не уезжает в конец", () => {
+    dialog();
+    const phone = screen.getByLabelText("Телефон") as HTMLInputElement;
+    fireEvent.change(phone, { target: { value: "+7 (900) 123-45-67" } });
+    phone.focus();
+    fireEvent.change(phone, { target: { value: "+7 (900) 12 3-45-67", selectionStart: 12, selectionEnd: 12 } });
+    expect(phone.value).toBe("+7 (900) 123-45-67");
+    expect(phone.selectionStart).toBe(11);
+  });
+
+  it("правка телефона не стирает ошибку сервера", async () => {
+    submitLeadForm.mockResolvedValue({ ok: false, error: "dates_taken:2026-09-04" });
+    dialog();
+    fill();
+    fireEvent.submit(form());
+    await screen.findByRole("alert");
+    fireEvent.change(screen.getByLabelText("Телефон"), { target: { value: "+7 (900) 123-45-6" } });
+    expect(screen.getByRole("alert")).toHaveTextContent("Выбранные даты уже заняты");
   });
 
   it("отказ — текст по коду, как у заявки из кабинета, и цели нет", async () => {

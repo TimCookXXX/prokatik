@@ -6,7 +6,7 @@
 // (leadReply, по времени суток) и цель booking_sent; код заявки человеку не
 // показывается.
 
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { Modal, ModalContent, ModalDescription, ModalTitle } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/button";
 import { submitLeadForm } from "@/server/actions/lead";
@@ -21,6 +21,7 @@ import { content } from "@theme/content";
 import { humanError } from "@/components/booking/booking-errors";
 import { attribution, selectionFields } from "@/components/booking/lead-client";
 import { leadReply } from "@/lib/leads/reply";
+import { applyPhoneEdit, isCompletePhone } from "@/lib/booking/phone-mask";
 
 const t = content.booking;
 const f = content.booking.leadForm;
@@ -41,6 +42,22 @@ export function LeadFormDialog({
   const [error, setError] = useState<string | null>(null);
   const [code, setCode] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  // Маска «+7 (900) 123-45-67». Значение и каретка ставятся в поле сразу: React
+  // увидит в DOM то же значение и каретку не тронет. Через эффект нельзя — если
+  // значение не изменилось (набрали нецифру), ре-рендера нет, и React вернёт
+  // прежнее значение с кареткой в конце.
+  const phoneRef = useRef<HTMLInputElement>(null);
+  const onPhone = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const input = e.target;
+    const inputType = (e.nativeEvent as InputEvent).inputType ?? "";
+    const next = applyPhoneEdit(phone, input.value, input.selectionStart ?? input.value.length, inputType);
+    input.value = next.value;
+    if (document.activeElement === input) input.setSelectionRange(next.caret, next.caret);
+    setPhone(next.value);
+    // Сбрасывается только подсказка про номер: «даты заняты» правка телефона не лечит.
+    if (error === f.phoneInvalid) setError(null);
+  };
+  const phoneInvalid = error === f.phoneInvalid;
 
   const days = rentalDaysCount(sel);
   const q = quote({ ...tariff, minDays }, days, sel.qty);
@@ -61,6 +78,12 @@ export function LeadFormDialog({
   const submit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const website = new FormData(e.currentTarget).get("website")?.toString() ?? "";
+    // Неполный номер на сервер не уходит: заявку с ним не передать прокату.
+    if (!isCompletePhone(phone)) {
+      setError(f.phoneInvalid);
+      phoneRef.current?.focus();
+      return;
+    }
     setError(null);
     startTransition(async () => {
       const r = await submitLeadForm({
@@ -110,9 +133,11 @@ export function LeadFormDialog({
               <label className="flex flex-col gap-1 text-sm">
                 {f.phone}
                 <input
+                  ref={phoneRef}
                   type="tel" required value={phone} autoComplete="tel" inputMode="tel"
-                  onChange={(e) => setPhone(e.target.value)}
-                  placeholder="+7 900 000-00-00"
+                  onChange={onPhone}
+                  placeholder={f.phonePlaceholder}
+                  aria-invalid={phoneInvalid || undefined}
                   className={`${field} h-11 px-3`}
                 />
               </label>
