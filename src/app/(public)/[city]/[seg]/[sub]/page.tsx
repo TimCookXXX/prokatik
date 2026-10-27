@@ -234,6 +234,9 @@ async function ListingPage({
   const initialPhone = session?.user?.id ? (await getUserPhone(session.user.id)) ?? "" : "";
   const env = getEnv();
   const authProps = authPanelProps();
+  // Бронь через бота (ADR 0028): флаг и имя бота — пропами, без NEXT_PUBLIC_*,
+  // страница и так динамическая. env.ts не пускает telegram без группы TELEGRAM_*.
+  const viaBot = env.BOOKING_FLOW === "telegram" && Boolean(env.TELEGRAM_BOT_USERNAME);
   // Расстояние до вещи от точки «Где» из адреса — считает SQL, точка
   // объявления в страницу не попадает.
   const { near } = await getCityScope(city, searchParams);
@@ -388,7 +391,11 @@ async function ListingPage({
                 </li>
                 <li className="flex gap-2.5">
                   <CircleCheck className="mt-0.5 h-4 w-4 shrink-0 text-accent" aria-hidden="true" />
-                  <span>Заявка на бронь ни к чему не обязывает. Даты займутся только после подтверждения владельцем.</span>
+                  <span>
+                    {viaBot
+                      ? `Заявка на бронь ни к чему не обязывает. ${content.booking.holdNote}.`
+                      : "Заявка на бронь ни к чему не обязывает. Даты займутся только после подтверждения владельцем."}
+                  </span>
                 </li>
                 <li className="flex gap-2.5">
                   <CircleCheck className="mt-0.5 h-4 w-4 shrink-0 text-accent" aria-hidden="true" />
@@ -439,6 +446,8 @@ async function ListingPage({
             isOwn={isOwn}
             authProps={authProps}
             trackToken={trackToken}
+            bookingFlow={viaBot ? "telegram" : "auth"}
+            botUsername={viaBot ? env.TELEGRAM_BOT_USERNAME : undefined}
           />
         </aside>
       </div>

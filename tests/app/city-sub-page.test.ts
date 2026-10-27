@@ -315,6 +315,27 @@ describe("/{city}/{cat}/{slug}-{id}: событие view_listing", () => {
     expect(widget.props.trackToken).toBe(shown.props.token);
   });
 
+  // BOOKING_FLOW=telegram (ADR 0028): флаг и имя бота — пропами виджета, без
+  // NEXT_PUBLIC_*. По умолчанию — прежняя бронь через вход.
+  it("бронь через бота — по флагу окружения; по умолчанию через вход", async () => {
+    const Widget = (await import("@/components/booking/BookingWidget")).BookingWidget;
+    const { _resetEnvCacheForTests } = await import("@/lib/env");
+    const { enableTelegramEnv } = await import("../fixtures/leads");
+    _resetEnvCacheForTests();
+    expect(find(await listingTree(), Widget)[0].props).toMatchObject({ bookingFlow: "auth", botUsername: undefined });
+
+    const disable = enableTelegramEnv();
+    process.env.BOOKING_FLOW = "telegram";
+    _resetEnvCacheForTests();
+    try {
+      expect(find(await listingTree(), Widget)[0].props).toMatchObject({ bookingFlow: "telegram", botUsername: "test_bot" });
+    } finally {
+      delete process.env.BOOKING_FLOW;
+      disable();
+      _resetEnvCacheForTests();
+    }
+  });
+
   it("владельцу на своём объявлении — нет ни события, ни токена у брони", async () => {
     vi.mocked(auth).mockResolvedValueOnce({ user: { id: "U1", role: "user", bannedAt: null } } as never);
     const tree = await listingTree();

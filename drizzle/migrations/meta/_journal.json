@@ -169,6 +169,13 @@
       "when": 1792839229881,
       "tag": "0023_listing_tariffs",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1793132633417,
+      "tag": "0024_booking_leads",
+      "breakpoints": true
     }
   ]
 }

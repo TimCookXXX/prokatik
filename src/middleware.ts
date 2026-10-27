@@ -116,6 +116,10 @@ export const config = {
     // (/api/geo/client-index, public и immutable) — ответы, которые можно
     // положить в общий кэш. Set-Cookie: vid на них общий кэш раздал бы многим
     // браузерам, и разные люди стали бы одним гостем.
-    "/((?!_next/static|_next/image|favicon\\.ico|icon\\.svg|apple-icon\\.png|opengraph-image|icons/.*|manifest\\.webmanifest|covers/|demo/|mock/|api/geo/client-index).*)",
+    //
+    // Вебхук бота (/api/telegram/) и маяк черновика заявки (/api/leads/) куку
+    // vid не выдают и не продлевают: Telegram она ни к чему, а маяк её только
+    // читает — выдать id браузеру, который его ещё не получил, тут незачем.
+    "/((?!_next/static|_next/image|favicon\\.ico|icon\\.svg|apple-icon\\.png|opengraph-image|icons/.*|manifest\\.webmanifest|covers/|demo/|mock/|api/geo/client-index|api/telegram/|api/leads/).*)",
   ],
 };

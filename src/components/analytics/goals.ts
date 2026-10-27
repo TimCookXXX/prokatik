@@ -29,7 +29,12 @@ const GOAL_PARAMS = {
   booking_click: { authed: [true, false] },
   /** Аккаунт создан только что: почтой, Яндексом или VK. */
   signup: { method: SIGNUP_METHODS },
-  /** Заявка на бронь отправлена. */
+  /** Клик по «Забронировать в Telegram» (BOOKING_FLOW=telegram). Отправку в боте видит только сервер. */
+  tg_booking_click: {},
+  /**
+   * Заявка с сайта отправлена: из кабинета при BOOKING_FLOW=auth, запасной
+   * формой «Имя + телефон» при telegram. Смысл меняется с включения флага.
+   */
   booking_sent: {},
   /** Первое сообщение владельцу — новая переписка. */
   chat_started: {},

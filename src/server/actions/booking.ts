@@ -21,9 +21,6 @@ import { auth } from "@/lib/auth";
 import { newId } from "@/lib/id";
 import { checkLimit } from "@/lib/rate-limit";
 import { bookingFormSchema } from "@/lib/booking/validation";
-import { isSelectionShifted, parseBookingParams, rentalDaysCount } from "@/lib/booking/params";
-import { unavailableDates, type AvailabilityMap } from "@/lib/catalog/availability";
-import { isPubliclyVisible } from "@/lib/catalog/visibility";
 import { canTransition, availabilityDelta } from "@/lib/catalog/booking-status";
 import { todayStr } from "@/lib/catalog/dates";
 import { notify } from "@/server/notifications";
@@ -31,6 +28,7 @@ import { publish } from "@/server/realtime";
 import { writeDealNote } from "@/server/deal-note";
 import { queueBookingMail } from "@/server/booking-mail";
 import { requestNotify } from "@/lib/realtime/events";
+import { checkBookingSelection } from "@/server/booking-check";
 
 export type ActionResult<T = void> =
   | { ok: true; data: T }
@@ -63,76 +61,13 @@ export async function createBookingRequest(
   const perListing = checkLimit(`${session.user.id}:${form.listingId}`, "booking_listing");
   if (!perListing.ok) return { ok: false, error: `rate_limited:${perListing.retryAfterSec}` };
 
+  // Объявление, даты, количество, цены, срок и занятость — общая проверка
+  // с заявкой без аккаунта (server/booking-check.ts), порядок отказов прежний.
+  const check = await checkBookingSelection(form, { userId: session.user.id });
+  if (!check.ok) return { ok: false, error: check.error };
+  const { listing, sel } = check;
+
   const db = getDb();
-  // Владелец читается вместе с объявлением: публичность решает isPubliclyVisible,
-  // а не один только статус. Бан гасит объявления на записи, но статус может
-  // разойтись с баном, если объявление подняли вручную.
-  const listingRows = await db.select({ listing: listings, ownerBannedAt: users.bannedAt })
-    .from(listings)
-    .innerJoin(users, eq(users.id, listings.ownerUserId))
-    .where(eq(listings.id, form.listingId))
-    .limit(1);
-  const row = listingRows[0];
-  if (!row) return { ok: false, error: "listing_not_found" };
-  // Заявка на свою же вещь закрыта так же, как переписка с самим собой: иначе
-  // владелец подтверждает её сам и занимает собственные даты в обход календаря
-  // занятости, а уведомлений за весь её цикл не приходит никому.
-  // Сравнение стоит раньше публичности — тот же порядок, что в canStartThread:
-  // владельцу скрытого объявления ответ «позиция недоступна» говорил бы не о
-  // том, а раскрыть эта ветка ничего не может, она отвечает только владельцу.
-  if (row.listing.ownerUserId === session.user.id) {
-    return { ok: false, error: "own_listing" };
-  }
-  // Ответ совпадает с несуществующим объявлением: по нему нельзя узнать, что
-  // владелец забанен, — тот же принцип, что в lib/chat/rules.ts.
-  if (!isPubliclyVisible({ status: row.listing.status, ownerBannedAt: row.ownerBannedAt })) {
-    return { ok: false, error: "listing_not_found" };
-  }
-  const listing = row.listing;
-
-  // Кламп дат к [today, horizon] — форма могла пролежать открытой. Если он
-  // что-то сдвинул, заявку не создаём: диалог показывает только «готово», и
-  // человек, открывший карточку до полуночи, молча отправил бы владельцу
-  // другие даты, чем выбрал.
-  const sel = parseBookingParams(
-    { from: form.from, to: form.to, qty: String(form.qty) },
-    { today: todayStr(), maxQty: listing.quantity },
-  );
-  if (isSelectionShifted(form, sel)) return { ok: false, error: "dates_stale" };
-  // Количество клампится к quantity так же молча, как когда-то даты: владелец
-  // мог уменьшить его, пока форма открыта, и заявка ушла бы на меньшее число
-  // единиц, чем человек видел в диалоге. Отдельный код, а не dates_stale:
-  // причина другая, и текст человеку нужен другой.
-  if (sel.qty !== form.qty) return { ok: false, error: "qty_stale" };
-  // И цена: заявка навсегда запоминает условия, на которых её подали, поэтому
-  // подать её на условиях, которых человек не видел, нельзя. Без этой проверки
-  // поднятая за секунду до отправки цена замерзала бы в заявке как «то, на что
-  // вы согласились» — ровно тот обман, от которого снимок и заводился.
-  // Сверяются все три тарифа: сумма за срок зависит от каждого (quote).
-  const priceShifted = ([
-    [form.priceDay, listing.priceDay],
-    [form.priceWeek, listing.priceWeek],
-    [form.priceMonth, listing.priceMonth],
-  ] as const).some(([seen, now]) => seen !== undefined && seen !== now);
-  if (priceShifted) return { ok: false, error: "price_stale" };
-
-  // Минимальный срок — после клампа: проверяются ровно те даты, что уйдут в
-  // заявку. Свой код с числом, чтобы диалог назвал минимум словами.
-  if (rentalDaysCount(sel) < listing.minDays) {
-    return { ok: false, error: `min_days:${listing.minDays}` };
-  }
-
-  const availRows = await db.select().from(availability).where(and(
-    eq(availability.listingId, listing.id),
-    gte(availability.date, sel.from),
-    lte(availability.date, sel.to),
-  ));
-  const map: AvailabilityMap = new Map(
-    availRows.map((r) => [r.date, { bookedQty: r.bookedQty, blockedQty: r.blockedQty }]),
-  );
-  const busy = unavailableDates(listing.quantity, map, sel.from, sel.to, sel.qty);
-  if (busy.length > 0) return { ok: false, error: `dates_taken:${busy.join(",")}` };
-
   const requestId = newId();
   const now = new Date();
   try {

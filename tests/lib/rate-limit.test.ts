@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
-  checkLimit, MAIL_DAILY_CAP, MAIL_DAILY_KEY, _resetForTests, _storeSizesForTests,
+  checkLimit, LEAD_FORM_DAILY_CAP, LEAD_FORM_DAILY_KEY, MAIL_DAILY_CAP, MAIL_DAILY_KEY,
+  _resetForTests, _storeSizesForTests,
 } from "@/lib/rate-limit";
 
 beforeEach(() => { _resetForTests(); });
@@ -195,5 +196,66 @@ describe("rate limit: публичные ручки", () => {
     expect(_storeSizesForTests().private).toBe(before);
     expect(_storeSizesForTests().public).toBeLessThanOrEqual(20_000);
     expect(checkLimit(login, "login").ok).toBe(false);
+  });
+});
+
+describe("rate limit: заявки без аккаунта", () => {
+  const exhaust = (key: string, kind: Parameters<typeof checkLimit>[1], n: number) => {
+    for (let i = 0; i < n; i++) expect(checkLimit(key, kind)).toEqual({ ok: true });
+    return checkLimit(key, kind);
+  };
+
+  it("черновик: 30 в час по vid и 200 по IP, ключи раздельны", () => {
+    expect(exhaust("vid-1", "lead_draft", 30).ok).toBe(false);
+    expect(checkLimit("vid-2", "lead_draft")).toEqual({ ok: true });
+    expect(exhaust("1.2.3.4", "lead_draft_ip", 200).ok).toBe(false);
+  });
+
+  it("форма: пауза 10 с между заявками одного браузера", () => {
+    vi.useFakeTimers();
+    try {
+      expect(checkLimit("vid-1", "lead_form")).toEqual({ ok: true });
+      const second = checkLimit("vid-1", "lead_form");
+      expect(second.ok).toBe(false);
+      if (!second.ok) expect(second.reason).toBe("gap");
+      vi.advanceTimersByTime(10_000);
+      expect(checkLimit("vid-1", "lead_form")).toEqual({ ok: true });
+      for (let i = 0; i < 3; i++) {
+        vi.advanceTimersByTime(10_000);
+        expect(checkLimit("vid-1", "lead_form")).toEqual({ ok: true });
+      }
+      vi.advanceTimersByTime(10_000);
+      const sixth = checkLimit("vid-1", "lead_form");
+      expect(sixth.ok).toBe(false);
+      if (!sixth.ok) expect(sixth.reason).toBe("window");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("форма: 30 в час по IP, 3 в сутки на номер", () => {
+    expect(exhaust("1.2.3.4", "lead_form_ip", 30).ok).toBe(false);
+    const phone = exhaust("+79000000000", "lead_phone", 3);
+    expect(phone.ok).toBe(false);
+    if (!phone.ok) expect(phone.retryAfterSec).toBeGreaterThan(23 * 60 * 60);
+  });
+
+  it("суточный потолок формы — общий ключ на весь сервис", () => {
+    expect(exhaust(LEAD_FORM_DAILY_KEY, "lead_form_daily", LEAD_FORM_DAILY_CAP).ok).toBe(false);
+  });
+
+  it("бот: 30 апдейтов в минуту на Telegram-аккаунт", () => {
+    const over = exhaust("123456789", "tg_user", 30);
+    expect(over.ok).toBe(false);
+    if (!over.ok) expect(over.retryAfterSec).toBeLessThanOrEqual(60);
+  });
+
+  it("виды заявок живут в публичном хранилище, суточный потолок формы — в общем", () => {
+    for (const kind of ["lead_draft", "lead_draft_ip", "lead_form", "lead_form_ip", "lead_phone", "tg_user"] as const) {
+      checkLimit("k", kind);
+    }
+    expect(_storeSizesForTests()).toEqual({ private: 0, public: 6 });
+    checkLimit(LEAD_FORM_DAILY_KEY, "lead_form_daily");
+    expect(_storeSizesForTests()).toEqual({ private: 1, public: 6 });
   });
 });

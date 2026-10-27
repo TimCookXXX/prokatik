@@ -62,6 +62,8 @@ const moscowDate = (column: SQL) => sql`(${column} at time zone 'UTC' at time zo
 const humansOnly = (all: boolean) => (all ? sql`` : sql`and not v.is_bot and not v.is_internal`);
 /** Без аккаунтов админов — аналог своих заходов для доменных таблиц; `u` — users. */
 const customersOnly = (all: boolean) => (all ? sql`` : sql`and u.role <> 'admin'`);
+/** Без тестовых заявок без аккаунта; `bl` — booking_leads. */
+const leadsOnly = (all: boolean) => (all ? sql`` : sql`and not bl.internal`);
 
 /** «Ничего не нашёл» — пустая выдача с причиной, кроме страницы за концом списка. */
 const zeroResult = (alias: string) =>
@@ -167,6 +169,9 @@ export async function adminVisitorSummary(f: AnalyticsFilters, now: Date = new D
       select null as day, ${figures(sql`f.first_day >= ${since}::date`)}
       from ev join firsts f on f.person = ev.person
     `),
+    // Заявки из кабинета — по людям; заявки без аккаунта (бот и форма, ADR
+    // 0028) — по Telegram-аккаунту или телефону, а без них каждая сама по
+    // себе. Черновики не заявка; тестовые (internal) — как свои заходы.
     db.execute<Grouped<{ requested: number }>>(sql`
       select d.day::text as day, count(distinct d.customer)::int as requested
       from (
@@ -174,6 +179,11 @@ export async function adminVisitorSummary(f: AnalyticsFilters, now: Date = new D
         from booking_requests br
         join users u on u.id = br.customer_user_id
         where br.created_at >= ${bound} ${customersOnly(f.all)}
+        union all
+        select ${moscowDate(sql`bl.sent_at`)} as day,
+          'lead:' || coalesce(bl.tg_user_id::text, bl.customer_phone, bl.id) as customer
+        from booking_leads bl
+        where bl.status <> 'draft' and bl.sent_at >= ${bound} ${leadsOnly(f.all)}
       ) d
       group by grouping sets ((d.day), ())
     `),

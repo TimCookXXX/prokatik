@@ -122,13 +122,20 @@ describe("middleware matcher", () => {
       "/demo/1.webp",
       "/mock/x.png",
       "/api/geo/client-index?region=krasnodar&v=3",
+      // Вебхук бота и маяк черновика заявки: куку vid они не выдают.
+      "/api/telegram/webhook",
+      "/api/leads/draft",
     ]) {
       expect(pattern.test(path), `${path} must be skipped`).toBe(false);
     }
   });
 
   it("covers application routes", () => {
-    for (const path of ["/", "/kazan", "/cabinet", "/admin/cities", "/api/health", "/api/analytics", "/api/geo/suggest", "/democracy"]) {
+    for (const path of [
+      "/", "/kazan", "/cabinet", "/admin/cities", "/api/health", "/api/analytics", "/api/geo/suggest", "/democracy",
+      // Префиксы исключений не задевают соседей с похожим началом.
+      "/api/telegramx", "/api/leadsx",
+    ]) {
       expect(pattern.test(path), `${path} must be matched`).toBe(true);
     }
   });

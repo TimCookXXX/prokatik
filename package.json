@@ -23,6 +23,7 @@
     "seed:photos": "tsx --env-file=.env scripts/seed-photos.ts",
     "geo:import": "tsx --env-file=.env scripts/geo-import.ts",
     "geo:backfill": "tsx --env-file=.env scripts/geo-backfill.ts",
+    "tg:webhook": "tsx --env-file=.env scripts/telegram-webhook.ts",
     "db:studio": "drizzle-kit studio"
   },
   "dependencies": {

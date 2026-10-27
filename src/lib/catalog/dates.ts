@@ -38,6 +38,19 @@ function zonedParts(date: Date): { year: number; month: number; day: number } {
   return { year: part("year"), month: part("month"), day: part("day") };
 }
 
+let hourFormat: Intl.DateTimeFormat | undefined;
+
+/* Час 0–23 в деловой зоне — для текстов, которые зависят от времени суток. */
+export function businessHour(now: Date = new Date()): number {
+  hourFormat ??= new Intl.DateTimeFormat("en-US", {
+    timeZone: APP_TIME_ZONE,
+    hour: "numeric",
+    hourCycle: "h23",
+    numberingSystem: "latn",
+  });
+  return Number(hourFormat.formatToParts(now).find((p) => p.type === "hour")?.value);
+}
+
 export function todayStr(now: Date = new Date()): string {
   const { year, month, day } = zonedParts(now);
   return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;

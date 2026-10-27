@@ -313,6 +313,101 @@ export const bookingRequests = pgTable("booking_requests", {
   pricePresent: check("booking_requests_price_present", sql`coalesce(${t.priceDay}, ${t.priceWeek}, ${t.priceMonth}) is not null`),
 }));
 
+export const leadChannel = pgEnum("lead_channel", ["telegram", "form"]);
+// draft — черновик из браузера, ждёт привязки и отправки в боте. sent —
+// заявка ушла в админскую группу. handed, taken, declined — отметки основателя
+// кнопками карточки (переходы — src/lib/leads/status.ts).
+export const leadStatus = pgEnum("lead_status", ["draft", "sent", "handed", "taken", "declined"]);
+
+/* Заявка без аккаунта: через Telegram-бота или запасную форму «Имя + телефон».
+ * booking_requests не подходит — там customer_user_id NOT NULL, а у лида
+ * человека в базе нет вовсе. Даты лид не держит: календарь не трогают ни
+ * черновик, ни «Взял» (ADR 0028).
+ *
+ * Объявление и владелец — ссылками с set null плюс снимком (название, имя и
+ * телефон проката, путь): карточку в группе можно перерисовать без join, и
+ * ссылка на объявление переживёт его удаление. Условия — снимком, как у
+ * booking_requests.
+ *
+ * Черновик, не прошедший проверку выбора, тоже пишется — с invalid_reason:
+ * бот объяснит причину, а не скажет «не найдено». Поэтому у такой строки
+ * может не быть ни снимка объявления, ни цен. */
+export const bookingLeads = pgTable("booking_leads", {
+  id: text("id").primaryKey(),
+  channel: leadChannel("channel").notNull(),
+  status: leadStatus("status").notNull().default("draft"),
+  /** Параметр `/start` из ссылки на бота; NULL у формы. */
+  startToken: varchar("start_token", { length: 32 }).unique(),
+  /** `INR-4821`; NULL у черновика (src/lib/leads/code.ts). */
+  code: varchar("code", { length: 10 }).unique(),
+  /** Код ошибки проверки выбора при создании черновика — те же коды, что у createBookingRequest. */
+  invalidReason: varchar("invalid_reason", { length: 40 }),
+  listingId: text("listing_id").references(() => listings.id, { onDelete: "set null" }),
+  ownerUserId: text("owner_user_id").references(() => users.id, { onDelete: "set null" }),
+  listingTitle: varchar("listing_title", { length: 200 }),
+  ownerName: varchar("owner_name", { length: 100 }),
+  /** users.phone владельца на момент заявки: передать её прокату одним звонком. */
+  ownerPhone: varchar("owner_phone", { length: 20 }),
+  /** listingPath() на момент создания, без хоста. */
+  listingPath: varchar("listing_path", { length: 300 }),
+  dateFrom: date("date_from").notNull(),
+  dateTo: date("date_to").notNull(),
+  qty: integer("qty").notNull().default(1),
+  priceDay: integer("price_day"),
+  priceWeek: integer("price_week"),
+  priceMonth: integer("price_month"),
+  depositType: depositType("deposit_type").notNull().default("none"),
+  depositAmount: integer("deposit_amount"),
+  /** Сумма за срок и количество (quote); NULL — посчитать было нечем. */
+  total: integer("total"),
+  /** Метки кампании, очищенные (src/lib/analytics/sanitize.ts). */
+  utm: jsonb("utm").$type<Record<string, string>>(),
+  /** ClientID Метрики, только цифры, — для будущих офлайн-конверсий. */
+  ymClientId: varchar("ym_client_id", { length: 32 }),
+  /** Кука vid. Без FK: visitors чистится по сроку, а лид остаётся. */
+  visitorId: uuid("visitor_id"),
+  /** Тестовая заявка: браузер помечен is_internal или сессия админа. Из счётчиков успеха исключается. */
+  internal: boolean("internal").notNull().default(false),
+  // Клиент. Форма даёт имя и телефон; бот — Telegram-аккаунт и телефон, если
+  // человек им поделился.
+  customerName: varchar("customer_name", { length: 100 }),
+  customerPhone: varchar("customer_phone", { length: 20 }),
+  tgUserId: bigint("tg_user_id", { mode: "number" }),
+  tgUsername: varchar("tg_username", { length: 32 }),
+  tgName: varchar("tg_name", { length: 130 }),
+  /** Когда черновик привязан к Telegram-аккаунту по /start. */
+  boundAt: timestamp("bound_at"),
+  // Доставка карточки в админскую группу (src/server/lead-delivery.ts):
+  // захват строки, счётчик попыток и время следующей.
+  groupMessageId: bigint("group_message_id", { mode: "number" }),
+  cardAttempts: integer("card_attempts").notNull().default(0),
+  cardClaimedAt: timestamp("card_claimed_at"),
+  cardNextAt: timestamp("card_next_at"),
+  statusChangedAt: timestamp("status_changed_at"),
+  /** Telegram-имя того, кто нажал кнопку статуса. */
+  statusChangedBy: varchar("status_changed_by", { length: 130 }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  sentAt: timestamp("sent_at"),
+}, (t) => ({
+  // Чистка черновиков и поиск недоставленных карточек.
+  statusCreatedIdx: index("booking_leads_status_created_idx").on(t.status, t.createdAt),
+  // Активный черновик Telegram-аккаунта — последний по bound_at.
+  tgUserIdx: index("booking_leads_tg_user_idx")
+    .on(t.tgUserId, t.boundAt)
+    .where(sql`${t.tgUserId} is not null`),
+  // Список и счётчики админки.
+  sentIdx: index("booking_leads_sent_idx").on(t.sentAt).where(sql`${t.sentAt} is not null`),
+  datesOrder: check("booking_leads_dates_order", sql`${t.dateFrom} <= ${t.dateTo}`),
+  // Как booking_requests_price_present, но черновик с invalid_reason может не
+  // знать цен вовсе: объявления к моменту проверки уже нет.
+  pricePresent: check("booking_leads_price_present", sql`${t.invalidReason} is not null
+    or coalesce(${t.priceDay}, ${t.priceWeek}, ${t.priceMonth}) is not null`),
+  // Код выдаётся ровно при отправке: у черновика его нет, у отправленной есть.
+  codeOnSend: check("booking_leads_code_on_send", sql`(${t.status} = 'draft') = (${t.code} is null)`),
+  // Токен /start — только у Telegram-канала.
+  tokenOnTelegram: check("booking_leads_token_on_telegram", sql`(${t.channel} = 'telegram') = (${t.startToken} is not null)`),
+}));
+
 // events — журнал сделок: submit_request, cancel_request, request_declined.
 // Поведение посетителей — страницы, поиски, просмотры — живёт отдельно, в
 // visitors и visitor_events. Старые строки view_listing, которые страница

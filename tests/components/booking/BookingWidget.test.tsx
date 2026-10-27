@@ -1,8 +1,8 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 
-// Виджет тянет две ветки, которых в jsdom не бывает: окно входа уходит в
-// next-auth, а форма заявки — в server action, и оба заканчиваются на
+// Виджет тянет ветки, которых в jsdom не бывает: окно входа уходит в
+// next-auth, а формы заявки — в server actions, и все заканчиваются на
 // next/server. К способу получения ни одна отношения не имеет.
 // (OwnerCard этим не болен: он грузит окно входа через LoginTrigger, а виджет
 // импортирует его напрямую.)
@@ -17,6 +17,9 @@ vi.mock("@/components/auth/LoginDialog", () => ({
 }));
 vi.mock("@/server/actions/booking", () => ({
   createBookingRequest: async () => ({ ok: true, data: undefined }),
+}));
+vi.mock("@/server/actions/lead", () => ({
+  submitLeadForm: async () => ({ ok: true, data: { code: "INR-1234" } }),
 }));
 
 const { BookingWidget } = await import("@/components/booking/BookingWidget");
@@ -318,5 +321,80 @@ describe("BookingWidget — минимальный срок", () => {
     window.history.replaceState(null, "", base.pathname);
     render(<BookingWidget {...base} handoverPickup handoverDelivery={false} />);
     expect(screen.queryByText(/Минимальный срок/)).toBeNull();
+  });
+});
+
+// BOOKING_FLOW=telegram (ADR 0028): «Забронировать» — настоящая ссылка на бота
+// с токеном, а не окно входа. На iOS приложение открывает только переход по
+// жесту — поэтому <a href>, а не переход после await.
+describe("BookingWidget — бронь через Telegram", () => {
+  const tg = { ...base, bookingFlow: "telegram" as const, botUsername: "inrenta_bot", handoverPickup: true, handoverDelivery: false };
+  const links = () => screen.getAllByRole("link", { name: /Telegram/ }) as HTMLAnchorElement[];
+  const tokenOf = (a: HTMLAnchorElement) => new URL(a.href).searchParams.get("start");
+  const day = (d: string) => document.querySelector<HTMLButtonElement>(`[data-day="${d}"] button`)!;
+
+  beforeEach(() => {
+    login.callbackUrl = "";
+  });
+
+  it("ссылка на бота с токеном — и в виджете, и в липкой полосе, с одним токеном", () => {
+    window.history.replaceState(null, "", base.pathname);
+    render(<BookingWidget {...tg} />);
+    const [main, bar] = links();
+    expect(main).toHaveTextContent("Забронировать в Telegram");
+    expect(within(document.querySelector<HTMLElement>("[data-booking-bar]")!).getByRole("link"))
+      .toHaveTextContent("В Telegram");
+    expect(main.href).toMatch(/^https:\/\/t\.me\/inrenta_bot\?start=[A-Za-z0-9_-]{22}$/);
+    expect(tokenOf(bar)).toBe(tokenOf(main));
+    // Ссылка — в той же вкладке: так iOS отдаёт переход приложению.
+    expect(main).not.toHaveAttribute("target");
+  });
+
+  it("окно входа не монтируется, кнопок «Забронировать» нет", () => {
+    window.history.replaceState(null, "", base.pathname);
+    render(<BookingWidget {...tg} isAuthed={false} />);
+    expect(login.callbackUrl).toBe("");
+    expect(screen.queryByRole("button", { name: "Забронировать" })).toBeNull();
+  });
+
+  it("смена выбора — новый токен", () => {
+    window.history.replaceState(null, "", base.pathname);
+    render(<BookingWidget {...tg} />);
+    const before = tokenOf(links()[0]);
+    fireEvent.click(day("2026-09-10"));
+    const after = tokenOf(links()[0]);
+    expect(after).toMatch(/^[A-Za-z0-9_-]{22}$/);
+    expect(after).not.toBe(before);
+  });
+
+  it("под ссылкой — что даты держит прокат, и запасная форма", () => {
+    window.history.replaceState(null, "", base.pathname);
+    render(<BookingWidget {...tg} />);
+    expect(screen.getByText("Даты закрепятся после подтверждения проката")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Нет Telegram? Оставьте телефон" }));
+    expect(screen.getByRole("dialog")).toHaveTextContent("Оставьте имя и телефон");
+  });
+
+  it("занятые даты — ссылки нет, кнопка неактивна, формы нет", () => {
+    window.history.replaceState(null, "", base.pathname);
+    render(<BookingWidget {...tg} availability={{ "2026-09-04": { bookedQty: 1, blockedQty: 0 } }} />);
+    expect(screen.queryAllByRole("link", { name: /Telegram/ })).toEqual([]);
+    expect(screen.getByRole("button", { name: "Забронировать в Telegram" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Нет Telegram? Оставьте телефон" })).toBeNull();
+  });
+
+  it("своё объявление — ни ссылки, ни формы", () => {
+    window.history.replaceState(null, "", base.pathname);
+    render(<BookingWidget {...tg} isOwn />);
+    expect(screen.queryAllByRole("link", { name: /Telegram/ })).toEqual([]);
+    expect(screen.queryByText("Нет Telegram? Оставьте телефон")).toBeNull();
+    expect(screen.getByText("Это ваше объявление")).toBeInTheDocument();
+  });
+
+  it("без имени бота — прежняя бронь через вход", () => {
+    window.history.replaceState(null, "", base.pathname);
+    render(<BookingWidget {...tg} botUsername={undefined} />);
+    expect(screen.queryAllByRole("link", { name: /Telegram/ })).toEqual([]);
+    expect(screen.getAllByRole("button", { name: "Забронировать" })).toHaveLength(2);
   });
 });

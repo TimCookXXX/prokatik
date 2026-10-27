@@ -8,6 +8,7 @@ import { METRIKA_SKIPPED_PATH, isMetrikaSkipped, metrikaSafeHref } from "./metri
 import { reloadDocument } from "./document-nav";
 import { analyticsAllowedHere } from "./allowed-here";
 import { track } from "./track";
+import { requestYmClientId } from "./ym-client";
 import { ANALYTICS_ALLOWED_JS } from "@/lib/analytics/allowed";
 
 declare global {
@@ -136,16 +137,10 @@ function stopIfOptedOut(): boolean {
 
 // ClientID Метрики — в свою статистику, раз на загрузку документа: по нему в
 // Метрике находится запись Вебвизора гостя. Роут пишет его только гостю без
-// аккаунта и только когда значение сменилось. Чужой код: сбой — без ClientID.
+// аккаунта и только когда значение сменилось. Тот же ответ запоминает
+// ym-client.ts — для маяка черновика заявки.
 function reportClientId(id: number): void {
-  try {
-    window.ym?.(id, "getClientID", (cid: unknown) => {
-      const value = typeof cid === "string" || typeof cid === "number" ? String(cid) : "";
-      if (/^\d{1,32}$/.test(value)) track("ym_client", { cid: value });
-    });
-  } catch {
-    // Без ClientID карточка гостя покажет «ещё не получен».
-  }
+  requestYmClientId(id, (cid) => track("ym_client", { cid }));
 }
 
 // Что считается новым просмотром: другая страница, другая страница выдачи

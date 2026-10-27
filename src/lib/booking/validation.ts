@@ -21,7 +21,10 @@ const snapshotPrice = z.preprocess(
   z.coerce.number().int().positive().nullable().optional(),
 );
 
-export const bookingFormSchema = z.object({
+/* Выбор на странице вещи: объявление, даты, количество и увиденные цены. Общая
+ * часть заявки из кабинета, черновика для бота и запасной формы — их проверяет
+ * одна функция (checkBookingSelection), и разойтись входам нельзя. */
+export const bookingSelectionSchema = z.object({
   listingId: z.string().min(1),
   from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
@@ -43,6 +46,12 @@ export const bookingFormSchema = z.object({
    * цена меняет сумму так же, как поднятая суточная. */
   priceWeek: snapshotPrice,
   priceMonth: snapshotPrice,
+});
+
+export type BookingSelectionInput = z.input<typeof bookingSelectionSchema>;
+export type BookingSelectionData = z.output<typeof bookingSelectionSchema>;
+
+export const bookingFormSchema = bookingSelectionSchema.extend({
   phone: z.string().transform(normalizePhone).refine((p) => p.length > 0, {
     message: "Укажите телефон в формате +7 900 000-00-00",
   }),

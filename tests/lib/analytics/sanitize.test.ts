@@ -141,7 +141,7 @@ describe("referrerHost", () => {
 describe("entryOf", () => {
   it("разрешённые метки, маска, длина; клик рекламы — флагом", () => {
     const entry = entryOf(
-      `/?utm_source=tg&utm_medium=cpc&utm_campaign=${enc("ivan@mail.ru " + "x".repeat(80))}&utm_content=secret&yclid=777`,
+      `/?utm_source=tg&utm_medium=cpc&utm_campaign=${enc("ivan@mail.ru " + "x".repeat(80))}&utm_id=secret&yclid=777`,
       "https://yandex.ru/",
     );
     expect(entry.ref).toBe("yandex.ru");
@@ -152,6 +152,12 @@ describe("entryOf", () => {
     expect(entry.utm.utm_campaign!.length).toBeLessThanOrEqual(50);
     expect(JSON.stringify(entry)).not.toContain("secret");
     expect(JSON.stringify(entry)).not.toContain("777");
+  });
+
+  it("ключевая фраза и объявление кампании пишутся, с маской", () => {
+    const entry = entryOf(`/?utm_term=${enc("аренда велосипеда")}&utm_content=${enc("ad 89001112233")}`, null);
+    expect(entry.utm.utm_term).toBe("аренда велосипеда");
+    expect(entry.utm.utm_content).toBe("ad ***");
   });
 
   it("без меток и referrer'а — пусто", () => {

@@ -43,6 +43,28 @@ const schema = z.object({
 
   INDEXNOW_KEY: z.string().regex(/^[a-f0-9]{8,128}$/, "INDEXNOW_KEY must be hex").optional(),
   YANDEX_METRIKA_ID: z.string().regex(/^\d+$/, "YANDEX_METRIKA_ID must be digits").optional(),
+
+  // Поведение «Забронировать» у анонима: auth — вход и заявка из кабинета,
+  // telegram — ссылка на бота и запасная форма (ADR 0028). Влияет только на
+  // виджет: вебхук и таблица лидов работают при любом значении.
+  BOOKING_FLOW: z.enum(["auth", "telegram"]).default("auth"),
+  // Бот заявок. Токен от BotFather; секрет вебхука уходит в setWebhook и
+  // сверяется с заголовком X-Telegram-Bot-Api-Secret-Token — правило Bot API
+  // на его алфавит и длину (1–256), снизу 32 ради стойкости. Чат — id
+  // админской группы, у групп он отрицательный.
+  TELEGRAM_BOT_TOKEN: z.string().regex(/^\d+:[A-Za-z0-9_-]{30,}$/, "TELEGRAM_BOT_TOKEN must look like 123456:ABC…").optional(),
+  TELEGRAM_BOT_USERNAME: z.string()
+    .transform((s) => s.replace(/^@/, ""))
+    .pipe(z.string().regex(/^[A-Za-z][A-Za-z0-9_]{3,31}$/, "TELEGRAM_BOT_USERNAME must be a bot username"))
+    .optional(),
+  TELEGRAM_WEBHOOK_SECRET: z.string()
+    .regex(/^[A-Za-z0-9_-]{32,256}$/, "TELEGRAM_WEBHOOK_SECRET must be 32–256 of [A-Za-z0-9_-]")
+    .optional(),
+  TELEGRAM_ADMIN_CHAT_ID: z.string()
+    .regex(/^-?\d{1,20}$/, "TELEGRAM_ADMIN_CHAT_ID must be an integer")
+    .transform(Number)
+    .pipe(z.number().int().safe())
+    .optional(),
 }).superRefine((v, ctx) => {
   for (const p of ["YANDEX", "VK"] as const) {
     const id = (v as Record<string, unknown>)[`${p}_CLIENT_ID`];
@@ -95,6 +117,28 @@ const schema = z.object({
       code: z.ZodIssueCode.custom,
       path: ["BACKUP_S3_BUCKET"],
       message: "BACKUP_S3_* env vars must be all set or all empty",
+    });
+  }
+
+  // Бот: все или ни одной. Без группы бот выключен целиком — вебхук отвечает
+  // 404, — а флаг telegram без бота вёл бы человека на ссылку в никуда.
+  const telegramKeys = [
+    "TELEGRAM_BOT_TOKEN", "TELEGRAM_BOT_USERNAME", "TELEGRAM_WEBHOOK_SECRET", "TELEGRAM_ADMIN_CHAT_ID",
+  ] as const;
+  const telegramPresence = telegramKeys.map(k => (v as Record<string, unknown>)[k] !== undefined);
+  const telegramAll = telegramPresence.every(Boolean);
+  if (!telegramAll && telegramPresence.some(Boolean)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["TELEGRAM_BOT_TOKEN"],
+      message: "TELEGRAM_* env vars must be all set or all empty",
+    });
+  }
+  if (v.BOOKING_FLOW === "telegram" && !telegramAll) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["BOOKING_FLOW"],
+      message: "BOOKING_FLOW=telegram requires TELEGRAM_* env vars",
     });
   }
 

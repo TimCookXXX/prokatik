@@ -10,7 +10,9 @@ export type LimitKind =
   | "chat_message" | "chat_thread" | "chat_read"
   | "realtime_sync"
   | "search" | "geo"
-  | "track" | "track_vid" | "track_new";
+  | "track" | "track_vid" | "track_new"
+  | "lead_draft" | "lead_draft_ip" | "lead_form" | "lead_form_ip" | "lead_phone" | "lead_form_daily"
+  | "tg_user";
 
 // Потолок отправки на весь сервис за сутки. Яндекс даёт 300 писем в сутки по
 // SMTP и режет раньше, если письма однотипные, — упереться хочется в свой
@@ -18,6 +20,11 @@ export type LimitKind =
 export const MAIL_DAILY_CAP = 250;
 // Общий ключ: лимит один на всех, отправитель значения не имеет.
 export const MAIL_DAILY_KEY = "service";
+// Потолок заявок запасной формы на весь сервис за сутки, по образцу
+// MAIL_DAILY_CAP. Сверх него заявка сохраняется, но в группу не идёт: поток
+// от скрипта не должен заваливать чат, где основатель работает руками.
+export const LEAD_FORM_DAILY_CAP = 100;
+export const LEAD_FORM_DAILY_KEY = "service";
 export type LimitResult =
   | { ok: true }
   | { ok: false; retryAfterSec: number; reason: "gap" | "window" };
@@ -96,6 +103,26 @@ const RULES: Record<LimitKind, Rule> = {
   // Заведение нового гостя — строка в visitors. Кука id ничего не стоит, и
   // без этого контура скрипт заводил бы гостя на каждый запрос.
   track_new: { windowMs: 60 * 60 * 1000, maxInWindow: 20, gapMs: 0, store: "public" },
+  // Черновик заявки в Telegram (/api/leads/draft): маяк на каждый клик по
+  // ссылке на бота. Человек перебирает даты и жмёт снова — тридцать в час
+  // хватает с запасом, скрипту с одной кукой этого мало.
+  lead_draft: { windowMs: 60 * 60 * 1000, maxInWindow: 30, gapMs: 0, store: "public" },
+  // Тот же поток по IP. За одним адресом мобильного оператора сидит много
+  // людей, поэтому потолок высокий: он против скрипта, меняющего куку.
+  lead_draft_ip: { windowMs: 60 * 60 * 1000, maxInWindow: 200, gapMs: 0, store: "public" },
+  // Запасная форма «Имя + телефон»: каждая заявка — карточка в группе и
+  // ручная работа основателя. Пауза ловит двойное нажатие и долбёжку.
+  lead_form: { windowMs: 60 * 60 * 1000, maxInWindow: 5, gapMs: 10_000, store: "public" },
+  lead_form_ip: { windowMs: 60 * 60 * 1000, maxInWindow: 30, gapMs: 0, store: "public" },
+  // По номеру: смена куки и IP не даёт засыпать заявками один чужой телефон.
+  lead_phone: { windowMs: 24 * 60 * 60 * 1000, maxInWindow: 3, gapMs: 0, store: "public" },
+  // Общий ключ LEAD_FORM_DAILY_KEY — потолок на весь сервис. Лежит в общем
+  // хранилище, как mail_daily: в публичном его вытеснил бы поток ключей
+  // lead_phone с разными номерами, и потолок молча обнулился бы.
+  lead_form_daily: { windowMs: 24 * 60 * 60 * 1000, maxInWindow: LEAD_FORM_DAILY_CAP, gapMs: 0 },
+  // Входящие апдейты бота по Telegram id. Отказ — молчаливый 200: на 429
+  // Telegram стал бы повторять доставку.
+  tg_user: { windowMs: 60 * 1000, maxInWindow: 30, gapMs: 0, store: "public" },
 };
 
 // Аварийный выключатель на время ручных проверок. Читается один раз при старте
@@ -113,7 +140,7 @@ if (DISABLED) {
 // Хранилища. В общем — вход, почта, заявки, чат: ключей немного, и
 // вытеснение самого давнего при заполнении их не трогает. Публичные ручки
 // заводят ключ на каждый анонимный IP; в общем хранилище такой поток вытеснял
-// бы ключи `login`, `reset`, `mail_daily` и молча обнулял их. Поэтому у них
+// бы ключи `login`, `reset`, `mail_daily`, `lead_form_daily` и молча обнулял их. Поэтому у них
 // свои хранилища, побольше, с чисткой просроченных ключей при заполнении, —
 // по одному на длину окна (см. sweepExpired).
 const MAX_KEYS = 10_000;

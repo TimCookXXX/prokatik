@@ -23,7 +23,9 @@ const MAX_HOST_LENGTH = 100;
 
 const MASK = "***";
 
-export const UTM_PARAMS = ["utm_source", "utm_medium", "utm_campaign"] as const;
+// utm_term — ключевая фраза Директа ({keyword} в шаблоне ссылок), utm_content —
+// объявление кампании. Маскируются, как и остальные метки.
+export const UTM_PARAMS = ["utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content"] as const;
 export type UtmKey = (typeof UTM_PARAMS)[number];
 
 /** Клик по рекламе: id клика не хранится, только чья реклама. */

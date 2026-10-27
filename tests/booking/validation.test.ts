@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { bookingFormSchema, normalizePhone } from "@/lib/booking/validation";
+import { bookingFormSchema, bookingSelectionSchema, normalizePhone } from "@/lib/booking/validation";
 
 describe("normalizePhone()", () => {
   it("нормализует российские форматы к +7", () => {
@@ -69,5 +69,20 @@ describe("bookingFormSchema", () => {
 
   it("комментарий длиннее 500 — отказ", () => {
     expect(bookingFormSchema.safeParse({ ...valid, comment: "x".repeat(501) }).success).toBe(false);
+  });
+});
+
+describe("bookingSelectionSchema", () => {
+  it("выбор без телефона и комментария; лишние поля отбрасываются", () => {
+    const r = bookingSelectionSchema.parse({
+      listingId: "01ABC", from: "2026-07-20", to: "2026-07-22", qty: "1", priceDay: "500", priceWeek: "", phone: "x",
+    });
+    expect(r).toEqual({ listingId: "01ABC", from: "2026-07-20", to: "2026-07-22", qty: 1, priceDay: 500, priceWeek: null });
+  });
+
+  it("форма заявки — его расширение: те же поля выбора плюс телефон", () => {
+    const selectionKeys = Object.keys(bookingSelectionSchema.shape);
+    expect(Object.keys(bookingFormSchema.shape)).toEqual(expect.arrayContaining(selectionKeys));
+    expect(bookingSelectionSchema.safeParse({ listingId: "x", from: "2026-07-20", to: "bad", qty: 1 }).success).toBe(false);
   });
 });

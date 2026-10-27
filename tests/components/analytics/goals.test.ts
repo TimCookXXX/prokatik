@@ -20,10 +20,10 @@ afterEach(() => {
 const loose = reachGoal as (name: string, params?: unknown) => void;
 
 describe("список целей", () => {
-  it("ровно девять целей владельца", () => {
+  it("ровно десять целей владельца", () => {
     expect([...GOALS].sort()).toEqual([
       "booking_click", "booking_sent", "chat_started", "listing_created", "listing_started",
-      "listing_view", "search", "search_zero", "signup",
+      "listing_view", "search", "search_zero", "signup", "tg_booking_click",
     ]);
   });
 

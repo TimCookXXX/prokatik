@@ -42,7 +42,7 @@ describe("имена форм", () => {
   it("имена — из списка и не повторяются", () => {
     const names = forms().map((f) => /\bname="([a-z_]+)"/.exec(f.tag)?.[1]);
     expect([...names].sort()).toEqual([
-      "admin_category", "admin_city", "admin_visitor_find", "analytics_opt_out", "auth_email", "banned", "booking", "filters", "listing",
+      "admin_category", "admin_city", "admin_visitor_find", "analytics_opt_out", "auth_email", "banned", "booking", "booking_lead", "filters", "listing",
       "password_change", "password_reset", "profile", "search_header", "search_hero", "search_mobile",
     ]);
   });

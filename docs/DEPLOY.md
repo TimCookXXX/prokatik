@@ -223,6 +223,7 @@ cd inrenta
 openssl rand -base64 32                          # NEXTAUTH_SECRET
 openssl rand -base64 24 | tr -d '/+=' | head -c 32   # DB_PASSWORD (без спецсимволов — попадает в URL)
 openssl rand -hex 16                             # INDEXNOW_KEY
+openssl rand -hex 32                             # TELEGRAM_WEBHOOK_SECRET
 ```
 
 Шаблон рабочего прод `.env` (все переменные обязательны, кроме помеченных):
@@ -272,6 +273,14 @@ BACKUP_S3_SECRET_ACCESS_KEY=...
 
 INDEXNOW_KEY=<openssl rand -hex 16>
 YANDEX_METRIKA_ID=          # опционально, пусто = метрика выключена
+
+# Бот заявок: все четыре или ни одной (§8.5). BOOKING_FLOW=telegram — только
+# после проверки бота, до того auth.
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_BOT_USERNAME=
+TELEGRAM_WEBHOOK_SECRET=    # openssl rand -hex 32
+TELEGRAM_ADMIN_CHAT_ID=
+BOOKING_FLOW=auth
 ```
 
 ```bash
@@ -387,6 +396,77 @@ curl https://example.ru/indexnow.txt          # вернёт ключ; 404 — �
 2. Telegram-алерт: бот у @BotFather → Alert Contact типа Webhook →
    URL `https://api.telegram.org/bot<TOKEN>/sendMessage`, POST JSON:
    `{"chat_id":"<CHAT_ID>","text":"*alertTypeFriendlyName* - *monitorFriendlyName*"}`
+
+### 8.5. Бот заявок
+
+Заявки без аккаунта уходят через Telegram-бота в админскую группу
+([0028](decisions/0028-telegram-booking-leads.md)); переменные —
+[environment.md, «Бот заявок»](environment.md#бот-заявок-все-четыре). Исходящий
+доступ VPS к `api.telegram.org` нужен `app`: им уходят ответы клиенту и
+карточки.
+
+**1. Бот и группа — руками, один раз.**
+
+- @BotFather: `/newbot` → токен и имя бота.
+- Группа: создать, добавить бота. «Права → Добавление участников» — только
+  админы: любой участник группы меняет статусы заявок кнопками.
+- После этого в @BotFather `/setjoingroups` → Disable: больше бота никто
+  никуда не добавит. Privacy mode не трогать — боту в группе нужны только
+  нажатия кнопок.
+- id группы — пока вебхук не установлен: написать в группе
+  `/start@<имя_бота>` (с privacy mode бот видит в группе только команды) и
+  открыть `https://api.telegram.org/bot<TOKEN>/getUpdates` —
+  `message.chat.id`, отрицательное число.
+
+**2. `.env` прода** — четыре `TELEGRAM_*` и `BOOKING_FLOW=auth` (§7.1), затем:
+
+```bash
+docker compose up -d --force-recreate app     # пересоздание, не restart: env_file
+```
+
+**3. Вебхук — с машины разработчика, из корня репозитория.** Токен и секрет —
+прода, из его `.env`:
+
+```bash
+read -rs TELEGRAM_BOT_TOKEN && read -rs TELEGRAM_WEBHOOK_SECRET && export TELEGRAM_BOT_TOKEN TELEGRAM_WEBHOOK_SECRET
+pnpm exec tsx scripts/telegram-webhook.ts set --url https://example.ru/api/telegram/webhook
+pnpm exec tsx scripts/telegram-webhook.ts info
+```
+
+`read -s` читает значение без эха, и в историю команд оно не попадает. Скрипт
+зовётся через `tsx` напрямую, а не `pnpm tg:webhook`: тот читает локальный
+`.env`, а здесь нужны значения прода — как у импорта геоданных ниже. Адрес
+вебхука передаётся явно, не-https скрипт отклоняет. В `info` — адрес прода,
+`pending_update_count` около нуля и нет `last_error_message`.
+
+**4. Проверка — с телефона** (iPhone Safari и Android): `BOOKING_FLOW=telegram`
+и `--force-recreate app`, затем на чужом объявлении выбрать даты →
+«Забронировать в Telegram» → бот показал сводку → отправить. Карточка пришла в
+группу, кнопки «Передал прокату» → «Взял» правят её. Затем «Нет Telegram?
+Оставьте телефон» — карточка тоже пришла. С `?_ym_debug=2` в консоли видно,
+что `tg_booking_click` уходит до перехода в Telegram. Заявки из браузера админа
+помечены тестовыми: в списке `/admin/leads` они есть, в счётчиках — нет.
+
+**Включение и откат** — `BOOKING_FLOW=telegram` или `auth` в `.env` и
+`docker compose up -d --force-recreate app`. Флаг меняет только кнопку брони:
+бот и уже отправленные заявки работают при любом значении. Долгий сбой
+Telegram — откат на `auth`.
+
+**Смена секрета вебхука:** новый `TELEGRAM_WEBHOOK_SECRET` в `.env` →
+`--force-recreate app` → `set` из шага 3 с новым секретом. Между вторым и
+третьим шагом вебхук отвечает 401; Telegram держит недоставленные апдейты до
+суток и повторит их после `set`. После смены токена (`/revoke` в @BotFather) —
+те же шаги и тоже `set` заново.
+
+**Группа стала супергруппой** (обычную группу Telegram переводит сам при
+смене части настроек): в логе `app` строка `[telegram] chat migrated <новый id>`.
+Новый id — в `TELEGRAM_ADMIN_CHAT_ID`, затем `--force-recreate app`.
+
+**Здоровье** — `/admin/leads`: черновики без привязки (люди кликают, а
+`/start` не доходит), очередь и последняя ошибка вебхука, недоставленные
+карточки. Повтор карточек ленивый — без трафика он ждёт следующей заявки,
+апдейта или захода в эту страницу. Лог — `docker compose logs app | grep
+-E '\[(telegram|leads)\]'`.
 
 ## 9. Регулярные операции
 
@@ -932,6 +1012,8 @@ docker compose logs backup --tail=50
 | То же, но в логах `535 authentication failed` | Пароль приложения ещё не активен (Яндекс пишет про 2–3 часа) либо в Яндекс 360 не разрешён доступ по протоколам для доменного ящика | Подождать; проверить настройку доступа по протоколам в админке 360 |
 | Бэкап падает `Unable to locate credentials` | AWS_* не экспортированы в сессии | Уже самодостаточно в `scripts/backup.sh`; проверить `BACKUP_S3_*` в `.env` |
 | `pnpm build` OOM на VPS | Нет swap | §4.1 — swap обязателен |
+| Бот молчит на `/start` | Вебхук не установлен, секрет в `.env` не совпал с `setWebhook` (401) или в `app` нет `TELEGRAM_*` (404) | `info` из §8.5 — `last_error_message` назовёт код ответа; дальше §8.5, шаги 2–3 |
+| Кнопки на карточке в группе крутят часики и ничего не меняют | Группа стала супергруппой: апдейты идут из чата с новым id, и вебхук их молча отбрасывает | `docker compose logs app \| grep "chat migrated"` → новый id в `TELEGRAM_ADMIN_CHAT_ID`, `up -d --force-recreate app` |
 | `/api/geo/suggest` отвечает `{"items":[]}` на любой адрес | У города нет `geo_region` или центра, либо регион не импортирован | `select slug, geo_region, lat, lon from cities;` и `select region, version, built_at, counts from geo_imports;` через `docker compose exec db psql -U app -d app -c "…"`; дальше «Геоданные (адреса)» |
 
 ## 11. Восстановление из бэкапа

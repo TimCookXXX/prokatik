@@ -169,7 +169,16 @@ describe("запросы", () => {
 
   it("«с ботами и своими» снимает фильтр и у событий, и у заявок с регистрациями", async () => {
     await reads.adminVisitorSummary({ period: 30, all: true }, NOW);
-    expect(state.queries.some((q) => /is_bot|is_internal|role <> 'admin'/.test(q.text))).toBe(false);
+    expect(state.queries.some((q) => /is_bot|is_internal|role <> 'admin'|bl.internal/.test(q.text))).toBe(false);
+  });
+
+  // Заявки без аккаунта (ADR 0028) — тоже «отправили заявку»: отправленные, по
+  // дате отправки, без тестовых. Черновик для бота заявкой не считается.
+  it("«отправили заявку»: и заявки из кабинета, и отправленные заявки без аккаунта", async () => {
+    await reads.adminVisitorSummary({ period: 7, all: false }, NOW);
+    const requests = state.queries.find((q) => q.text.includes("from booking_requests br"))!.text;
+    expect(requests).toMatch(/union all\s+select .*from booking_leads bl\s+where bl.status <> 'draft' and bl.sent_at >= .* and not bl.internal/s);
+    expect(requests).toContain("'lead:' || coalesce(bl.tg_user_id::text, bl.customer_phone, bl.id)");
   });
 
   it("поиск по ClientID — параметром и равенством, по нынешнему значению и истории", async () => {

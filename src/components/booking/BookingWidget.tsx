@@ -10,12 +10,24 @@
 // Кнопка ведёт в форму заявки (анонима — сперва в окно входа), а у владельца её
 // нет вовсе: свою вещь бронировать нельзя, createBookingRequest отвечает
 // own_listing.
+//
+// При BOOKING_FLOW=telegram (ADR 0028) кнопка — настоящая ссылка на бота
+// t.me/<бот>?start=<token>: на iOS приложение открывает только переход по жесту,
+// а не переход после await. Токен браузер выпускает заново на каждую смену
+// выбора и после возвращения из Telegram; по клику, без ожидания, уходят
+// событие и цели и маяк черновика (/api/leads/draft) — бот найдёт черновик по
+// токену. Окно входа и форма кабинета тогда не монтируются; для тех, у кого
+// нет Telegram, — запасная форма «Имя + телефон» (LeadFormDialog).
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { LoginDialog } from "@/components/auth/LoginDialog";
 import type { AuthPanelProps } from "@/lib/auth/panel-props";
 import { BookingFormDialog } from "@/components/booking/BookingFormDialog";
+import { LeadFormDialog } from "@/components/booking/LeadFormDialog";
+import {
+  attribution, botHref, newStartToken, selectionFields, sendLeadDraft,
+} from "@/components/booking/lead-client";
 import { BookingCalendar } from "@/components/booking/BookingCalendar";
 import {
   buildBookingQuery, mergeBookingQuery, rentalDaysCount, type BookingSelection,
@@ -33,6 +45,7 @@ import {
   daysLabel, formatUnitPriceSlash, primaryPrice, priceTiers, quote, type Tariff,
 } from "@/lib/catalog/tariff";
 import { track } from "@/components/analytics/track";
+import { reachGoal } from "@/components/analytics/goals";
 
 const t = content.booking;
 
@@ -71,12 +84,23 @@ export interface BookingWidgetProps {
    * «Забронировать» — событие своей статистики. Без них — только цель Метрики.
    */
   trackToken?: string;
+  /**
+   * Как бронирует чужой: `auth` — окно входа и форма заявки из кабинета,
+   * `telegram` — ссылка на бота и запасная форма (ADR 0028). Без имени бота —
+   * всегда `auth`.
+   */
+  bookingFlow?: "auth" | "telegram";
+  /** Имя бота без @ (TELEGRAM_BOT_USERNAME). */
+  botUsername?: string;
 }
 
 export function BookingWidget(props: BookingWidgetProps) {
   const [sel, setSel] = useState<BookingSelection>(props.initial);
   const [loginOpen, setLoginOpen] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
+  const [leadOpen, setLeadOpen] = useState(false);
+  const botUsername = props.bookingFlow === "telegram" ? props.botUsername ?? "" : "";
+  const viaBot = botUsername !== "";
 
   const setQty = (qty: number) => setSel((cur) => ({ ...cur, qty }));
 
@@ -166,6 +190,63 @@ export function BookingWidget(props: BookingWidgetProps) {
     el.focus({ preventScroll: true });
   };
 
+  // Токен ссылки на бота. Выпускается в эффекте, а не при рендере: случайное
+  // значение на сервере разошлось бы с гидратацией. До эффекта ссылка ведёт на
+  // бота без токена — он попросит выбрать вещь на сайте.
+  const [startToken, setStartToken] = useState("");
+  const selKey = `${sel.from}|${sel.to}|${sel.qty}`;
+  useEffect(() => {
+    if (viaBot) setStartToken(newStartToken());
+  }, [viaBot, selKey]);
+  // Вернулся из Telegram — следующий клик это новая заявка: черновик со старым
+  // токеном уже привязан или отправлен, и бот ответил бы «уже принята».
+  const leftForBot = useRef(false);
+  useEffect(() => {
+    if (!viaBot) return;
+    const onBack = () => {
+      if (document.visibilityState !== "visible" || !leftForBot.current) return;
+      leftForBot.current = false;
+      setStartToken(newStartToken());
+    };
+    document.addEventListener("visibilitychange", onBack);
+    window.addEventListener("pageshow", onBack);
+    return () => {
+      document.removeEventListener("visibilitychange", onBack);
+      window.removeEventListener("pageshow", onBack);
+    };
+  }, [viaBot]);
+
+  // Переход по ссылке не ждёт ничего: событие, цели и маяк уходят синхронно,
+  // а их отправку переживает уход со страницы (keepalive, sendBeacon).
+  const onBotClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
+    if (bookDisabled) {
+      e.preventDefault();
+      return;
+    }
+    track("booking_click", { token: props.trackToken, authed: props.isAuthed });
+    reachGoal("tg_booking_click");
+    if (!startToken) return;
+    sendLeadDraft({
+      token: startToken,
+      ...selectionFields(props.listingId, sel, props.tariff),
+      ...attribution(),
+    });
+    leftForBot.current = true;
+  };
+  const botLink = (className: string, label: string) => (
+    <Button asChild className={className}>
+      <a
+        href={botHref(botUsername, startToken)}
+        onClick={onBotClick}
+        // Средняя кнопка открывает ссылку без click — маяк нужен и тогда.
+        onAuxClick={(e) => { if (e.button === 1) onBotClick(e); }}
+        data-booking-link="telegram"
+      >
+        {label}
+      </a>
+    </Button>
+  );
+
   const onBook = () => {
     if (bookDisabled) return;
     track("booking_click", { token: props.trackToken, authed: props.isAuthed });
@@ -186,12 +267,34 @@ export function BookingWidget(props: BookingWidgetProps) {
       <p className={`text-center text-sm text-muted-foreground ${extra}`}>
         Это ваше объявление
       </p>
+    ) : viaBot ? (
+      bookDisabled
+        ? <Button className={extra} disabled>{hasComplete ? t.bookTg : t.pickDates}</Button>
+        : botLink(extra, t.bookTg)
     ) : (
       <Button className={extra} onClick={onBook} disabled={bookDisabled}>
         {hasComplete ? t.book : t.pickDates}
       </Button>
     )
   );
+
+  // Под ссылкой на бота: даты не держит и сама заявка, и черновик — их
+  // закрепляет прокат. Запасная форма — только когда бронировать есть что:
+  // с занятыми датами она отказала бы тем же текстом, что подсказка выше.
+  const botNotes = viaBot && !props.isOwn ? (
+    <>
+      <p className="mt-2 text-center text-xs text-muted-foreground">{t.holdNote}</p>
+      {!bookDisabled && (
+        <button
+          type="button"
+          onClick={() => setLeadOpen(true)}
+          className="tap-target mx-auto mt-1 block text-sm font-medium text-primary hover:underline"
+        >
+          {t.noTelegram}
+        </button>
+      )}
+    </>
+  ) : null;
 
   // Кнопка полосы на мобиле не бывает мёртвой: календарь от неё далеко, и
   // серая «Выберите даты» внизу экрана не говорила, куда идти. Пока дат нет
@@ -200,7 +303,9 @@ export function BookingWidget(props: BookingWidgetProps) {
     ? <Button className="shrink-0" onClick={toCalendar}>{t.pickDates}</Button>
     : hasConflict || tooShort
       ? <Button className="shrink-0" onClick={toCalendar}>{t.changeDates}</Button>
-      : <Button className="shrink-0" onClick={onBook}>{t.book}</Button>;
+      : viaBot
+        ? botLink("shrink-0", t.bookTgShort)
+        : <Button className="shrink-0" onClick={onBook}>{t.book}</Button>;
 
   // Владельцу подсказка про занятые даты не адресована: выбирать ему нечего,
   // а занятость он и так видит в календаре выше.
@@ -329,6 +434,7 @@ export function BookingWidget(props: BookingWidgetProps) {
         {conflictMessage && <div className="mt-2">{conflictMessage}</div>}
 
         {bookSlot("mt-3 w-full")}
+        {botNotes}
       </div>
 
       {/* Цена и залог — отдельным блоком под виджетом (не на подложке) */}
@@ -405,22 +511,38 @@ export function BookingWidget(props: BookingWidgetProps) {
         </div>
       </div>}
 
-      <LoginDialog
-        open={loginOpen}
-        onOpenChange={setLoginOpen}
-        callbackUrl={callbackUrl}
-        {...props.authProps}
-      />
+      {viaBot ? (
+        !props.isOwn && (
+          <LeadFormDialog
+            open={leadOpen}
+            onOpenChange={setLeadOpen}
+            listingId={props.listingId}
+            listingTitle={props.listingTitle}
+            sel={sel}
+            tariff={props.tariff}
+            minDays={props.minDays}
+          />
+        )
+      ) : (
+        <>
+          <LoginDialog
+            open={loginOpen}
+            onOpenChange={setLoginOpen}
+            callbackUrl={callbackUrl}
+            {...props.authProps}
+          />
 
-      <BookingFormDialog
-        open={formOpen}
-        onOpenChange={setFormOpen}
-        listingId={props.listingId}
-        listingTitle={props.listingTitle}
-        sel={sel}
-        tariff={props.tariff}
-        initialPhone={props.initialPhone}
-      />
+          <BookingFormDialog
+            open={formOpen}
+            onOpenChange={setFormOpen}
+            listingId={props.listingId}
+            listingTitle={props.listingTitle}
+            sel={sel}
+            tariff={props.tariff}
+            initialPhone={props.initialPhone}
+          />
+        </>
+      )}
     </>
   );
 }

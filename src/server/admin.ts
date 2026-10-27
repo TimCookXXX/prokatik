@@ -7,12 +7,12 @@
 // подзапроса по listings превратился бы в "id" самих listings — счётчик
 // молча показывал бы ноль.
 
-import { count, desc, eq, sql } from "drizzle-orm";
+import { and, count, desc, eq, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { getDb } from "@/lib/db";
 import { assertAdmin } from "@/lib/auth/assert-admin";
 import {
-  bookingRequests, categories, cities, geoImports, listings, users,
+  bookingLeads, bookingRequests, categories, cities, geoImports, listings, users,
 } from "@db/schema";
 
 export async function adminListListings(limit = 200) {
@@ -101,14 +101,18 @@ export async function adminListUsers(limit = 200) {
 export async function adminCounts() {
   await assertAdmin();
   const db = getDb();
-  const [l, r, u] = await Promise.all([
+  const [l, r, u, p] = await Promise.all([
     db.select({ c: count() }).from(listings),
     db.select({ c: count() }).from(bookingRequests),
     db.select({ c: count() }).from(users),
+    // Заявки без аккаунта, которые ещё не передали прокату (ADR 0028).
+    db.select({ c: count() }).from(bookingLeads)
+      .where(and(eq(bookingLeads.status, "sent"), eq(bookingLeads.internal, false))),
   ]);
   return {
     listings: Number(l[0].c),
     requests: Number(r[0].c),
     users: Number(u[0].c),
+    leadsPending: Number(p[0].c),
   };
 }

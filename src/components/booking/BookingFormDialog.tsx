@@ -17,44 +17,9 @@ import { field } from "@/components/ui/field";
 import { WEBVISOR_NO_KEYS } from "@/components/analytics/webvisor";
 import { formatDayMonth } from "@/lib/catalog/dates";
 import { formatPrice } from "@/lib/catalog/format";
-import { daysLabel, quote, type Tariff } from "@/lib/catalog/tariff";
-import { content } from "@theme/content";
+import { quote, type Tariff } from "@/lib/catalog/tariff";
 import { reachGoal } from "@/components/analytics/goals";
-
-function humanError(code: string): string {
-  if (code.startsWith("rate_limited:")) {
-    return `Слишком много заявок. Попробуйте через ${code.split(":")[1]} с.`;
-  }
-  if (code.startsWith("dates_taken:")) {
-    return "Выбранные даты уже заняты — обновите страницу и выберите другие.";
-  }
-  if (code === "duplicate_request") {
-    return "Вы уже отправили заявку на эти даты — она ждёт ответа в «Мои заявки».";
-  }
-  if (code === "qty_stale") {
-    return "Пока форма была открыта, у вещи изменилось количество — обновите страницу.";
-  }
-  if (code === "price_stale") {
-    return "Пока форма была открыта, владелец изменил цену — обновите страницу.";
-  }
-  if (code.startsWith("min_days:")) {
-    const n = Number(code.split(":")[1]);
-    if (Number.isInteger(n) && n > 1) return content.booking.minDaysError(daysLabel(n));
-  }
-  if (code === "dates_stale") {
-    return "Пока форма была открыта, начался новый день — обновите страницу и выберите даты заново.";
-  }
-  if (code === "listing_not_found") return "Позиция больше не доступна.";
-  // Из интерфейса недостижимо — владельцу виджет брони не предлагает. Текст
-  // нужен для прямого вызова экшена: по сети он доступен мимо UI.
-  if (code === "own_listing") return "Это ваше объявление — забронировать его нельзя.";
-  if (code === "auth_required") return "Войдите, чтобы отправить заявку.";
-  /* Наружу выносим только то, что писали для человека. Сообщения зода на
-   * английском («Expected number, received nan») сюда доезжали дословно:
-   * экшен отдаёт текст первой непройденной проверки, и среди них есть как
-   * наши русские, так и служебные. Кириллица — признак «это писали людям». */
-  return /[а-яё]/i.test(code) ? code : "Не получилось отправить заявку — обновите страницу.";
-}
+import { humanError } from "@/components/booking/booking-errors";
 
 export function BookingFormDialog({
   open, onOpenChange, listingId, listingTitle, sel, tariff, initialPhone,

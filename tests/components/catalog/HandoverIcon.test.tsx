@@ -2,11 +2,14 @@ import { render } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import type { AvailabilityMap } from "@/lib/catalog/availability";
 
-// Виджет брони тянет окно входа и server action — обе ветки кончаются на
+// Виджет брони тянет окно входа и server actions — все ветки кончаются на
 // next/server, которого в jsdom нет. К значку они отношения не имеют.
 vi.mock("@/components/auth/LoginDialog", () => ({ LoginDialog: () => null }));
 vi.mock("@/server/actions/booking", () => ({
   createBookingRequest: async () => ({ ok: true, data: undefined }),
+}));
+vi.mock("@/server/actions/lead", () => ({
+  submitLeadForm: async () => ({ ok: true, data: { code: "INR-1234" } }),
 }));
 
 const { ListingCard } = await import("@/components/catalog/ListingCard");
